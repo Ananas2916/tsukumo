@@ -1,4 +1,8 @@
-# Desk Companion
+# Tsukumo
+
+> *Nel folklore giapponese i **tsukumogami** sono oggetti che, dopo cent'anni,
+> prendono un'anima e cominciano a muoversi. Questo fa lo stesso con la tua
+> scrivania, ma senza aspettare tanto.*
 
 Un assistente 3D che vive sulla tua scrivania: carica un avatar **VRM**, parla
 con **Kokoro TTS** in locale e muove la bocca in sincronia con l'audio.
@@ -11,10 +15,11 @@ dal pannello quale cervello, quale voce e quale ascolto usare fra quelli
 supportati: **11 motori di conversazione, 7 di sintesi vocale, 5 di
 riconoscimento**.
 
-> *A 3D desk companion with a VRM avatar, local text-to-speech, lip-sync and
-> voice input. Runs fully offline by default; 11 LLM backends, 7 TTS engines
-> and 5 speech-recognition engines are selectable from the panel.
-> Documentation is in Italian — the code and configuration keys are in English.*
+> *Tsukumo is a 3D desk companion with a VRM avatar, local text-to-speech,
+> lip-sync and voice input. It runs fully offline by default; 11 LLM backends,
+> 7 TTS engines and 5 speech-recognition engines are selectable from the panel.
+> Named after the tsukumogami — objects that come alive in Japanese folklore.
+> Documentation is in Italian; the code and configuration keys are in English.*
 
 ```
                     WebSocket (JSON + WAV base64)
@@ -761,7 +766,7 @@ Attiva la casella **Sfondo** nell'interfaccia per avere uno sfondo opaco.
 
 ## Licenza
 
-Desk Companion è distribuito sotto **GNU AGPL v3** (testo completo in
+Tsukumo è distribuito sotto **GNU AGPL v3** (testo completo in
 [`LICENSE`](LICENSE)). In breve, e senza valore legale:
 
 - puoi **usarlo, studiarlo, modificarlo e ridistribuirlo** liberamente;
