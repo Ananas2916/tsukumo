@@ -1,0 +1,38 @@
+# --- Desk Companion - dipendenze Python ---------------------------------
+# Installazione:  pip install -r requirements.txt
+
+# Server / API
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# Client HTTP asincrono (Ollama, Kokoro-FastAPI)
+httpx>=0.27
+
+# Analisi audio e generazione della timeline dei visemi
+numpy>=1.26,<3.0
+
+# Kokoro TTS in locale (ONNX Runtime + pesi scaricati da scripts/download_models.py).
+# kokoro-onnx installa a sua volta espeakng-loader, cosi' su Windows NON serve
+# installare espeak-ng a parte.
+kokoro-onnx>=0.4.9
+onnxruntime>=1.18
+
+# Per GPU NVIDIA sostituisci la riga sopra con:
+#   onnxruntime-gpu>=1.18
+
+
+# --- Provider opzionali --------------------------------------------------
+# Niente di quanto segue serve per far funzionare il companion: il default e'
+# tutto locale (Ollama o LM Studio + Kokoro). Installa solo la riga del motore
+# che vuoi usare davvero — il pannello ti dice quale manca quando lo selezioni.
+#
+#   anthropic>=0.40        # LLM: modelli Claude
+#   edge-tts>=6.1          # TTS: voci neurali di Microsoft Edge, senza chiave
+#   piper-tts>=1.2         # TTS: sintesi locale leggera
+#   pyttsx3>=2.90          # TTS: voci gia' installate nel sistema operativo
+#   faster-whisper>=1.0    # STT: riconoscimento vocale locale (push-to-talk)
+#   sounddevice>=0.4       # STT: cattura dal microfono
+#
+# Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together ed ElevenLabs non
+# richiedono nulla: passano da httpx, che c'e' gia'.

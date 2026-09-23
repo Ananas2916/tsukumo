@@ -1,0 +1,19 @@
+{
+  "name": "desk-companion-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Renderer 3D (Three.js + three-vrm) del Desk Companion, con lip-sync guidato dal backend Python.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.1.6",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}

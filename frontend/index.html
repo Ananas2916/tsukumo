@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Desk Companion</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#129302;</text></svg>" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <!-- Il personaggio. Tutto il resto compare solo quando serve. -->
+    <canvas id="stage"></canvas>
+
+    <!-- Quello che sta dicendo, sopra la testa -->
+    <div id="bubble" class="bubble hidden" aria-live="polite"></div>
+
+    <!-- Spie di stato: minuscole, si nascondono da sole dopo qualche secondo -->
+    <div id="status-stack" class="status-stack" data-solid>
+      <span id="status" class="dot" data-state="offline" title="Backend"></span>
+      <span id="openclaw" class="dot openclaw hidden" data-state="unknown" title="OpenClaw"></span>
+    </div>
+
+    <!-- Messaggi di sistema, passeggeri -->
+    <div id="toast" class="toast hidden" aria-live="polite"></div>
+
+    <!-- Barra per scrivergli: nascosta finche' non la apri -->
+    <form id="composer" class="composer hidden" autocomplete="off" data-solid>
+      <input
+        id="input"
+        class="input"
+        type="text"
+        placeholder="Scrivi qualcosa..."
+        aria-label="Messaggio per il companion"
+      />
+      <button id="btn-send" class="icon-btn send" type="submit" title="Invia (Invio)">&#10148;</button>
+      <button id="btn-close-composer" class="icon-btn" type="button" title="Chiudi (Esc)">&#10005;</button>
+    </form>
+
+    <!-- Menu col tasto destro, come una vera mascotte da desktop -->
+    <nav id="menu" class="menu hidden" data-solid>
+      <button class="menu-item" data-action="talk">Parla con me</button>
+      <button class="menu-item" data-action="say">Fai leggere il testo</button>
+      <button class="menu-item danger" data-action="stop">Interrompi la voce</button>
+
+      <div class="menu-sep"></div>
+
+      <label class="menu-row">
+        <span>Voce</span>
+        <select id="voice" class="select"></select>
+      </label>
+      <label class="menu-row">
+        <span>Bocca</span>
+        <input id="gain" class="range" type="range" min="0.4" max="2.5" step="0.05" value="1.15" />
+        <output id="gain-value">1.15</output>
+      </label>
+
+      <div class="menu-sep"></div>
+
+      <label class="menu-row check electron-only">
+        <input id="toggle-top" type="checkbox" checked />
+        <span>Sempre in primo piano</span>
+      </label>
+      <label class="menu-row check electron-only">
+        <input id="toggle-ghost" type="checkbox" />
+        <span>Modalita fantasma</span>
+      </label>
+      <label class="menu-row check">
+        <input id="toggle-bg" type="checkbox" />
+        <span>Sfondo visibile</span>
+      </label>
+      <label class="menu-row check">
+        <input id="toggle-debug" type="checkbox" />
+        <span>Pannello debug</span>
+      </label>
+
+      <div class="menu-sep"></div>
+
+      <button class="menu-item" data-action="model">Cambia modello 3D...</button>
+      <button class="menu-item" data-action="reset">Azzera conversazione</button>
+      <button class="menu-item danger electron-only" data-action="quit">Chiudi</button>
+      <input id="file-vrm" type="file" accept=".vrm" hidden />
+    </nav>
+
+    <!-- Overlay di caricamento / errori bloccanti -->
+    <div id="overlay" class="overlay" data-solid>
+      <div class="overlay-card">
+        <div class="spinner"></div>
+        <p id="overlay-text">Carico l'avatar...</p>
+        <p id="overlay-hint" class="overlay-hint"></p>
+      </div>
+    </div>
+
+    <!-- Pannello di debug del lip-sync -->
+    <div id="debug" class="debug hidden" data-solid>
+      <div class="debug-row"><span>viseme</span><b id="dbg-viseme">sil</b></div>
+      <div class="debug-row"><span>rms</span><b id="dbg-rms">0.00</b></div>
+      <div class="debug-row"><span>fps</span><b id="dbg-fps">0</b></div>
+      <div class="debug-row"><span>driver</span><b id="dbg-driver">-</b></div>
+      <div class="debug-bars">
+        <div class="bar"><i data-viseme="a"></i><span>A</span></div>
+        <div class="bar"><i data-viseme="i"></i><span>I</span></div>
+        <div class="bar"><i data-viseme="u"></i><span>U</span></div>
+        <div class="bar"><i data-viseme="e"></i><span>E</span></div>
+        <div class="bar"><i data-viseme="o"></i><span>O</span></div>
+      </div>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

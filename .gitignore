@@ -1,0 +1,28 @@
+# Pesi dei modelli (centinaia di MB)
+models/*.onnx
+models/*.bin
+models/*.part
+
+# Avatar VRM dell'utente
+frontend/public/models/*.vrm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Stato locale (sessionKey OpenClaw del companion, non un segreto ma non va
+# nel repo: e' specifico di questa macchina)
+state/
+logs/
+
+# Node / build
+node_modules/
+frontend/dist/
+electron/dist/
+
+# Sistema
+.DS_Store
+Thumbs.db

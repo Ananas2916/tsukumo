@@ -1,0 +1,17 @@
+# Fine riga normalizzati a LF nel repository: il progetto gira su Windows,
+# macOS e Linux, e senza questo ogni sistema riscriverebbe i file dell'altro
+# facendo apparire modificate righe che nessuno ha toccato.
+* text=auto eol=lf
+
+# Gli script di Windows vogliono CRLF per funzionare davvero.
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+*.bat text eol=crlf
+
+# Binari: mai toccare.
+*.onnx binary
+*.bin  binary
+*.vrm  binary
+*.png  binary
+*.ico  binary
+*.wav  binary

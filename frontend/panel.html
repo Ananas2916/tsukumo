@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Desk Companion - pannello</title>
+    <link rel="stylesheet" href="./src/panel.css" />
+  </head>
+  <body>
+    <div class="panel">
+      <!-- Barra del titolo: trascinandola il pannello si stacca dal personaggio -->
+      <header class="titlebar">
+        <span id="status" class="dot" data-state="offline" title="Backend"></span>
+        <span id="openclaw" class="dot hidden" data-state="unknown" title="OpenClaw"></span>
+        <strong class="title">Desk Companion</strong>
+        <span class="spacer"></span>
+        <button id="btn-dock" class="icon-btn" type="button" title="Aggancia al personaggio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H6a3 3 0 0 0 0 6h3m6-6h3a3 3 0 0 1 0 6h-3M8 10h8" /></svg>
+        </button>
+        <button id="btn-pin" class="icon-btn" type="button" title="Tieni il pannello in primo piano">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7" /></svg>
+        </button>
+        <button id="btn-hide" class="icon-btn" type="button" title="Chiudi il pannello (Esc)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </header>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab-btn" data-tab="chat" role="tab">Chat</button>
+        <button class="tab-btn" data-tab="menu" role="tab">Impostazioni</button>
+        <button class="tab-btn" data-tab="engines" role="tab">Motori</button>
+      </nav>
+
+      <div id="now-playing" class="now-playing hidden" title="In riproduzione su Spotify">
+        <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span id="now-playing-text" class="now-playing-text"></span>
+      </div>
+
+      <!-- Chat --------------------------------------------------------------->
+      <section id="tab-chat" class="tab" role="tabpanel">
+        <div id="messages" class="messages" aria-live="polite">
+          <p id="empty" class="empty">Scrivile qualcosa: ti risponde a voce.</p>
+        </div>
+        <div id="typing" class="typing hidden"><i></i><i></i><i></i><span>sta pensando</span></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <textarea id="input" rows="1" placeholder="Scrivile qualcosa..." aria-label="Messaggio"></textarea>
+          <button id="btn-send" class="send" type="submit" title="Invia (Invio)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-2.5-6.5z" /></svg>
+          </button>
+        </form>
+        <div class="composer-tools">
+          <label class="check small" title="Pronuncia il testo cosi' com'e', senza passare dall'LLM">
+            <input id="say-mode" type="checkbox" />
+            <span>Fai solo leggere</span>
+          </label>
+          <span class="spacer"></span>
+          <button id="btn-stop" class="link-btn" type="button">Interrompi</button>
+          <button id="btn-clear" class="link-btn" type="button">Azzera chat</button>
+        </div>
+      </section>
+
+      <!-- Impostazioni ------------------------------------------------------->
+      <section id="tab-menu" class="tab hidden" role="tabpanel">
+        <div class="scroll">
+          <h3>Voce e lingua</h3>
+          <label class="row">
+            <span>Voce</span>
+            <select id="voice" class="select"></select>
+          </label>
+          <label class="row">
+            <span>Risponde</span>
+            <select id="reply-language" class="select">
+              <option value="auto">nella lingua della voce</option>
+              <option value="same">nella lingua in cui scrivo</option>
+              <option value="English">sempre in inglese</option>
+              <option value="Italian">sempre in italiano</option>
+            </select>
+          </label>
+          <p id="language-hint" class="hint"></p>
+          <label class="row">
+            <span>Bocca</span>
+            <input id="gain" class="range" type="range" min="0.4" max="2.5" step="0.05" value="1.15" />
+            <output id="gain-value">1.15</output>
+          </label>
+
+          <h3>Personaggio</h3>
+          <label class="row">
+            <span>Dimensione</span>
+            <input id="scale" class="range" type="range" min="0.5" max="2.6" step="0.05" value="1" />
+            <output id="scale-value">100%</output>
+          </label>
+          <label class="check">
+            <input id="toggle-top" type="checkbox" />
+            <span>Sempre davanti alle finestre</span>
+          </label>
+          <label class="check">
+            <input id="toggle-windows" type="checkbox" />
+            <span>Si siede sulle finestre</span>
+          </label>
+          <label class="check">
+            <input id="toggle-spontaneous" type="checkbox" />
+            <span>Gesti e pose spontanee</span>
+          </label>
+          <label class="check" title="Quando Spotify suona ascolta l'audio del PC e si muove a tempo">
+            <input id="toggle-dance" type="checkbox" />
+            <span>Balla con la musica di Spotify</span>
+          </label>
+          <label class="check">
+            <input id="toggle-ghost" type="checkbox" />
+            <span>Modalita fantasma (i click la attraversano)</span>
+          </label>
+
+          <h3>Falle fare qualcosa</h3>
+          <div class="chips">
+            <button class="chip" type="button" data-play="wave">Saluta</button>
+            <button class="chip" type="button" data-play="stretch">Stiracchiati</button>
+            <button class="chip" type="button" data-play="lookAround">Guardati intorno</button>
+            <button class="chip" type="button" data-play="hum">Canticchia</button>
+            <button class="chip" type="button" data-posture="sit">Siediti</button>
+            <button class="chip" type="button" data-posture="lie">Sdraiati</button>
+            <button class="chip" type="button" data-posture="side">Sdraiati sul fianco</button>
+            <button class="chip" type="button" data-posture="stand">Alzati</button>
+          </div>
+          <p class="hint">Sedersi e sdraiarsi funzionano quando e' sulla barra delle applicazioni.</p>
+
+          <h3>Altro</h3>
+          <div class="buttons">
+            <button id="btn-model" class="btn" type="button">Cambia modello 3D...</button>
+            <label class="check">
+              <input id="toggle-debug" type="checkbox" />
+              <span>Pannello debug del lip-sync</span>
+            </label>
+            <button id="btn-quit" class="btn danger" type="button">Chiudi Desk Companion</button>
+          </div>
+          <p id="status-line" class="hint status-line"></p>
+        </div>
+      </section>
+
+      <!-- I motori non sono elencati qui: il pannello li disegna leggendo
+           GET /api/providers, cosi' un motore nuovo compare da solo. -->
+      <section id="tab-engines" class="tab hidden" role="tabpanel">
+        <div class="menu-scroll">
+          <div id="engines-root" class="engines">
+            <p class="hint">Carico i motori disponibili…</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="./src/panel.js"></script>
+  </body>
+</html>

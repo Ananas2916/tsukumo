@@ -1,0 +1,19 @@
+{
+  "name": "desk-companion-shell",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Finestra desktop (Electron) del Desk Companion: avvia il backend Python e mostra l'avatar VRM senza cornice.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:devtools": "cross-env DC_DEVTOOLS=1 electron .",
+    "start:attach": "cross-env DC_NO_SPAWN=1 electron ."
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^32.2.0"
+  },
+  "dependencies": {
+    "koffi": "^2.16.3"
+  }
+}
