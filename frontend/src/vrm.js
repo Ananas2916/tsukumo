@@ -435,6 +435,23 @@ export class VrmStage {
     };
   }
 
+  /**
+   * Dove sta il busto adesso, in pixel della finestra: i dock del HUD si
+   * aprono ai suoi lati e lo seguono (in piedi, seduta, sdraiata).
+   */
+  hudFrame() {
+    if (!this.vrm) return null;
+    const bone = (name) => this.vrm.humanoid.getNormalizedBoneNode(name);
+    const chest = bone('upperChest') ?? bone('chest') ?? bone('spine');
+    const hips = bone('hips');
+    if (!chest || !hips) return null;
+    this._hudChest ??= new THREE.Vector3();
+    this._hudHips ??= new THREE.Vector3();
+    const top = this._toScreen(chest.getWorldPosition(this._hudChest));
+    const bottom = this._toScreen(hips.getWorldPosition(this._hudHips));
+    return { cx: bottom.x, cy: top.y * 0.6 + bottom.y * 0.4 };
+  }
+
   /** Click senza trascinare: sulla testa e' una carezza, sul corpo un colpetto. */
   poke(px, py) {
     if (!this.body || !this.vrm) return;

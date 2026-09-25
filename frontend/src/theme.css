@@ -1,0 +1,50 @@
+/* Tsukumo - colori e misure condivisi da personaggio e pannello.
+   Vetro scuro come i dock dell'immagine di riferimento: quasi nero, bordo
+   chiaro sottile, icone a tratto, un accento lilla. */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #111115;
+  --glass: rgba(24, 24, 29, 0.84);
+  --glass-strong: rgba(20, 20, 25, 0.95);
+  --surface: #1a1a20;
+  --surface-2: #22222a;
+  --surface-3: #2b2b35;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+
+  --text: #ececf1;
+  --text-2: #b4b4c0;
+  --muted: #85858f;
+
+  --accent: #a58bff;
+  --accent-2: #f39bd4;
+  --accent-soft: rgba(165, 139, 255, 0.16);
+  --accent-grad: linear-gradient(135deg, #8f7bff 0%, #b98cf5 55%, #e89bd8 100%);
+
+  --ok: #3ddc97;
+  --warn: #f5c451;
+  --danger: #ff6b81;
+  --info: #5cc8ff;
+  --pink: #f472b6;
+
+  --radius-s: 8px;
+  --radius: 14px;
+  --radius-l: 20px;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --shadow-s: 0 6px 18px rgba(0, 0, 0, 0.35);
+
+  --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Code', Consolas, ui-monospace, monospace;
+}
+
+.icon {
+  display: block;
+  flex: none;
+}
+
+.hidden {
+  display: none !important;
+}

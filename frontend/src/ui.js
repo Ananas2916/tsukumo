@@ -1,16 +1,17 @@
 /**
- * Tutto il DOM in un posto solo.
+ * Il DOM della finestra del personaggio, in un posto solo.
  *
  * L'interfaccia e' volutamente quasi invisibile, in stile mascotte da
- * scrivania: normalmente si vede solo il personaggio. I controlli stanno nel
- * menu del tasto destro, la casella di testo compare su richiesta, e le spie
- * di stato si mostrano da sole solo quando cambia qualcosa.
+ * scrivania: normalmente si vede solo lei. Il tasto destro apre i dock ai
+ * suoi lati (hud.js), la chat e le impostazioni stanno nel pannello a parte,
+ * le spie si fanno vedere solo quando qualcosa non va.
  *
  * `main.js` non tocca mai direttamente gli elementi: chiama i metodi di questa
- * classe e registra i callback (`onSend`, `onSay`, ...).
+ * classe e registra i callback (`onSend`, `onContextMenu`, ...).
  */
 
 import { VISEME_KEYS } from './config.js';
+import { iconSvg } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,23 +19,12 @@ export class UI {
   constructor() {
     this.elements = {
       stage: $('stage'),
+      hud: $('hud'),
       bubble: $('bubble'),
-      statusStack: $('status-stack'),
-      status: $('status'),
-      openclaw: $('openclaw'),
       toast: $('toast'),
       composer: $('composer'),
       input: $('input'),
       send: $('btn-send'),
-      closeComposer: $('btn-close-composer'),
-      menu: $('menu'),
-      voice: $('voice'),
-      gain: $('gain'),
-      gainValue: $('gain-value'),
-      toggleTop: $('toggle-top'),
-      toggleGhost: $('toggle-ghost'),
-      toggleBg: $('toggle-bg'),
-      toggleDebug: $('toggle-debug'),
       fileInput: $('file-vrm'),
       overlay: $('overlay'),
       overlayText: $('overlay-text'),
@@ -45,6 +35,7 @@ export class UI {
       dbgFps: $('dbg-fps'),
       dbgDriver: $('dbg-driver'),
     };
+    this.elements.send.innerHTML = iconSvg('send', 16);
 
     this.bars = new Map();
     document.querySelectorAll('.bar i[data-viseme]').forEach((bar) => {
@@ -53,29 +44,17 @@ export class UI {
 
     // Callback impostati da main.js.
     this.onSend = () => {};
-    this.onSay = () => {};
     this.onStop = () => {};
-    this.onReset = () => {};
     this.onModelFile = () => {};
-    this.onGainChange = () => {};
-    this.onVoiceChange = () => {};
-    this.onBackgroundChange = () => {};
-    this.onAlwaysOnTopChange = () => {};
-    this.onGhostChange = () => {};
-    this.onQuit = () => {};
-    /**
-     * In Electron menu e chat stanno nel pannello staccato: se questi due
-     * sono impostati, tasto destro e doppio click (o iniziare a scrivere)
-     * chiamano loro invece di aprire il menu e la casella dentro la pagina.
-     */
-    this.onContextMenu = null;
+    /** Tasto destro: apre/chiude i dock. */
+    this.onContextMenu = () => {};
+    /** Doppio click o iniziare a scrivere: apre la chat (col primo tasto dentro). */
     this.onOpenChat = null;
+    /** Esc: il primo pezzo di interfaccia aperto si chiude, altrimenti zitta. */
+    this.onEscape = () => false;
 
-    /** In modalita' "leggi" il testo va pronunciato senza passare dall'LLM. */
-    this._composerMode = 'chat';
     this._bubbleTimer = null;
     this._toastTimer = null;
-    this._statusTimer = null;
 
     this._bindEvents();
   }
@@ -83,63 +62,18 @@ export class UI {
   _bindEvents() {
     const { elements } = this;
 
-    // --- casella di testo ---------------------------------------------
     elements.composer.addEventListener('submit', (event) => {
       event.preventDefault();
       const text = elements.input.value.trim();
       if (!text) return;
       elements.input.value = '';
-      if (this._composerMode === 'say') this.onSay(text);
-      else this.onSend(text);
+      this.onSend(text);
     });
 
-    elements.closeComposer.addEventListener('click', () => this.closeComposer());
-
-    // --- menu del tasto destro ----------------------------------------
     window.addEventListener('contextmenu', (event) => {
       event.preventDefault();
-      if (this.onContextMenu) this.onContextMenu();
-      else this.openMenu(event.clientX, event.clientY);
+      this.onContextMenu(event.clientX, event.clientY);
     });
-
-    elements.menu.addEventListener('click', (event) => {
-      const action = event.target.closest('[data-action]')?.dataset.action;
-      if (!action) return;
-      this.closeMenu();
-      this._runAction(action);
-    });
-
-    // Un click fuori chiude menu e casella di testo.
-    window.addEventListener('pointerdown', (event) => {
-      if (!elements.menu.classList.contains('hidden') && !elements.menu.contains(event.target)) {
-        this.closeMenu();
-      }
-    });
-
-    // --- interruttori --------------------------------------------------
-    elements.gain.addEventListener('input', () => {
-      const value = Number(elements.gain.value);
-      elements.gainValue.textContent = value.toFixed(2);
-      this.onGainChange(value);
-    });
-
-    elements.voice.addEventListener('change', () => this.onVoiceChange(elements.voice.value));
-
-    elements.toggleBg.addEventListener('change', () => {
-      document.body.classList.toggle('opaque-bg', elements.toggleBg.checked);
-      this.onBackgroundChange(elements.toggleBg.checked);
-    });
-
-    elements.toggleDebug.addEventListener('change', () => {
-      elements.debug.classList.toggle('hidden', !elements.toggleDebug.checked);
-    });
-
-    elements.toggleTop.addEventListener('change', () =>
-      this.onAlwaysOnTopChange(elements.toggleTop.checked),
-    );
-    elements.toggleGhost.addEventListener('change', () =>
-      this.onGhostChange(elements.toggleGhost.checked),
-    );
 
     elements.fileInput.addEventListener('change', (event) => {
       const file = event.target.files?.[0];
@@ -151,93 +85,39 @@ export class UI {
     window.addEventListener('dragover', (event) => event.preventDefault());
     window.addEventListener('drop', (event) => {
       event.preventDefault();
-      const file = [...(event.dataTransfer?.files ?? [])].find((f) =>
-        f.name.toLowerCase().endsWith('.vrm'),
-      );
+      const file = [...(event.dataTransfer?.files ?? [])].find((f) => f.name.toLowerCase().endsWith('.vrm'));
       if (file) this.onModelFile(file);
     });
 
-    // --- scorciatoie ----------------------------------------------------
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
-        if (!elements.menu.classList.contains('hidden')) this.closeMenu();
-        else if (!elements.composer.classList.contains('hidden')) this.closeComposer();
+        if (this.onEscape()) return;
+        if (!elements.composer.classList.contains('hidden')) this.closeComposer();
         else this.onStop();
         return;
       }
-      // Basta iniziare a scrivere per aprire la casella di testo.
+      // Basta iniziare a scrivere per aprire la chat.
       const typing = document.activeElement === elements.input;
       if (!typing && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
         if (this.onOpenChat) {
           this.onOpenChat(event.key);
           return;
         }
-        this.openComposer('chat');
+        this.openComposer();
         elements.input.value = event.key;
       }
     });
 
-    // Doppio click sul personaggio: apre la casella di testo.
     elements.stage.addEventListener('dblclick', () => {
       if (this.onOpenChat) this.onOpenChat('');
-      else this.openComposer('chat');
+      else this.openComposer();
     });
   }
 
-  _runAction(action) {
-    switch (action) {
-      case 'talk':
-        this.openComposer('chat');
-        break;
-      case 'say':
-        this.openComposer('say');
-        break;
-      case 'stop':
-        this.onStop();
-        break;
-      case 'model':
-        this.elements.fileInput.click();
-        break;
-      case 'reset':
-        this.onReset();
-        break;
-      case 'quit':
-        this.onQuit();
-        break;
-      default:
-        break;
-    }
-  }
-
-  // ------------------------------------------------------------------ menu
-  openMenu(x, y) {
-    const { menu } = this.elements;
-    menu.classList.remove('hidden');
-    // Prima lo mostriamo, poi lo riposizioniamo: senza dimensioni reali non
-    // sapremmo se esce dai bordi della finestra.
-    const rect = menu.getBoundingClientRect();
-    const left = Math.min(x, window.innerWidth - rect.width - 6);
-    const top = Math.min(y, window.innerHeight - rect.height - 6);
-    menu.style.left = `${Math.max(6, left)}px`;
-    menu.style.top = `${Math.max(6, top)}px`;
-  }
-
-  closeMenu() {
-    this.elements.menu.classList.add('hidden');
-  }
-
-  get menuOpen() {
-    return !this.elements.menu.classList.contains('hidden');
-  }
-
   // -------------------------------------------------------------- composer
-  /** @param {'chat'|'say'} mode */
-  openComposer(mode = 'chat') {
-    this._composerMode = mode;
-    const { composer, input } = this.elements;
-    composer.classList.remove('hidden');
-    input.placeholder = mode === 'say' ? 'Testo da pronunciare...' : 'Scrivi qualcosa...';
-    input.focus();
+  openComposer() {
+    this.elements.composer.classList.remove('hidden');
+    this.elements.input.focus();
   }
 
   closeComposer() {
@@ -245,60 +125,8 @@ export class UI {
     this.elements.input.value = '';
   }
 
-  get composerOpen() {
-    return !this.elements.composer.classList.contains('hidden');
-  }
-
-  setBusy(busy) {
-    this.elements.send.disabled = busy;
-  }
-
-  // ------------------------------------------------------------------ stato
-  /** @param {'offline'|'online'|'thinking'|'speaking'|'error'} state */
-  setStatus(state, text) {
-    this.elements.status.dataset.state = state;
-    this.elements.status.title = text;
-    // Le spie si fanno vedere solo quando succede qualcosa, poi svaniscono.
-    this._flashStatus(state === 'offline' || state === 'error');
-  }
-
-  /**
-   * Spia del Gateway OpenClaw: verde se risponde, rosso se e' spento,
-   * giallo se risponde ma non si dichiara pronto.
-   */
-  setOpenClaw(status) {
-    const { openclaw } = this.elements;
-    if (!status || status.state === 'disabled') {
-      openclaw.classList.add('hidden');
-      return;
-    }
-
-    const state = status.state ?? 'unknown';
-    const previous = openclaw.dataset.state;
-    openclaw.classList.remove('hidden');
-    openclaw.dataset.state = state;
-
-    const labels = {
-      online: 'OpenClaw connesso',
-      degraded: 'OpenClaw non pronto',
-      offline: 'OpenClaw disconnesso',
-      unknown: 'OpenClaw: stato sconosciuto',
-    };
-    const detail = [status.url, status.version ? `v${status.version}` : null, status.error]
-      .filter(Boolean)
-      .join(' - ');
-    openclaw.title = `${labels[state] ?? labels.unknown}\n${detail}`;
-
-    if (previous !== state) this._flashStatus(state === 'offline');
-  }
-
-  /** Mostra le spie per qualche secondo (o le lascia fisse se c'e' un problema). */
-  _flashStatus(persistent = false) {
-    const { statusStack } = this.elements;
-    statusStack.classList.add('visible');
-    clearTimeout(this._statusTimer);
-    if (persistent) return;
-    this._statusTimer = setTimeout(() => statusStack.classList.remove('visible'), 2600);
+  pickModel() {
+    this.elements.fileInput.click();
   }
 
   // ----------------------------------------------------------------- bolla
@@ -329,7 +157,7 @@ export class UI {
   // --------------------------------------------------------------- overlay
   showOverlay(text, hint = '', isError = false) {
     this.elements.overlayText.textContent = text;
-    this.elements.overlayHint.innerHTML = hint;
+    this.elements.overlayHint.textContent = hint;
     this.elements.overlay.classList.toggle('error', isError);
     this.elements.overlay.classList.remove('hidden');
   }
@@ -342,31 +170,8 @@ export class UI {
     return !this.elements.overlay.classList.contains('hidden');
   }
 
-  // ------------------------------------------------------------------ voci
-  setVoices(voices, current) {
-    const select = this.elements.voice;
-    select.replaceChildren();
-    for (const voice of voices) {
-      const option = document.createElement('option');
-      option.value = voice;
-      option.textContent = voice;
-      select.appendChild(option);
-    }
-    if (current && voices.includes(current)) select.value = current;
-  }
-
-  get voice() {
-    return this.elements.voice.value || null;
-  }
-
-  setGain(value) {
-    this.elements.gain.value = String(value);
-    this.elements.gainValue.textContent = Number(value).toFixed(2);
-  }
-
   // ----------------------------------------------------------------- debug
   setDebugVisible(visible) {
-    this.elements.toggleDebug.checked = visible;
     this.elements.debug.classList.toggle('hidden', !visible);
   }
 
@@ -384,8 +189,8 @@ export class UI {
 
   /**
    * Il cursore e' sopra un elemento "solido" dell'interfaccia?
-   * Serve al click-through per pixel: menu, casella di testo e pannelli
-   * devono restare cliccabili anche dove il personaggio non c'e'.
+   * Serve al click-through per pixel: dock, bolle e pannelli devono restare
+   * cliccabili anche dove il personaggio non c'e'.
    */
   isOverSolidUI(x, y) {
     const element = document.elementFromPoint(x, y);

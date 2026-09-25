@@ -1,9 +1,9 @@
 {
-  "name": "desk-companion-frontend",
-  "version": "1.0.0",
+  "name": "tsukumo-frontend",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Renderer 3D (Three.js + three-vrm) del Desk Companion, con lip-sync guidato dal backend Python.",
+  "description": "Renderer 3D (Three.js + three-vrm) e pannello di Tsukumo, con lip-sync guidato dal backend Python.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

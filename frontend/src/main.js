@@ -1,7 +1,7 @@
 /**
- * Punto di ingresso del frontend.
+ * Punto di ingresso della finestra del personaggio.
  *
- * Mette insieme i quattro pezzi:
+ * Mette insieme i pezzi:
  *
  *   WebSocket  ->  SpeechPlayer  ->  LipSync  ->  VrmStage
  *   (backend)      (WebAudio)        (pesi)       (blendshape)
@@ -12,12 +12,14 @@
  * della bocca a ogni frame.
  *
  * In Electron c'e' in piu' il comportamento da mascotte: click-through per
- * pixel, lo prendi in mano e lo sposti (penzola, poi cade e atterra), e
- * reagisce quando lo tocchi.
+ * pixel, lo prendi in mano e lo sposti (penzola, poi cade e atterra), reagisce
+ * quando lo tocchi, e col tasto destro apre i dock ai suoi lati (hud.js).
  */
 
 import { apiUrl, DEFAULT_BLENDSHAPES, wsUrl } from './config.js';
 import { SpeechPlayer } from './audio.js';
+import { readSetting, writeSetting } from './dom.js';
+import { Hud } from './hud.js';
 import { LipSync } from './lipsync.js';
 import { MusicListener } from './music.js';
 import { UI } from './ui.js';
@@ -28,8 +30,9 @@ import { CompanionSocket } from './ws.js';
 const pet = window.companion?.isElectron ? window.companion : null;
 
 const ui = new UI();
+const hud = new Hud(ui.elements.hud);
 const stage = new VrmStage(document.getElementById('stage'));
-const lipSync = new LipSync({ gain: Number(ui.elements.gain.value) });
+const lipSync = new LipSync({ gain: readSetting('dc:gain', 1.15) });
 const player = new SpeechPlayer({
   onClipStart: (payload) => {
     lipSync.setTimeline(payload.visemes);
@@ -43,15 +46,6 @@ const player = new SpeechPlayer({
   },
 });
 const socket = new CompanionSocket(wsUrl);
-const voice = new VoiceController({
-  socket,
-  onEvent: (event) => {
-    if (event.type === 'error') ui.showBubble(event.message, 4000);
-    if (event.type === 'activity') document.body.classList.toggle('listening', event.speaking);
-  },
-});
-/** Ritmo della musica di Spotify, ascoltando l'audio di sistema (solo Electron). */
-const music = new MusicListener();
 
 /** Stato locale, tenuto volutamente minimo. */
 const state = {
@@ -59,7 +53,27 @@ const state = {
   backendState: 'idle',
   /** Ultimo valore inviato a Electron per il click-through. */
   interactive: null,
+  voiceAvailable: false,
+  muted: readSetting('dc:muted', false),
+  micLevel: 0,
+  dancing: readSetting('dc:dance', true),
+  musicPlaying: false,
 };
+
+const voice = new VoiceController({
+  socket,
+  onEvent: (event) => {
+    if (event.type === 'error') ui.toast(event.message, true, 4000);
+    if (event.type === 'activity') document.body.classList.toggle('listening', event.speaking);
+    if (event.type === 'level') state.micLevel = event.level;
+    if (event.type === 'enabled') reportVoice();
+  },
+});
+
+/** Ritmo della musica di Spotify, ascoltando l'audio di sistema (solo Electron). */
+const music = new MusicListener();
+
+hud.setMuted(state.muted);
 
 // ---------------------------------------------------------------------------
 // Render loop: unico punto in cui la bocca viene aggiornata.
@@ -69,7 +83,17 @@ stage.onFrame((dt) => {
   const weights = lipSync.update(player.currentTime, level, dt, player.playing);
   // Il corpo gesticola e annuisce a tempo con il volume della voce.
   stage.setSpeech(player.playing, level);
-  stage.setMusic(music.update(dt));
+  const rhythm = music.update(dt);
+  stage.setMusic(rhythm);
+
+  if (hud.visible) {
+    hud.setFrame(stage.hudFrame());
+    hud.update({
+      voice: level,
+      mic: voice.listening ? state.micLevel : 0,
+      music: rhythm.active ? Math.max(0, 1 - rhythm.phase * 2.5) * Math.min(1, rhythm.energy * 4) : 0,
+    });
+  }
 
   ui.updateDebug({
     viseme: player.playing ? lipSync.activeViseme : 'sil',
@@ -80,7 +104,6 @@ stage.onFrame((dt) => {
   });
 
   if (pet) updateClickThrough();
-
   return weights;
 });
 stage.start();
@@ -88,13 +111,14 @@ stage.start();
 /**
  * Click-through per pixel: la finestra e' "solida" solo dove c'e' davvero il
  * personaggio (alpha del pixel sotto il cursore, letto dal framebuffer) o
- * dove c'e' un pezzo di interfaccia cliccabile. Ovunque altro il mouse passa
- * attraverso e va a finire sulle finestre sotto.
+ * dove c'e' un pezzo di interfaccia cliccabile (i dock, un avviso). Ovunque
+ * altro il mouse passa attraverso e va a finire sulle finestre sotto.
  */
 function updateClickThrough() {
   const { x, y } = stage.pointerPx;
   const overUI = x >= 0 && ui.isOverSolidUI(x, y);
-  const wanted = overUI || stage.pointerOnAvatar || ui.overlayOpen;
+  const wanted = overUI || stage.pointerOnAvatar;
+  if (wanted) hud.touch();
 
   if (window.__petDebug) {
     const now = performance.now();
@@ -116,16 +140,13 @@ function updateClickThrough() {
 // Caricamento dell'avatar
 // ---------------------------------------------------------------------------
 async function loadAvatar(url, label) {
-  ui.showOverlay(`Carico ${label}...`, '');
+  ui.showOverlay(`Carico ${label}…`);
   try {
-    await stage.load(url, (progress) => {
-      ui.showOverlay(`Carico ${label}... ${Math.round(progress * 100)}%`, '');
-    });
+    await stage.load(url, (progress) => ui.showOverlay(`Carico ${label}… ${Math.round(progress * 100)}%`));
     state.avatarLoaded = true;
     ui.hideOverlay();
     // Appena compare, saluta.
     setTimeout(() => stage.greet(), 700);
-
     if (stage.mouthDriver.kind === 'none') {
       ui.toast('Il modello non ha le blendshape della bocca: niente lip-sync.', true, 6000);
     }
@@ -134,23 +155,11 @@ async function loadAvatar(url, label) {
     console.error(error);
     ui.showOverlay(
       'Non riesco a caricare il modello 3D',
-      `${escapeHtml(String(error.message || error))}<br><br>` +
-        'Copia un file <code>avatar.vrm</code> in <code>frontend/public/models/</code> ' +
-        'oppure trascina un <code>.vrm</code> su questa finestra.',
+      `${error.message || error}. Copia un file avatar.vrm in frontend/public/models/ oppure trascina un .vrm qui.`,
       true,
     );
     return false;
   }
-}
-
-function showMissingAvatar() {
-  ui.showOverlay(
-    'Manca il modello 3D',
-    'Copia un file <code>avatar.vrm</code> in <code>frontend/public/models/</code>, ' +
-      'oppure <b>trascina un file .vrm su questa finestra</b>.<br><br>' +
-      'Puoi crearne uno gratis con VRoid Studio.',
-    true,
-  );
 }
 
 ui.onModelFile = async (file) => {
@@ -169,33 +178,73 @@ ui.onSend = async (text) => {
   socket.chat(text);
 };
 
-ui.onSay = async (text) => {
-  await player.resume();
-  socket.say(text, ui.voice);
+ui.onStop = () => stopSpeaking(true);
+
+ui.onEscape = () => {
+  if (!hud.visible) return false;
+  hud.hide();
+  return true;
 };
 
-ui.onStop = () => {
+ui.onContextMenu = () => hud.toggle();
+
+function stopSpeaking(tellBackend) {
   player.stop();
   lipSync.clear();
   ui.hideBubble();
-  socket.cancel();
+  if (tellBackend) socket.cancel();
+}
+
+function setMuted(muted) {
+  state.muted = Boolean(muted);
+  writeSetting('dc:muted', state.muted);
+  hud.setMuted(state.muted);
+  if (state.muted) stopSpeaking(false);
+}
+
+// I dock: cosa fa ogni bottone.
+hud.onAction = async (id) => {
+  switch (id) {
+    case 'agent':
+      openPanel({ tab: 'engines', section: 'llm' });
+      break;
+    case 'voice':
+      setMuted(!state.muted);
+      socket.send({ type: 'settings', muted: state.muted });
+      ui.toast(state.muted ? 'Voce spenta: risponde solo per iscritto.' : 'Voce accesa.');
+      break;
+    case 'mic':
+      if (!state.voiceAvailable) {
+        openPanel({ tab: 'engines', section: 'stt' });
+        ui.toast('Scegli prima un motore di ascolto.');
+        break;
+      }
+      await pushToggle();
+      break;
+    case 'music':
+      setDancing(!state.dancing);
+      ui.toast(state.dancing ? 'Ballo con Spotify.' : 'Niente balli.');
+      break;
+    case 'chat':
+    case 'character':
+    case 'engines':
+      if (pet) pet.togglePanel({ tab: id });
+      else if (id === 'chat') ui.openComposer();
+      else openPanel({ tab: id });
+      break;
+    case 'power':
+      if (pet) pet.quit();
+      else hud.hide();
+      break;
+    default:
+      break;
+  }
 };
 
-ui.onReset = () => {
-  player.stop();
-  lipSync.clear();
-  ui.hideBubble();
-  socket.reset();
-  ui.toast('Conversazione azzerata.');
-};
-
-ui.onGainChange = (value) => {
-  lipSync.gain = value;
-};
-
-ui.onBackgroundChange = (visible) => {
-  stage.setBackgroundVisible(visible);
-};
+function openPanel(focus) {
+  if (pet) pet.openPanel(focus);
+  else window.open(`./panel.html#${focus.tab}`, 'tsukumo-panel', 'width=420,height=640');
+}
 
 // ---------------------------------------------------------------------------
 // Backend -> interfaccia
@@ -203,26 +252,15 @@ ui.onBackgroundChange = (visible) => {
 /**
  * Lo stato mostrato dipende da DUE cose: cosa sta facendo il backend e se c'e'
  * ancora audio in coda. Il backend dichiara "idle" appena ha finito di
- * sintetizzare, ma il companion sta ancora parlando per qualche secondo.
+ * sintetizzare, ma il personaggio sta ancora parlando per qualche secondo.
  */
 function refreshStatus() {
   if (!socket.connected) {
-    ui.setStatus('offline', 'Backend non raggiungibile, riprovo...');
-    ui.setBusy(false);
+    hud.setBusy('idle');
     return;
   }
-  if (player.playing) {
-    ui.setStatus('speaking', 'Sta parlando');
-    ui.setBusy(true);
-    return;
-  }
-  if (state.backendState === 'thinking') {
-    ui.setStatus('thinking', 'Sta pensando...');
-    ui.setBusy(true);
-    return;
-  }
-  ui.setStatus('online', 'Pronto');
-  ui.setBusy(false);
+  if (player.playing) hud.setBusy('speaking');
+  else hud.setBusy(state.backendState === 'thinking' ? 'thinking' : 'idle');
 }
 
 socket.on('open', () => refreshStatus());
@@ -231,55 +269,65 @@ socket.on('close', () => {
   state.backendState = 'idle';
   stage.setThinking(false);
   refreshStatus();
-  // Senza backend non sappiamo piu' nulla di OpenClaw: meglio il grigio
+  // Senza backend non sappiamo piu' nulla dei motori: meglio il grigio
   // "non so" che lasciare un verde bugiardo acceso.
-  ui.setOpenClaw({ state: 'unknown', error: 'Backend non raggiungibile' });
+  hud.setEngines(null);
+  if (!state.avatarLoaded) ui.showOverlay('Aspetto il backend…', 'Riprovo da sola, non serve fare niente.');
 });
-
-// Il backend sonda il Gateway OpenClaw e avvisa solo quando lo stato cambia.
-socket.on('openclaw', (message) => ui.setOpenClaw(message));
 
 socket.on('hello', (message) => {
   refreshStatus();
-  ui.setVoices(message.voices ?? [], message.config?.voice);
-  ui.setOpenClaw(message.openclaw);
-
   const config = message.config ?? {};
+  hud.setEngines(message.engines);
   voice.setWakeWord(config.wakeWord ?? 'companion');
   voice.interruptOnSpeech = config.voiceInterrupt !== false;
   voice.mode = config.voiceMode ?? 'push';
   // Il microfono non si apre da solo: serve un gesto dell'utente, sia per il
   // permesso del browser sia perche' accendere il microfono a sua insaputa
-  // sarebbe sgradevole. Il pannello e il tasto del push-to-talk lo attivano.
+  // sarebbe sgradevole. I dock, il pannello e il push-to-talk lo attivano.
   state.voiceAvailable = (config.sttEngine ?? 'none') !== 'none';
+  reportVoice();
 
-  // Il guadagno della bocca scelto nel pannello vince sul default del backend.
-  const gain = readSetting('dc:gain', message.config?.visemeGain);
-  if (typeof gain === 'number') {
-    lipSync.gain = gain;
-    ui.setGain(gain);
-  }
+  // Il muto scelto qui vale anche dopo un riavvio del backend.
+  if (Boolean(config.muted) !== state.muted) socket.send({ type: 'settings', muted: state.muted });
+
   if (message.blendshapes) {
     stage.blendshapes = { ...DEFAULT_BLENDSHAPES, ...message.blendshapes };
   }
-
   if (!state.avatarLoaded) {
     const avatar = message.avatar?.default;
-    if (avatar) loadAvatar(apiUrl(avatar), avatar.split('/').pop());
-    else showMissingAvatar();
+    if (avatar) {
+      loadAvatar(apiUrl(avatar), avatar.split('/').pop());
+    } else {
+      ui.showOverlay(
+        'Manca il modello 3D',
+        'Copia un file avatar.vrm in frontend/public/models/, oppure trascina un .vrm su questa finestra. Puoi crearne uno gratis con VRoid Studio.',
+        true,
+      );
+    }
   }
+});
+
+socket.on('engines', (message) => {
+  hud.setEngines(message);
+  state.voiceAvailable = (message.stt?.state ?? 'off') !== 'off';
+  reportVoice();
+});
+
+socket.on('settings', (message) => {
+  if (typeof message.muted === 'boolean' && message.muted !== state.muted) setMuted(message.muted);
 });
 
 socket.on('state', (message) => {
   state.backendState = message.value;
   stage.setThinking(message.value === 'thinking');
-  // Il microfono deve sapere quando il companion parla, o si risente da solo.
+  // Il microfono deve sapere quando il personaggio parla, o si risente da solo.
   voice.setCompanionState(message.value);
   refreshStatus();
 });
 
-// Quello che il companion ha capito: mostrarlo sempre, anche quando ha capito
-// male, evita di dover indovinare il perche' di una risposta strana.
+// Quello che ha capito: mostrarlo sempre, anche quando ha capito male, evita
+// di dover indovinare il perche' di una risposta strana.
 socket.on('transcript', (message) => {
   const text = (message.text ?? '').trim();
   if (!text) return;
@@ -287,31 +335,121 @@ socket.on('transcript', (message) => {
   ui.showBubble(`« ${text} »`, 2500);
 });
 
-// Una frase pronta da pronunciare: WAV + timeline dei visemi. Senza questo
-// handler l'audio arriva dal backend ma non viene mai suonato.
+// Una frase pronta da pronunciare: WAV + timeline dei visemi.
 socket.on('speech', (message) => {
-  player.enqueue(message);
+  if (!state.muted) player.enqueue(message);
+});
+
+// Una frase senza audio (muta, o voce guasta): la bolla basta.
+socket.on('caption', (message) => {
+  if (message.text) ui.showBubble(message.text, Math.min(9000, 1800 + message.text.length * 55));
 });
 
 socket.on('reply', (message) => {
   // La bolla mostra gia' le singole frasi mentre le pronuncia: qui serve solo
   // per le risposte che non vengono lette (per esempio se l'audio e' bloccato).
-  if (message.text && !player.playing) ui.showBubble(message.text, 6000);
+  if (message.text && !player.playing && !message.failed) ui.showBubble(message.text, 6000);
 });
 
 socket.on('notice', (message) => ui.toast(message?.message ?? ''));
 
 socket.on('error', (message) => {
-  ui.toast(message?.message ?? 'Errore sconosciuto', true, 6000);
-  ui.setStatus('error', message?.message ?? 'Errore');
-  ui.setBusy(false);
+  ui.toast(message?.message ?? 'Errore sconosciuto', true, 7000);
+  refreshStatus();
 });
 
 socket.on('cancel', () => {
   stage.setThinking(false);
-  player.stop();
-  lipSync.clear();
-  ui.hideBubble();
+  stopSpeaking(false);
+});
+
+// ---------------------------------------------------------------------------
+// Musica
+// ---------------------------------------------------------------------------
+let musicStopTimer = null;
+function syncMusic() {
+  hud.setMusic(state.musicPlaying);
+  const wanted = state.musicPlaying && state.dancing;
+  if (wanted) {
+    clearTimeout(musicStopTimer);
+    musicStopTimer = null;
+    if (!music.running) {
+      music.start().catch((error) => console.error('[pet] cattura audio non disponibile:', error.message));
+    }
+  } else if (music.running && !musicStopTimer) {
+    // Fra una traccia e l'altra il titolo sparisce per un attimo: aspettiamo
+    // un po' prima di spegnere la cattura.
+    musicStopTimer = setTimeout(() => {
+      musicStopTimer = null;
+      music.stop();
+    }, 4000);
+  }
+}
+
+function setDancing(value) {
+  state.dancing = Boolean(value);
+  writeSetting('dc:dance', state.dancing);
+  stage.setDancing(state.dancing);
+  syncMusic();
+}
+
+// ---------------------------------------------------------------------------
+// Voce: push-to-talk
+// ---------------------------------------------------------------------------
+// Due strade, perche' Electron non sa dire quando una scorciatoia globale
+// viene *rilasciata*: da fuori il tasto fa da interruttore, da dentro la
+// finestra usiamo keydown/keyup veri e il tieni-premuto funziona davvero.
+let pushHeld = false;
+
+function reportVoice() {
+  const snapshot = { available: state.voiceAvailable, enabled: voice.listening, mode: voice.mode, held: pushHeld };
+  hud.setMic({ available: state.voiceAvailable, enabled: voice.listening && (voice.mode !== 'push' || pushHeld) });
+  pet?.setVoiceState(snapshot);
+}
+
+async function pushToggle() {
+  if (!state.voiceAvailable) {
+    ui.showBubble('Il riconoscimento vocale non è attivo', 3000);
+    return;
+  }
+  await player.resume();
+  if (!voice.listening && !(await voice.enable({ mode: voice.mode }))) return;
+
+  if (voice.mode !== 'push') {
+    // Negli altri modi il microfono e' gia' aperto: il tasto lo accende e spegne.
+    voice.disable();
+    pushHeld = false;
+    reportVoice();
+    return;
+  }
+  pushHeld = !pushHeld;
+  if (pushHeld) voice.pushStart();
+  else voice.pushEnd();
+  reportVoice();
+}
+
+window.companion?.onPushToTalk?.(({ action }) => {
+  if (action === 'toggle') pushToggle();
+});
+
+// Tieni premuto, quando la finestra ha il fuoco. `repeat` va ignorato o la
+// pressione prolungata farebbe ripartire la registrazione a ogni ripetizione.
+window.addEventListener('keydown', async (event) => {
+  if (event.code !== 'Space' || !event.ctrlKey || event.repeat) return;
+  if (!state.voiceAvailable || voice.mode !== 'push') return;
+  event.preventDefault();
+  if (!voice.listening && !(await voice.enable({ mode: 'push' }))) return;
+  pushHeld = true;
+  voice.pushStart();
+  reportVoice();
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.code !== 'Space' || !pushHeld) return;
+  event.preventDefault();
+  pushHeld = false;
+  voice.pushEnd();
+  reportVoice();
 });
 
 // ---------------------------------------------------------------------------
@@ -325,42 +463,21 @@ if (pet) {
   // Il trascinamento sposta la finestra, non ruota la camera.
   stage.dragEnabled = false;
   stage.setSpontaneous(readSetting('dc:spontaneous', true));
-  let dancing = readSetting('dc:dance', true);
-  stage.setDancing(dancing);
+  stage.setDancing(state.dancing);
 
-  // Spotify suona: ascolta l'audio di sistema per ballare a tempo. Fra una
-  // traccia e l'altra il titolo sparisce per un attimo: aspettiamo un po'
-  // prima di spegnere la cattura.
-  let musicPlaying = false;
-  let musicStopTimer = null;
-  const syncMusic = () => {
-    const wanted = musicPlaying && dancing;
-    if (wanted) {
-      clearTimeout(musicStopTimer);
-      musicStopTimer = null;
-      if (!music.running) {
-        music.start().catch((error) => console.error('[pet] cattura audio non disponibile:', error.message));
-      }
-    } else if (music.running && !musicStopTimer) {
-      musicStopTimer = setTimeout(() => {
-        musicStopTimer = null;
-        music.stop();
-      }, 4000);
-    }
-  };
   pet.onMusic((status) => {
-    musicPlaying = Boolean(status?.playing);
+    state.musicPlaying = Boolean(status?.playing);
     syncMusic();
   });
   pet.getState().then((initial) => {
-    musicPlaying = Boolean(initial?.music?.playing);
+    state.musicPlaying = Boolean(initial?.music?.playing);
     syncMusic();
+    hud.setActiveTab(initial?.panelVisible ? initial.panelTab : null);
   });
+  pet.onPetState((current) => hud.setActiveTab(current?.panelVisible ? current.panelTab : null));
 
-  // Chat e menu vivono nel pannello, staccato dal personaggio: qui resta
-  // solo lei. Tasto destro apre il menu, doppio click (o iniziare a
-  // scrivere) apre la chat.
-  ui.onContextMenu = () => pet.togglePanel({ tab: 'menu' });
+  // Chat e impostazioni vivono nel pannello, staccato dal personaggio.
+  // Doppio click (o iniziare a scrivere) apre la chat.
   ui.onOpenChat = (text) => pet.openPanel({ tab: 'chat', text });
 
   // La rotellina la ingrandisce: cambia la finestra, non la camera.
@@ -403,6 +520,7 @@ if (pet) {
     current.startedAt = performance.now();
     current.offset = stage.beginHold(current.clientX, current.clientY);
     document.body.classList.add('dragging');
+    hud.hide();
     pet.dragStart().then((origin) => {
       current.origin = origin;
       requestAnimationFrame(() => dragFrame(current));
@@ -477,15 +595,22 @@ if (pet) {
         stage.setSpontaneous(command.value);
         break;
       case 'dance':
-        dancing = Boolean(command.value);
-        stage.setDancing(dancing);
-        syncMusic();
+        setDancing(command.value);
         break;
       case 'play':
         stage.body?.play(command.name, { sign: command.sign });
         break;
       case 'posture':
         pet.requestPosture(command.value);
+        break;
+      case 'mic':
+        pushToggle();
+        break;
+      case 'hud':
+        hud.show();
+        break;
+      case 'stop':
+        stopSpeaking(true);
         break;
       default:
         break;
@@ -498,9 +623,9 @@ if (pet) {
   });
 } else {
   // Nel browser lo sfondo trasparente non serve: lo accendiamo di default.
-  ui.elements.toggleBg.checked = true;
   document.body.classList.add('opaque-bg');
   stage.setBackgroundVisible(true);
+  stage.setDancing(state.dancing);
 }
 
 // L'audio richiede un gesto utente: il primo click/tasto sblocca il contesto.
@@ -512,93 +637,16 @@ const unlock = () => {
 window.addEventListener('pointerdown', unlock);
 window.addEventListener('keydown', unlock);
 
-ui.setStatus('offline', 'Connessione...');
-ui.showOverlay('Connessione al backend...', 'Assicurati che <code>python -m backend</code> sia in esecuzione.');
+ui.showOverlay('Tsukumo si sta svegliando…');
 socket.connect();
-
-// Se dopo qualche secondo il backend non risponde, spieghiamo cosa fare.
-setTimeout(() => {
-  if (!socket.connected && !state.avatarLoaded) {
-    ui.showOverlay(
-      'Backend non raggiungibile',
-      'Avvia il server Python dalla cartella del progetto:<br>' +
-        '<code>python -m backend</code><br><br>' +
-        'Sto continuando a riprovare da solo.',
-      true,
-    );
-  }
-}, 4000);
 
 // Primo avvio: un suggerimento, poi silenzio.
 setTimeout(() => {
-  if (state.avatarLoaded) {
-    ui.toast(pet ? 'Tasto destro per il menu, doppio click per scriverle.' : 'Tasto destro per il menu.');
+  if (state.avatarLoaded && !readSetting('dc:hint-seen', false)) {
+    writeSetting('dc:hint-seen', true);
+    ui.toast(pet ? 'Tasto destro su di lei per i comandi, doppio click per scriverle.' : 'Tasto destro per i comandi.', false, 6000);
   }
 }, 2500);
 
-/** Preferenza salvata dal pannello (stessa origine: localStorage condiviso). */
-function readSetting(key, fallback) {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw === null ? fallback : JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (char) => {
-    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return map[char];
-  });
-}
-
-// Utile per ispezionare lo stato dalla console del browser.
-// ---------------------------------------------------------------------------
-// Push-to-talk
-// ---------------------------------------------------------------------------
-// Due strade, perche' Electron non sa dire quando una scorciatoia globale
-// viene *rilasciata*: da fuori il tasto fa da interruttore, da dentro la
-// finestra usiamo keydown/keyup veri e il tieni-premuto funziona davvero.
-let pushHeld = false;
-
-async function pushToggle() {
-  if (!state.voiceAvailable) {
-    ui.showBubble('Il riconoscimento vocale non e’ attivo', 3000);
-    return;
-  }
-  if (!voice.listening && !(await voice.enable({ mode: voice.mode }))) return;
-
-  if (voice.mode !== 'push') {
-    // Negli altri modi il microfono e' gia' aperto: il tasto lo accende e spegne.
-    voice.disable();
-    return;
-  }
-  pushHeld = !pushHeld;
-  if (pushHeld) voice.pushStart();
-  else voice.pushEnd();
-}
-
-window.companion?.onPushToTalk?.(({ action }) => {
-  if (action === 'toggle') pushToggle();
-});
-
-// Tieni premuto, quando la finestra ha il fuoco. `repeat` va ignorato o la
-// pressione prolungata farebbe ripartire la registrazione a ogni ripetizione.
-window.addEventListener('keydown', async (event) => {
-  if (event.code !== 'Space' || !event.ctrlKey || event.repeat) return;
-  if (!state.voiceAvailable || voice.mode !== 'push') return;
-  event.preventDefault();
-  if (!voice.listening && !(await voice.enable({ mode: 'push' }))) return;
-  pushHeld = true;
-  voice.pushStart();
-});
-
-window.addEventListener('keyup', (event) => {
-  if (event.code !== 'Space' || !pushHeld) return;
-  event.preventDefault();
-  pushHeld = false;
-  voice.pushEnd();
-});
-
-window.deskCompanion = { stage, player, lipSync, socket, ui, state, pet, voice, pushToggle };
+// Utile per ispezionare lo stato dalla console.
+window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle };
