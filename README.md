@@ -458,6 +458,8 @@ la pagina, personaggio e motori in una finestra a parte.
 | **Bordi dello schermo** | lasciata oltre il bordo sinistro o destro, si aggrappa e sbircia dentro |
 | **Dimensione** | con la rotellina (o dal pannello) si ingrandisce tutta la finestra: resta intera e con i piedi dove stavano |
 | **Tocco** | un click sulla testa è una carezza (si rannicchia contento), sul corpo un colpetto (sobbalza) |
+| **Versetti** | con la voce scelta: "Ciao!" quando compare (o "Buongiorno!", "Buonasera!", "Ancora in piedi?" secondo l'ora), una risatina alle carezze, "Ehi!" a un colpetto o se la sollevi, "Aaah!" se la lanci |
+| **Sonno** | se non tocchi mouse e tastiera per 2 minuti si fa assonnata (palpebre pesanti, colpi di sonno, qualche sbadiglio), dopo 5 si addormenta — sulla barra si stende sul fianco, con le "zeta" che salgono dalla testa. Quando torni, sblocchi lo schermo o il PC si risveglia, si alza e ti saluta |
 | **Sguardo** | segue il cursore ovunque sullo schermo, anche fuori dalla finestra; col mouse fermo guarda te |
 | **Sempre in primo piano** | attivo di default; viene riaffermato ogni secondo, perché Windows riordina le finestre "in primo piano" ogni volta che una di loro (barra compresa) si attiva |
 | **Modalità fantasma** | i click passano attraverso *tutto*, personaggio compreso |
@@ -480,6 +482,20 @@ nella cartella dati di Electron (`%APPDATA%\Tsukumo` su Windows). Al primo
 avvio col nuovo nome le impostazioni, la chat e le preferenze di
 `%APPDATA%\desk-companion-shell` vengono copiate lì da sole.
 
+I **versetti** li sintetizza il backend (`POST /api/vocal`) con il motore e la
+voce in uso, nella lingua della voce: una voce italiana dice "Ciao!", una
+inglese "Hii!". Ogni frase si sintetizza una volta per voce e poi resta in
+cache, quindi con una voce a pagamento costa pochi caratteri in tutto. Non
+entrano nella conversazione, tacciono se il personaggio è muto o sta pensando o
+parlando, e non partono a ogni click. Frasi e lingue sono in `backend/vocals.py`.
+
+Il **sonno** usa `powerMonitor` di Electron: ogni 5 secondi il processo main
+dice al personaggio da quanto il PC è fermo (`getSystemIdleTime`) e gli
+inoltra blocco/sblocco dello schermo e sospensione/ripresa. Mentre parla,
+pensa, balla o è in mano non si addormenta. La logica è in
+`frontend/src/presence.js`. Versetti e sonno si spengono dal pannello, scheda
+Personaggio → Comportamento.
+
 Variabili utili per il debug: `DC_PET_DEBUG=1` scrive nel terminale cosa vede
 il renderer (cursore, alpha, stato della finestra), `DC_PET_WIDTH` /
 `DC_PET_HEIGHT` cambiano la dimensione di base della finestra.
@@ -498,14 +514,17 @@ parlato (`actions.js`), le costanti (`constants.js`).
 | **Ogni tanto, da solo** | si stiracchia, si guarda intorno, si sistema i capelli, mette le mani dietro la schiena, canticchia, inclina la testa |
 | **Mentre pensa** | mano al mento, l'altra a sostenere il gomito, occhi in alto |
 | **Mentre parla** | annuisce a tempo con la voce, gesticola (palmi aperti, mano che spiega, mano sul cuore), alza le spalle alle domande |
-| **All'avvio** | saluta con la mano |
+| **All'avvio** | saluta con la mano e con la voce ("Ciao!", o il saluto adatto all'ora) |
+| **Se non usi il PC** | assonnata: palpebre pesanti, sguardo basso, la testa che cade piano e si rialza di scatto, qualche sbadiglio con la mano davanti alla bocca; addormentata: occhi chiusi, testa reclinata, respiro lento e profondo |
 
 Le emoji nelle risposte non vengono lette: diventano l'espressione del viso
 mentre pronuncia quella frase (😊 sorride, 😢 si rattrista, 😮 si stupisce...).
 
 Dalla console del browser si può far partire un'azione a mano, per esempio
 `deskCompanion.stage.body.play('stretch')` (le altre: `lookAround`,
-`hairTuck`, `handsBehind`, `hum`, `headTilt`, `wave`, `pat`, `flinch`).
+`hairTuck`, `handsBehind`, `hum`, `headTilt`, `yawn`, `wave`, `pat`, `flinch`).
+Il sonno si prova con `deskCompanion.stage.setSleep(0.5)` (assonnata) o `1`
+(addormentata), un versetto con `deskCompanion.vocals.say('greet')`.
 
 ### Ballare con Spotify
 
@@ -776,6 +795,7 @@ due finestre, entrambe mostrano lo stesso avatar parlare.
 | `POST` | `/api/providers` | attiva un motore (salva in `.env`, ripristina se fallisce) |
 | `GET` | `/api/voices` | voci del motore attivo, con lingua e genere |
 | `POST` | `/api/say` | sintetizza un testo (l'audio va ai client WS) |
+| `POST` | `/api/vocal` | un versetto (`greet`, `morning`, `evening`, `night`, `welcome`, `pat`, `poke`, `lift`, `fall`) con la voce in uso, restituito solo a chi lo chiede |
 | `POST` | `/api/chat` | turno completo con l'LLM |
 | `POST` | `/api/cancel` | interrompe |
 | `POST` | `/api/reset` | azzera la conversazione |
@@ -809,6 +829,7 @@ desk-companion/
 │   ├── provider_specs.py  # la dichiarazione di ogni motore: il pannello si disegna da qui
 │   ├── config.py          # impostazioni da env / .env
 │   ├── languages.py       # lingua della voce e lingua delle risposte
+│   ├── vocals.py          # i versetti ("Ciao!", "Ehehe!") per evento e lingua
 │   ├── audio.py           # WAV, base64, inviluppo RMS
 │   ├── phonemes.py        # IPA, G2P e tempi per lettera -> visemi (fcl_mth_*)
 │   ├── visemes.py         # allineamento fonemi <-> energia dell'audio
@@ -828,6 +849,8 @@ desk-companion/
 │       ├── vrm.js         # Three.js + three-vrm, sguardo, blink, blendshape
 │       ├── body.js        # animazione del corpo: postura, IK, gesti, reazioni
 │       ├── body/          # motion.js, pose.js, actions.js, constants.js
+│       ├── vocals.js      # quando dire un versetto (saluto, carezza, caduta)
+│       ├── presence.js    # sonno e risveglio, da quanto il PC è fermo
 │       ├── panel.js       # il pannello: schede, testata, connessione
 │       ├── panel/         # chat.js, character.js (voci, aspetto, comportamento)
 │       ├── engines.js     # scheda Motori, disegnata da /api/providers

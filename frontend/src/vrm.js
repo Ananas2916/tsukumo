@@ -66,6 +66,7 @@ export class VrmStage {
     this._thinking = false;
     this._spontaneous = true;
     this._dancing = true;
+    this._sleep = 0;
 
     // --- modalita' mascotte (Electron) ------------------------------------
     /** Se impostata, la rotellina chiama questa invece di zoomare la camera. */
@@ -266,6 +267,7 @@ export class VrmStage {
     this.body.setThinking(this._thinking);
     this.body.spontaneous = this._spontaneous;
     this.body.dancing = this._dancing;
+    this.body.setSleep(this._sleep);
     this.body.onPostureRequest = (posture) => this.onPostureRequest?.(posture);
     this.mouthDriver = this._detectMouthDriver(vrm);
     this.blinkDriver = this._detectBlinkDriver(vrm);
@@ -416,6 +418,20 @@ export class VrmStage {
     if (this.body) this.body.spontaneous = this._spontaneous;
   }
 
+  /** Sonno: 0 sveglia, 0.5 assonnata, 1 addormentata (vedi presence.js). */
+  setSleep(level) {
+    this._sleep = level;
+    this.body?.setSleep(level);
+  }
+
+  /** Dove sta la testa, in pixel della finestra: da li' salgono le "zeta" del sonno. */
+  headScreen() {
+    const head = this.vrm?.humanoid.getNormalizedBoneNode('head');
+    if (!head) return null;
+    this._headPoint ??= new THREE.Vector3();
+    return this._toScreen(head.getWorldPosition(this._headPoint));
+  }
+
   /**
    * Dove stanno piedi, seduta e asse del corpo nella finestra, in frazioni
    * delle sue dimensioni: servono a Electron per appoggiarla sulla barra o
@@ -452,12 +468,15 @@ export class VrmStage {
     return { cx: bottom.x, cy: top.y * 0.6 + bottom.y * 0.4 };
   }
 
-  /** Click senza trascinare: sulla testa e' una carezza, sul corpo un colpetto. */
+  /**
+   * Click senza trascinare: sulla testa e' una carezza, sul corpo un colpetto.
+   * Restituisce la reazione (`pat`, `flinch`) o `null`.
+   */
   poke(px, py) {
-    if (!this.body || !this.vrm) return;
+    if (!this.body || !this.vrm) return null;
     const neck = this.vrm.humanoid.getNormalizedBoneNode('neck') ?? this.vrm.humanoid.getNormalizedBoneNode('head');
     const neckY = neck ? this._toScreen(neck.getWorldPosition(new THREE.Vector3())).y : -Infinity;
-    this.body.poke(py < neckY ? 'head' : 'body');
+    return this.body.poke(py < neckY ? 'head' : 'body');
   }
 
   /** Punto del mondo -> pixel della finestra. */
@@ -713,6 +732,10 @@ export class VrmStage {
       });
       this._updateBlink(dt);
       this._applyMoods();
+
+      // Lo sbadiglio apre la bocca anche quando non sta parlando.
+      const yawn = this.body.mouthOpen;
+      if (yawn > 0.001) mouth = { ...mouth, a: Math.max(mouth?.a ?? 0, yawn), o: Math.max(mouth?.o ?? 0, 0.3 * yawn) };
 
       // Le espressioni vanno impostate PRIMA di vrm.update(), i morph grezzi
       // DOPO (altrimenti l'expression manager li sovrascriverebbe).

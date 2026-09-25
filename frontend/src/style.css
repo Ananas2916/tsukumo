@@ -258,6 +258,68 @@ body.pet-mode.dragging #stage {
   transform: rotate(45deg);
 }
 
+/* ------------------------------------------------------------- sonno --- */
+.zzz {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 40px;
+  height: 44px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.zzz span {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  color: #d8d0ff;
+  font: 700 13px/1 system-ui, sans-serif;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  animation: zzz 3.6s ease-out infinite;
+}
+
+.zzz span:nth-child(2) {
+  font-size: 16px;
+  animation-delay: 1.2s;
+}
+
+.zzz span:nth-child(3) {
+  font-size: 20px;
+  animation-delay: 2.4s;
+}
+
+@keyframes zzz {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(-8deg);
+  }
+  20% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(18px, -36px) rotate(10deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zzz span {
+    animation: none;
+    opacity: 0.8;
+  }
+  .zzz span:nth-child(1) {
+    transform: translate(0, 0);
+  }
+  .zzz span:nth-child(2) {
+    transform: translate(9px, -14px);
+  }
+  .zzz span:nth-child(3) {
+    transform: translate(18px, -30px);
+  }
+}
+
 /* -------------------------------------------------------------- avvisi --- */
 .toast {
   position: fixed;

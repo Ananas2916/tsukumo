@@ -31,6 +31,7 @@ const ACTIONS = [
   { play: 'stretch', label: 'Stiracchiati', icon: 'resize' },
   { play: 'lookAround', label: 'Guardati intorno', icon: 'search' },
   { play: 'hum', label: 'Canticchia', icon: 'music' },
+  { play: 'yawn', label: 'Sbadiglia', icon: 'moon' },
   { posture: 'sit', label: 'Siediti', icon: 'sit' },
   { posture: 'lie', label: 'Sdraiati', icon: 'window' },
   { posture: 'side', label: 'Sul fianco', icon: 'window' },
@@ -138,10 +139,14 @@ export class CharacterView {
     this.windows = this._switch('Si siede sulle finestre', 'Se la lasci cadere su una finestra ci resta sopra e viaggia con lei.');
     this.spontaneous = this._switch('Gesti e pose spontanee');
     this.dance = this._switch('Balla con Spotify', "Quando Spotify suona ascolta l'audio del PC e si muove a tempo.");
+    this.vocals = this._switch('Versetti con la sua voce', 'Un “Ciao!” quando saluta, una risatina alle carezze: con la voce scelta.');
+    this.sleep = this._switch('Si addormenta se non usi il PC', 'Dopo 2 minuti è assonnata, dopo 5 dorme; quando torni si sveglia e ti saluta.');
     this.ghost = this._switch('Modalità fantasma', 'I click la attraversano; per uscirne usa l’icona nell’area di notifica.');
 
     this.spontaneous.input.checked = readSetting('dc:spontaneous', true);
     this.dance.input.checked = readSetting('dc:dance', true);
+    this.vocals.input.checked = readSetting('dc:vocals', true);
+    this.sleep.input.checked = readSetting('dc:sleep', true);
     this.onTop.input.addEventListener('change', () => this.companion?.toggleAlwaysOnTop());
     this.windows.input.addEventListener('change', () => this.companion?.setWindows(this.windows.input.checked));
     this.ghost.input.addEventListener('change', () => this.companion?.toggleGhost());
@@ -153,6 +158,14 @@ export class CharacterView {
       writeSetting('dc:dance', this.dance.input.checked);
       this.companion?.sendToPet({ type: 'dance', value: this.dance.input.checked });
     });
+    this.vocals.input.addEventListener('change', () => {
+      writeSetting('dc:vocals', this.vocals.input.checked);
+      this.companion?.sendToPet({ type: 'vocals', value: this.vocals.input.checked });
+    });
+    this.sleep.input.addEventListener('change', () => {
+      writeSetting('dc:sleep', this.sleep.input.checked);
+      this.companion?.sendToPet({ type: 'sleep', value: this.sleep.input.checked });
+    });
 
     const behaviourCard = this._card(
       'sit',
@@ -160,6 +173,8 @@ export class CharacterView {
       this.onTop.node,
       this.windows.node,
       this.spontaneous.node,
+      this.vocals.node,
+      this.sleep.node,
       this.dance.node,
       this.ghost.node,
     );

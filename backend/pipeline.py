@@ -27,11 +27,15 @@ from .stt import SAMPLE_RATE as STT_SAMPLE_RATE
 from .stt import STTEngine, Transcript, create_stt_engine, from_pcm16
 from .tts import TTSEngine, build_tts_engine, create_tts_engine
 from .visemes import build_timeline
+from .vocals import vocal_line
 
 logger = logging.getLogger(__name__)
 
 #: Callback usata per spedire un messaggio al frontend.
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
+
+#: Quanti versetti tenere in memoria (poche decine di KB ciascuno).
+VOCAL_CACHE_SIZE = 64
 
 # Emoji e pittogrammi. Kokoro li pronuncerebbe per nome ("smiling face with
 # smiling eyes"), e gli agenti ne usano parecchie: la loro personalita' non passa
@@ -223,6 +227,8 @@ class Companion:
         self.last_errors: dict[str, str] = {}
         #: Catalogo delle voci del motore attivo, caricato in background.
         self.voice_list: list[dict[str, Any]] | None = None
+        #: Versetti gia' sintetizzati, per (motore, voce, frase): vedi vocal().
+        self._vocals: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Motori
@@ -257,6 +263,7 @@ class Companion:
             old, self.tts = self.tts, new_tts
             self.voice = new_tts.default_voice or settings.voice
             self.voice_list = None
+            self._vocals.clear()
             self.last_errors.pop("tts", None)
         elif kind == "stt":
             old, self.stt = self.stt, create_stt_engine(settings)
@@ -370,6 +377,27 @@ class Companion:
             await emit({"type": "reply", "text": clean_for_speech(text), "turn": turn, "said": True})
             await emit({"type": "state", "value": "idle", "turn": turn})
         return len(sentences)
+
+    async def vocal(self, event: str) -> dict[str, Any] | None:
+        """Un versetto ("Hii!", "Ehehe!") con la voce in uso, per accompagnare un gesto.
+
+        Non passa dal cervello e non entra nella conversazione. Resta zitto
+        (``None``) se il companion e' muto o sta gia' pensando o parlando.
+        Ogni frase si sintetizza una volta per voce e poi resta in memoria:
+        le voci a pagamento costano a carattere.
+        """
+        if self.muted or self._turn_lock.locked():
+            return None
+        voice = self.voice
+        text = vocal_line(event, self.tts.language_of(voice))
+        key = (self.tts.name, voice, text)
+        payload = self._vocals.get(key)
+        if payload is None:
+            payload = await self._build_speech(text, 0, 0, voice, None)
+            self._vocals[key] = payload
+            while len(self._vocals) > VOCAL_CACHE_SIZE:
+                self._vocals.pop(next(iter(self._vocals)))
+        return {**payload, "vocal": event}
 
     # ------------------------------------------------------------------
     async def synthesize_payload(

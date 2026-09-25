@@ -26,6 +26,7 @@ const {
   globalShortcut,
   ipcMain,
   nativeImage,
+  powerMonitor,
   screen,
   shell,
 } = require('electron');
@@ -126,6 +127,8 @@ const SIDE_ASPECT = 1;
 /** Rialzandosi resta orizzontale per un attimo: la finestra si restringe dopo. */
 const SIDE_EXIT_MS = 1000;
 const MUSIC_POLL_MS = 1500;
+/** Ogni quanto dire al personaggio da quanto il PC e' fermo (sonno e risveglio). */
+const PRESENCE_POLL_MS = 5000;
 
 const PANEL_SIZE = { width: 400, height: 620 };
 const PANEL_GAP = 10;
@@ -528,6 +531,22 @@ function sendToPet(channel, payload) {
 
 function sendToPanel(channel, payload) {
   if (alive(panelWindow)) panelWindow.webContents.send(channel, payload);
+}
+
+// ---------------------------------------------------------------------------
+// Presenza: da quanto nessuno tocca mouse e tastiera, schermo bloccato
+// ---------------------------------------------------------------------------
+/** Secondi senza input: il personaggio si assopisce e poi dorme (presence.js). */
+function pollPresence() {
+  sendToPet('pet:presence', { idle: powerMonitor.getSystemIdleTime() });
+}
+
+function watchPresence() {
+  // Sblocco dello schermo e ritorno dalla sospensione: si sveglia e saluta.
+  for (const event of ['lock-screen', 'unlock-screen', 'suspend', 'resume']) {
+    powerMonitor.on(event, () => sendToPet('pet:presence', { event }));
+  }
+  setInterval(pollPresence, PRESENCE_POLL_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,6 +1093,7 @@ if (!app.requestSingleInstanceLock()) {
     setInterval(tick, TICK_MS);
     setInterval(keepOnTop, ON_TOP_MS);
     setInterval(pollMusic, MUSIC_POLL_MS);
+    watchPresence();
 
     const key = process.env.DC_PUSH_TO_TALK_KEY || settings.pushToTalkKey || 'Control+Space';
     const shortcut = registerPushToTalk(key);

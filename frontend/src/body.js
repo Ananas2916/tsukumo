@@ -146,6 +146,14 @@ export class BodyAnimator {
     };
     this.thinking = false;
     this.think = new Spring(3.2);
+    // --- sonno: il PC e' fermo da un po' (vedi presence.js) ----------------
+    /** 0 = sveglia, 0.5 = assonnata, 1 = addormentata. */
+    this.sleepTarget = 0;
+    this.sleep = 0;
+    /** Colpi di sonno da assonnata: la testa cade piano e si rialza di scatto. */
+    this.doze = { drop: 0, falling: false, timer: randomBetween(2, 4), jerk: 0 };
+    this.sleepSide = 1;
+    this.yawnTimer = randomBetween(3, 8);
 
     // --- azioni e pose spontanee ------------------------------------------
     this.actions = [];
@@ -366,8 +374,33 @@ export class BodyAnimator {
     if (this.thinking) this._cancelIdleActions();
   }
 
+  /**
+   * Sonno: 0 sveglia, 0.5 assonnata, 1 addormentata. Ci si addormenta piano,
+   * in una decina di secondi; ci si sveglia in un attimo, sbattendo le palpebre.
+   */
+  setSleep(level) {
+    const target = clamp(Number(level) || 0, 0, 1);
+    if (target > 0 && this.sleepTarget === 0) {
+      this._cancelIdleActions();
+      this.sleepSide = Math.random() < 0.5 ? -1 : 1;
+      this.yawnTimer = randomBetween(3, 8);
+    }
+    if (target < this.sleepTarget && this.sleep > 0.3) this.blinkRequested = true;
+    this.sleepTarget = target;
+  }
+
+  /** Dorme davvero (non solo assonnata). */
+  get asleep() {
+    return this.sleep > 0.75;
+  }
+
+  /** Bocca aperta dal corpo (lo sbadiglio), letta dalla scena a ogni frame. */
+  get mouthOpen() {
+    return this.pose.mouthOpen;
+  }
+
   /** Una nuova frase sta per essere pronunciata: sceglie gesto, umore e testa. */
-  onClipStart({ text = '', mood = null, duration = 1 } = {}) {
+  onClipStart({ text = '', mood = null, duration = 1, vocal = null } = {}) {
     const speech = this.speech;
     const trimmed = text.trim();
     speech.clipStart = this.time;
@@ -375,6 +408,14 @@ export class BodyAnimator {
     speech.question = trimmed.endsWith('?');
     speech.emphatic = trimmed.endsWith('!');
     speech.mood = mood;
+    if (vocal) {
+      // Un versetto ("Hii!", "Ehehe!") accompagna un gesto gia' in corso,
+      // come il saluto: niente gesti delle mani e nessuna interruzione.
+      speech.gesture = null;
+      speech.yawTarget = 0;
+      speech.rollTarget = 0;
+      return;
+    }
 
     // Un gesto diverso a ogni frase, ma non sempre: gesticolare di continuo stanca.
     const options = speech.question
@@ -484,11 +525,15 @@ export class BodyAnimator {
     this.carry.y = y;
   }
 
-  /** Tocco: sulla testa e' una carezza, sul corpo un piccolo spavento. */
+  /**
+   * Tocco: sulla testa e' una carezza, sul corpo un piccolo spavento.
+   * Restituisce la reazione partita (`pat`, `flinch`) o `null`.
+   */
   poke(region) {
-    if (!POSTURES.includes(this.mode)) return;
-    if (region !== 'head' && (this.mode === 'lie' || this.mode === 'side')) return;
-    this.play(region === 'head' ? 'pat' : 'flinch');
+    if (!POSTURES.includes(this.mode)) return null;
+    if (region !== 'head' && (this.mode === 'lie' || this.mode === 'side')) return null;
+    const name = region === 'head' ? 'pat' : 'flinch';
+    return this.play(name) ? name : null;
   }
 
   /** Ritmo della musica che sta suonando (vedi music.js), a ogni frame. */
@@ -541,6 +586,7 @@ export class BodyAnimator {
     this._updateModes(dt);
     this._updatePendulum(dt, ctx);
     this._updateCarry(dt, ctx);
+    this._updateSleep(dt);
     this._updateActions(dt, ctx);
 
     const pose = this.pose;
@@ -561,6 +607,7 @@ export class BodyAnimator {
     this._thinking(pose, dt, upright);
     this._dance(pose, dt, ctx);
     this._runActions(pose);
+    this._sleep(pose, upright, W.lie + W.side + W.edge);
     this._landing(pose, dt, W.stand);
     this._armGravity(pose, dt, upright);
     this._reactions(pose, dt);
@@ -669,7 +716,18 @@ export class BodyAnimator {
     // Gesti spontanei solo quando e' tranquilla: ferma, zitta, senza pensieri.
     const settled = RESTING.includes(this.mode) && this.modeWeight[this.mode] > 0.95;
     const quiet = !this.thinking && !ctx.speaking && this.time - this.speech.lastActive > 2;
-    if (!settled || !quiet || !this.spontaneous) return;
+    if (!settled || !quiet) return;
+
+    // Assonnata ogni tanto sbadiglia; addormentata non fa nient'altro.
+    if (this.sleepTarget > 0 || this.sleep > 0.05) {
+      this.yawnTimer -= dt;
+      if (this.sleep > 0.25 && this.sleep < 0.7 && this.yawnTimer <= 0 && !this.actions.length) {
+        this.yawnTimer = randomBetween(12, 25);
+        this.play('yawn');
+      }
+      return;
+    }
+    if (!this.spontaneous) return;
 
     // Sulla barra ogni tanto si siede sul bordo o si sdraia, poi si rialza.
     this.postureTimer -= dt;
@@ -711,16 +769,18 @@ export class BodyAnimator {
   // ----------------------------------------------------------- strati comuni
   /** Respiro: inspira in ~40% del ciclo, espira nel resto. */
   _breathe(pose, dt, ctx, w) {
-    const breathRate = ctx.speaking ? 1 / 3.4 : 1 / 4.2;
+    // Nel sonno il respiro rallenta e si fa piu' profondo.
+    const breathRate = (ctx.speaking ? 1 / 3.4 : 1 / 4.2) * (1 - 0.35 * this.sleep);
     this.breath.phase = (this.breath.phase + dt * breathRate) % 1;
     if (w < EPSILON) return;
     const phase = this.breath.phase;
     const breath = phase < 0.4 ? smoothstep(phase / 0.4) : 1 - smoothstep((phase - 0.4) / 0.6);
-    pose.add('chest', -0.02 * breath * w, 0, 0);
-    pose.add('upperChest', -0.014 * breath * w, 0, 0);
-    pose.add('neck', 0.014 * breath * w, 0, 0);
-    pose.both('Shoulder', 0, 0, 0.035 * breath, w);
-    pose.both('UpperArm', 0, 0, 0.015 * breath, w);
+    const depth = w * (1 + 0.8 * this.sleep);
+    pose.add('chest', -0.02 * breath * depth, 0, 0);
+    pose.add('upperChest', -0.014 * breath * depth, 0, 0);
+    pose.add('neck', 0.014 * breath * depth, 0, 0);
+    pose.both('Shoulder', 0, 0, 0.035 * breath, depth);
+    pose.both('UpperArm', 0, 0, 0.015 * breath, depth);
   }
 
   /**
@@ -1104,6 +1164,70 @@ export class BodyAnimator {
         pose.side(hand.side, 'Hand', 0, 0, 0.1, g);
       }
     }
+  }
+
+  _updateSleep(dt) {
+    // Addormentarsi richiede una decina di secondi, svegliarsi mezzo secondo.
+    const rate = this.sleepTarget > this.sleep ? 0.35 : 5;
+    this.sleep = damp(this.sleep, this.sleepTarget, rate, dt);
+
+    const doze = this.doze;
+    doze.jerk = damp(doze.jerk, 0, 4, dt);
+    const yawning = this.actions.some((action) => action.name === 'yawn' && !action.cancelled);
+    if (this.sleep < 0.2 || this.sleep > 0.75 || yawning) {
+      doze.drop = damp(doze.drop, 0, 3, dt);
+      doze.falling = false;
+      return;
+    }
+    doze.timer -= dt;
+    if (doze.falling) {
+      doze.drop = Math.min(1, doze.drop + dt / 3.5);
+      if (doze.timer <= 0) {
+        // Si riprende di soprassalto, sbattendo le palpebre.
+        doze.falling = false;
+        doze.jerk = doze.drop;
+        doze.timer = randomBetween(2.5, 5);
+        this.blinkRequested = true;
+      }
+    } else {
+      doze.drop = damp(doze.drop, 0, 10, dt);
+      if (doze.timer <= 0) {
+        doze.falling = true;
+        doze.timer = randomBetween(2.5, 4.5);
+      }
+    }
+  }
+
+  /**
+   * Assonnata: palpebre pesanti, sguardo basso, colpi di sonno. Addormentata:
+   * occhi chiusi, testa reclinata di lato, spalle abbandonate.
+   */
+  _sleep(pose, upright, lying) {
+    const s = this.sleep;
+    if (s < EPSILON) return;
+    const drowsy = clamp(s / 0.5, 0, 1);
+    const deep = clamp((s - 0.5) / 0.5, 0, 1);
+    const doze = this.doze;
+    const nod = smoothstep(doze.drop) * (1 - deep);
+    const all = upright + lying;
+
+    pose.eyesClosed = Math.max(pose.eyesClosed, Math.min(1, Math.max(0.5 * drowsy + 0.45 * nod, deep)) * all);
+    pose.mood('relaxed', (0.25 * drowsy + 0.35 * deep) * all);
+    pose.mood('surprised', 0.35 * doze.jerk * all);
+
+    // Smette di seguire il cursore e abbassa lo sguardo.
+    const g = Math.max(0.6 * drowsy, deep) * all;
+    pose.gaze.pitch += 0.18 * g;
+    pose.gaze.weight += g;
+
+    if (upright < EPSILON) return;
+    const side = this.sleepSide;
+    const head = 0.08 * drowsy + 0.4 * nod + 0.3 * deep - 0.12 * doze.jerk;
+    pose.add('head', head * upright, 0, 0.18 * side * deep * upright);
+    pose.add('neck', (0.04 * drowsy + 0.14 * nod + 0.12 * deep) * upright, 0, 0.06 * side * deep * upright);
+    pose.add('spine', 0.04 * deep * upright, 0, 0);
+    pose.add('chest', (0.02 * drowsy + 0.05 * deep) * upright, 0, 0);
+    pose.both('Shoulder', 0, 0, -0.04 * (drowsy + deep), upright);
   }
 
   /** Posa pensierosa: mano al mento, l'altra a sostenere il gomito, occhi in alto. */

@@ -56,6 +56,11 @@ contextBridge.exposeInMainWorld('companion', {
   onModel: (callback) => listen('pet:model', callback),
   /** Spotify: `{open, playing, artist, title}`, solo quando cambia. */
   onMusic: (callback) => listen('pet:music', callback),
+  /**
+   * Presenza: `{idle}` (secondi senza mouse ne' tastiera) ogni 5 s, oppure
+   * `{event}` per lock-screen, unlock-screen, suspend, resume.
+   */
+  onPresence: (callback) => listen('pet:presence', callback),
 
   // --- voce -------------------------------------------------------------
   /**

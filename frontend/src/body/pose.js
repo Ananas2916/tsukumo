@@ -44,6 +44,8 @@ export class Pose {
     this.legIK = 0;
     /** Chiusura forzata degli occhi (0..1), oltre al battito di ciglia. */
     this.eyesClosed = 0;
+    /** Bocca aperta senza voce (lo sbadiglio), 0..1: si somma al lip-sync. */
+    this.mouthOpen = 0;
   }
 
   add(bone, x, y, z) {

@@ -27,6 +27,9 @@ Server -> client::
     {"type": "notice" | "error", "message": "...", "source": "llm", "hint": "..."}
     {"type": "pong"}
 
+I versetti ("Hii!" quando saluta) non passano dal WebSocket: il personaggio li
+chiede con ``POST /api/vocal`` e li suona solo lui, senza broadcast.
+
 Il messaggio ``speech`` e' quello che guida il lip-sync: contiene il WAV in
 base64 e la timeline ``[{t, d, v, w}, ...]`` (tempo, durata, viseme, peso).
 """
@@ -63,6 +66,7 @@ from .pipeline import Companion
 from .providers import REGISTRIES, ProviderSpec, describe_all
 from .status import EngineMonitor, llm_entry
 from .tts import build_tts_engine
+from .vocals import EVENTS as VOCAL_EVENTS
 
 logger = logging.getLogger("tsukumo")
 
@@ -205,6 +209,10 @@ class SayRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Testo da pronunciare")
     voice: str | None = Field(None, description="Voce del motore attivo")
     speed: float | None = Field(None, gt=0.25, le=3.0, description="Velocita' di lettura")
+
+
+class VocalRequest(BaseModel):
+    event: str = Field(..., description="greet, morning, evening, night, welcome, pat, poke, lift, fall")
 
 
 class ProviderRequest(BaseModel):
@@ -557,6 +565,25 @@ async def api_chat(request: ChatRequest) -> dict[str, Any]:
     """Turno completo; l'audio viene inviato ai client WebSocket collegati."""
     reply = await companion().chat(request.text, hub.broadcast)
     return {"reply": reply, "clients": hub.count}
+
+
+@app.post("/api/vocal")
+async def api_vocal(request: VocalRequest) -> dict[str, Any]:
+    """Un versetto con la voce in uso, restituito solo a chi lo chiede.
+
+    ``ok: false`` quando e' meglio tacere (muto, sta pensando o parlando) o
+    quando la voce non funziona: un versetto mancato non e' un errore.
+    """
+    if request.event not in VOCAL_EVENTS:
+        raise HTTPException(status_code=400, detail=f"Versetto sconosciuto: {request.event!r}")
+    try:
+        payload = await companion().vocal(request.event)
+    except Exception as exc:
+        logger.debug("Versetto %s non sintetizzato: %s", request.event, exc)
+        return {"ok": False, "reason": describe_error(exc)}
+    if payload is None:
+        return {"ok": False, "reason": "busy"}
+    return {"ok": True, "speech": payload}
 
 
 @app.post("/api/cancel")

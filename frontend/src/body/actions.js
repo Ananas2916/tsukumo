@@ -151,6 +151,28 @@ export const ACTIONS = {
     },
   },
 
+  /** Sbadiglia: mano davanti alla bocca, testa all'indietro, occhi chiusi. Da assonnata. */
+  yawn: {
+    duration: 3.4,
+    modes: ['stand', 'sit'],
+    run(pose, u, w, t, action) {
+      const side = action.sign > 0 ? 'left' : 'right';
+      const s = action.sign;
+      const open = curve(u, [[0, 0], [0.2, 0.35], [0.42, 1], [0.66, 1], [0.86, 0]]) * w;
+      const hand = curve(u, [[0.08, 0], [0.3, 1], [0.72, 1], [0.92, 0]]) * w;
+      // Il bersaglio e' il polso: sotto il mento, cosi' le dita coprono la bocca.
+      pose.reach(side, 'head', [0.02, -0.07, 0.13], [1, -1, -0.2], hand, 0.4);
+      pose.fingers[side] -= 0.5 * hand;
+      pose.add('head', -0.18 * open, 0, 0.07 * s * open);
+      pose.add('neck', -0.06 * open, 0, 0);
+      pose.add('upperChest', -0.04 * open, 0, 0);
+      pose.both('Shoulder', 0, 0, 0.1, open);
+      pose.eyesClosed = Math.max(pose.eyesClosed, 0.95 * open);
+      pose.mouthOpen = Math.max(pose.mouthOpen, 0.85 * open);
+      pose.mood('relaxed', 0.3 * open);
+    },
+  },
+
   /** Saluta con la mano: parte quando il modello compare. */
   wave: {
     duration: 2.9,

@@ -22,7 +22,9 @@ import { readSetting, writeSetting } from './dom.js';
 import { Hud } from './hud.js';
 import { LipSync } from './lipsync.js';
 import { MusicListener } from './music.js';
+import { Presence, SLEEP_LEVEL } from './presence.js';
 import { UI } from './ui.js';
+import { greetingForNow, Vocals } from './vocals.js';
 import { VoiceController } from './voice.js';
 import { VrmStage } from './vrm.js';
 import { CompanionSocket } from './ws.js';
@@ -37,6 +39,8 @@ const player = new SpeechPlayer({
   onClipStart: (payload) => {
     lipSync.setTimeline(payload.visemes);
     stage.startClip(payload);
+    // Una risposta vera la sveglia; un suo versetto no.
+    if (!payload.vocal) presence.touch();
     if (payload.text) ui.showBubble(payload.text, Math.max(2500, payload.duration * 1000 + 1200));
     refreshStatus();
   },
@@ -58,6 +62,10 @@ const state = {
   micLevel: 0,
   dancing: readSetting('dc:dance', true),
   musicPlaying: false,
+  /** Si e' stesa per dormire: al risveglio si rialza. */
+  sleptLying: false,
+  /** Quando e' finito l'ultimo trascinamento: se cade subito dopo, l'hai lanciata. */
+  droppedAt: -Infinity,
 };
 
 const voice = new VoiceController({
@@ -72,6 +80,60 @@ const voice = new VoiceController({
 
 /** Ritmo della musica di Spotify, ascoltando l'audio di sistema (solo Electron). */
 const music = new MusicListener();
+
+/** "Hii!" quando saluta, "Ehehe!" a una carezza: con la voce scelta (vedi vocals.js). */
+const vocals = new Vocals({
+  player,
+  isQuiet: () => state.muted || player.playing || state.backendState !== 'idle',
+});
+
+/** Il PC e' fermo: si assopisce, poi dorme; quando torni ti saluta (vedi presence.js). */
+const presence = new Presence({
+  onChange: (next, { welcome }) => {
+    stage.setSleep(SLEEP_LEVEL[next]);
+    if (next === 'asleep') lieDownToSleep();
+    const stoodUp = next === 'awake' ? getUpFromSleep() : false;
+    if (welcome) {
+      setTimeout(() => {
+        stage.greet();
+        vocals.say('welcome');
+      }, stoodUp ? 1400 : 500);
+    }
+  },
+});
+
+/** Sta facendo qualcosa: niente sonno. */
+function busyForSleep() {
+  return (
+    player.playing ||
+    state.backendState !== 'idle' ||
+    (state.dancing && state.musicPlaying) ||
+    document.body.classList.contains('dragging')
+  );
+}
+
+/** Addormentata sulla barra: si stende sul fianco. Su una finestra resta dov'e'. */
+function lieDownToSleep() {
+  const body = stage.body;
+  if (!pet || !body || body.surface !== 'ground' || !['stand', 'sit'].includes(body.mode)) return;
+  state.sleptLying = true;
+  pet.requestPosture('side');
+}
+
+function getUpFromSleep() {
+  if (!pet || !state.sleptLying) return false;
+  state.sleptLying = false;
+  pet.requestPosture('stand');
+  return true;
+}
+
+/** Le "zeta" del sonno salgono dalla testa, ovunque sia (anche sdraiata). */
+const zzz = document.getElementById('zzz');
+function updateZzz() {
+  const head = stage.body?.asleep ? stage.headScreen() : null;
+  zzz.classList.toggle('hidden', !head);
+  if (head) zzz.style.transform = `translate(${Math.round(head.x + 12)}px, ${Math.round(head.y - 40)}px)`;
+}
 
 hud.setMuted(state.muted);
 
@@ -103,6 +165,7 @@ stage.onFrame((dt) => {
     driver: stage.mouthDriverLabel,
   });
 
+  updateZzz();
   if (pet) updateClickThrough();
   return weights;
 });
@@ -145,8 +208,11 @@ async function loadAvatar(url, label) {
     await stage.load(url, (progress) => ui.showOverlay(`Carico ${label}… ${Math.round(progress * 100)}%`));
     state.avatarLoaded = true;
     ui.hideOverlay();
-    // Appena compare, saluta.
-    setTimeout(() => stage.greet(), 700);
+    // Appena compare, saluta: con la mano e con la voce, adatto all'ora.
+    setTimeout(() => {
+      stage.greet();
+      vocals.say(greetingForNow());
+    }, 700);
     if (stage.mouthDriver.kind === 'none') {
       ui.toast('Il modello non ha le blendshape della bocca: niente lip-sync.', true, 6000);
     }
@@ -520,6 +586,8 @@ if (pet) {
     current.startedAt = performance.now();
     current.offset = stage.beginHold(current.clientX, current.clientY);
     document.body.classList.add('dragging');
+    presence.touch();
+    vocals.say('lift');
     hud.hide();
     pet.dragStart().then((origin) => {
       current.origin = origin;
@@ -548,8 +616,11 @@ if (pet) {
     if (finished.moved) {
       pet.dragEnd();
       stage.endHold();
+      state.droppedAt = performance.now();
     } else {
-      stage.poke(event.clientX, event.clientY);
+      presence.touch();
+      const reaction = stage.poke(event.clientX, event.clientY);
+      if (reaction) vocals.say(reaction === 'pat' ? 'pat' : 'poke');
     }
   });
 
@@ -559,6 +630,8 @@ if (pet) {
     switch (motion.state) {
       case 'falling':
         stage.setFalling();
+        // "Waah!" solo se l'hai lanciata tu, non quando cade all'avvio.
+        if (performance.now() - state.droppedAt < 1500) vocals.say('fall');
         break;
       case 'landed':
         stage.landed(motion.impact, motion.posture);
@@ -582,6 +655,9 @@ if (pet) {
   // Arriva anche quando e' fuori dalla finestra, e lo sguardo lo segue.
   pet.onCursor(({ x, y, inside }) => stage.setPointer(x, y, inside));
 
+  // Da quanto il PC e' fermo, blocco e sblocco dello schermo: sonno e risveglio.
+  pet.onPresence?.((message) => presence.update(message, busyForSleep()));
+
   // Comandi dal pannello.
   pet.onCommand((command) => {
     switch (command?.type) {
@@ -596,6 +672,12 @@ if (pet) {
         break;
       case 'dance':
         setDancing(command.value);
+        break;
+      case 'vocals':
+        vocals.setEnabled(command.value);
+        break;
+      case 'sleep':
+        presence.setEnabled(command.value);
         break;
       case 'play':
         stage.body?.play(command.name, { sign: command.sign });
@@ -649,4 +731,4 @@ setTimeout(() => {
 }, 2500);
 
 // Utile per ispezionare lo stato dalla console.
-window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle };
+window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle, vocals, presence };
