@@ -23,6 +23,7 @@ import { Hud } from './hud.js';
 import { LipSync } from './lipsync.js';
 import { MusicListener } from './music.js';
 import { Presence, SLEEP_LEVEL } from './presence.js';
+import { Sfx } from './sfx.js';
 import { UI } from './ui.js';
 import { greetingForNow, Vocals } from './vocals.js';
 import { VoiceController } from './voice.js';
@@ -82,6 +83,9 @@ const voice = new VoiceController({
 
 /** Ritmo della musica di Spotify, ascoltando l'audio di sistema (solo Electron). */
 const music = new MusicListener();
+
+/** Pop, tonfo, campanello, toc-toc: sintetizzati, mai sopra la bocca (vedi sfx.js). */
+const sfx = new Sfx({ isMuted: () => state.muted });
 
 /** "Hii!" quando saluta, "Ehehe!" a una carezza: con la voce scelta (vedi vocals.js). */
 const vocals = new Vocals({
@@ -212,6 +216,7 @@ async function loadAvatar(url, label) {
     state.avatarLoaded = true;
     ui.hideOverlay();
     // Appena compare, saluta: con la mano e con la voce, adatto all'ora.
+    sfx.pop();
     setTimeout(() => {
       stage.greet();
       vocals.say(greetingForNow());
@@ -376,6 +381,16 @@ socket.on('hello', (message) => {
       );
     }
   }
+});
+
+// Un promemoria o un timer e' scattato: campanello, bussa sul vetro, notifica.
+socket.on('reminder', (message) => {
+  if (message.event !== 'fired') return;
+  presence.touch();
+  sfx.chime();
+  if (!stage.body?.play('knock')) stage.body?.play('wave');
+  const label = message.reminder?.label ?? 'Promemoria';
+  pet?.notify?.('Tsukumo', label);
 });
 
 // Cosa fa l'utente al PC (vedi backend/context.py): guarda un video, e' in riunione...
@@ -644,6 +659,7 @@ if (pet) {
         break;
       case 'landed':
         stage.landed(motion.impact, motion.posture);
+        if (motion.impact > 0.15) sfx.thud(motion.impact);
         break;
       case 'posture':
         stage.setPosture(motion.posture);
@@ -684,6 +700,9 @@ if (pet) {
         break;
       case 'vocals':
         vocals.setEnabled(command.value);
+        break;
+      case 'sfx':
+        sfx.setEnabled(command.value);
         break;
       case 'sleep':
         presence.setEnabled(command.value);
@@ -740,4 +759,4 @@ setTimeout(() => {
 }, 2500);
 
 // Utile per ispezionare lo stato dalla console.
-window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle, vocals, presence };
+window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle, vocals, presence, sfx };

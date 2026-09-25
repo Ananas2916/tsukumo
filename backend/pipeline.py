@@ -15,6 +15,7 @@ import re
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 from .audio import encode_wav_base64
@@ -22,6 +23,7 @@ from .config import Settings
 from .languages import reply_language, short_language, speech_directive
 from .llm import LLMClient, Message, MockLLM, create_llm_client, describe_error
 from .phonemes import phones_for
+from .reminders import ReminderStore, TagFilter, action_directive, command_reply, confirmation, from_tag, parse_request
 from .providers import LLM_REGISTRY
 from .stt import SAMPLE_RATE as STT_SAMPLE_RATE
 from .stt import STTEngine, Transcript, create_stt_engine, from_pcm16
@@ -231,6 +233,10 @@ class Companion:
         self._vocals: dict[tuple[str, str, str], dict[str, Any]] = {}
         #: La voce l'ha scelta qualcuno (.env o pannello): la lingua del sistema non la tocca.
         self.voice_chosen = settings.voice_explicit
+        #: Timer e promemoria (li collega il server). Senza, niente "Alexa".
+        self.reminders: ReminderStore | None = None
+        #: Avvisa il server quando i promemoria cambiano (pannello, pianificatore).
+        self.on_reminders_changed: Callable[[], Awaitable[None]] | None = None
 
     # ------------------------------------------------------------------
     # Motori
@@ -287,8 +293,12 @@ class Companion:
     # ------------------------------------------------------------------
     # API pubblica
     # ------------------------------------------------------------------
-    async def chat(self, text: str, emit: Emit) -> str:
-        """Ciclo completo: cervello in streaming + sintesi frase per frase."""
+    async def chat(self, text: str, emit: Emit, *, hidden: bool = False) -> str:
+        """Ciclo completo: cervello in streaming + sintesi frase per frase.
+
+        ``hidden``: il messaggio non viene dall'utente (un'azione programmata, un
+        commento spontaneo) e non compare in chat; la risposta si'.
+        """
         prompt = (text or "").strip()
         if not prompt:
             return ""
@@ -301,16 +311,26 @@ class Companion:
             self._tts_failed = False
 
             await emit({"type": "state", "value": "thinking", "turn": turn})
-            await emit({"type": "user", "text": prompt, "turn": turn})
+            if not hidden:
+                await emit({"type": "user", "text": prompt, "turn": turn})
+                # Timer e promemoria che si capiscono da soli: risposta immediata.
+                local = await self._local_reply(prompt)
+                if local is not None:
+                    return await self._finish_local(prompt, local, emit, turn, started)
 
             messages = self._build_messages(prompt)
             buffer = ""
             full_reply = ""
             spoken = 0
             failed = False
+            tags = TagFilter()
 
             try:
-                async for piece in self._cancellable(self._stream_with_fallback(messages, emit)):
+                async for raw_piece in self._cancellable(self._stream_with_fallback(messages, emit)):
+                    # Le etichette [[remind ...]] non si leggono ne' si mostrano.
+                    piece = tags.feed(raw_piece)
+                    if not piece:
+                        continue
                     buffer += piece
                     full_reply += piece
                     await emit({"type": "token", "text": piece, "turn": turn})
@@ -324,11 +344,15 @@ class Companion:
                         spoken += await self._speak(head, emit, turn, spoken)
                         sentences = split_sentences(buffer, self.settings.max_sentence_chars)
 
+                tail = tags.flush()
+                buffer += tail
+                full_reply += tail
                 if not self._cancel.is_set():
                     for sentence in split_sentences(buffer, self.settings.max_sentence_chars):
                         spoken += await self._speak(sentence, emit, turn, spoken)
                 if full_reply.strip():
                     self.last_errors.pop("llm", None)
+                await self._schedule_from_tags(tags.tags)
             except Exception as exc:
                 failed = True
                 logger.warning("Turno %s fallito: %s", turn, exc)
@@ -366,6 +390,40 @@ class Companion:
                 await emit({"type": "state", "value": "idle", "turn": turn})
 
             return reply
+
+    async def announce(self, text: str, emit: Emit, event: str = "") -> None:
+        """Dice qualcosa di sua iniziativa (un promemoria, una notifica).
+
+        Rispetta il muto (arriva solo il testo) e compare in chat come un suo
+        messaggio. ``event`` descrive cosa l'ha fatta parlare: entra nella
+        conversazione, cosi' il cervello sa di cosa si parla se rispondi.
+        """
+        async with self._turn_lock:
+            self._cancel.clear()
+            self._turn_id += 1
+            turn = self._turn_id
+            self._tts_failed = False
+            spoken = 0
+            for sentence in split_sentences(text, self.settings.max_sentence_chars):
+                if self._cancel.is_set():
+                    break
+                spoken += await self._speak(sentence, emit, turn, spoken)
+            if event:
+                self.history.append(Message("user", f"({event})"))
+                self.history.append(Message("assistant", clean_for_speech(text)))
+                self._trim_history()
+            await emit(
+                {
+                    "type": "reply",
+                    "text": clean_for_speech(text),
+                    "turn": turn,
+                    "sentences": spoken,
+                    "cancelled": self._cancel.is_set(),
+                    "failed": False,
+                    "proactive": True,
+                }
+            )
+            await emit({"type": "state", "value": "idle", "turn": turn})
 
     # ------------------------------------------------------------------
     async def say(self, text: str, emit: Emit, voice: str | None = None) -> int:
@@ -497,9 +555,12 @@ class Companion:
         # L'ULTIMO messaggio di sistema sono i vincoli del parlato (lingua,
         # testo semplice): gli agenti, che hanno una personalita' propria,
         # ricevono solo quello e non il nostro system prompt.
+        directive = speech_directive(self._reply_language())
+        if self.reminders is not None:
+            directive = f"{directive} {action_directive()}"
         messages = [
             Message("system", self.settings.system_prompt),
-            Message("system", speech_directive(self._reply_language())),
+            Message("system", directive),
         ]
         if not self.llm.stateful:
             # Un agente ricorda da se': rimandargli la cronologia sprecherebbe
@@ -507,6 +568,67 @@ class Companion:
             messages.extend(self.history)
         messages.append(Message("user", prompt))
         return messages
+
+    async def _local_reply(self, prompt: str) -> str | None:
+        """Timer, promemoria, "quanto manca", "annulla il timer": senza cervello."""
+        if self.reminders is None:
+            return None
+        now = datetime.now()
+        command = command_reply(prompt, self.reminders, now)
+        if command is not None:
+            reply, changed = command
+            if changed:
+                await self._reminders_changed()
+            return reply
+        request = parse_request(prompt, now)
+        if request is None:
+            return None
+        reminder = self.reminders.add(request.to_reminder())
+        logger.info("Promemoria (%s) per %s: %r", reminder.kind, datetime.fromtimestamp(reminder.due), reminder.text)
+        await self._reminders_changed()
+        return confirmation(reminder, now)
+
+    async def _finish_local(self, prompt: str, reply: str, emit: Emit, turn: int, started: float) -> str:
+        spoken = 0
+        for sentence in split_sentences(reply, self.settings.max_sentence_chars):
+            spoken += await self._speak(sentence, emit, turn, spoken)
+        self.history.append(Message("user", prompt))
+        self.history.append(Message("assistant", reply))
+        self._trim_history()
+        await emit(
+            {
+                "type": "reply",
+                "text": reply,
+                "turn": turn,
+                "sentences": spoken,
+                "elapsed": round(time.perf_counter() - started, 3),
+                "cancelled": False,
+                "failed": False,
+                "local": True,
+            }
+        )
+        await emit({"type": "state", "value": "idle", "turn": turn})
+        return reply
+
+    async def _schedule_from_tags(self, tags: list[str]) -> None:
+        """Le etichette [[remind ...]] del cervello diventano promemoria veri."""
+        if not tags or self.reminders is None:
+            return
+        added = 0
+        for tag in tags:
+            reminder = from_tag(tag, datetime.now(), self.voice_language)
+            if reminder is None:
+                logger.info("Etichetta del cervello non valida: %s", tag[:200])
+                continue
+            self.reminders.add(reminder)
+            added += 1
+            logger.info("Promemoria dal cervello (%s) per %s: %r", reminder.kind, datetime.fromtimestamp(reminder.due), reminder.text)
+        if added:
+            await self._reminders_changed()
+
+    async def _reminders_changed(self) -> None:
+        if self.on_reminders_changed is not None:
+            await self.on_reminders_changed()
 
     def _trim_history(self) -> None:
         limit = max(2, self.settings.history_turns * 2)

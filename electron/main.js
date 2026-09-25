@@ -21,6 +21,7 @@ const {
   app,
   BrowserWindow,
   Menu,
+  Notification,
   Tray,
   dialog,
   globalShortcut,
@@ -956,6 +957,16 @@ function updateTrayMenu() {
 // ---------------------------------------------------------------------------
 /** Il renderer dice se il cursore e' sopra un pixel opaco del personaggio. */
 ipcMain.on('pet:set-interactive', (_event, value) => applyInteractive(Boolean(value)));
+// Promemoria e notifiche: anche con il personaggio coperto o a schermo intero.
+ipcMain.on('pet:notify', (_event, { title, body } = {}) => {
+  if (!Notification.isSupported()) return;
+  new Notification({
+    title: String(title || APP_NAME),
+    body: String(body || ''),
+    icon: path.join(__dirname, 'icon.ico'),
+    silent: true,
+  }).show();
+});
 
 ipcMain.handle('pet:drag-start', () => {
   physics.grab();

@@ -19,6 +19,8 @@ Server -> client::
     {"type": "voices", "voices": [...], "voice": "..."}  # elenco voci (cambia col motore)
     {"type": "providers", "kind": "llm", "selected": {...}, "settings": {...}}  # motori cambiati
     {"type": "context", "activity": {...}, "present": true, ...}  # cosa fa l'utente al PC
+    {"type": "reminders", "reminders": [...]}  # timer e promemoria in attesa
+    {"type": "reminder", "event": "fired", "reminder": {...}}  # uno e' appena scattato
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "user",   "text": "..."}
     {"type": "token",  "text": "..."}        # streaming del cervello
@@ -46,8 +48,10 @@ import dataclasses
 import importlib.util
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +65,15 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .config import Settings, save_dotenv
 from .context import PCContext
+from .reminders import (
+    MAX_LATE,
+    ReminderStore,
+    announcement,
+    describe,
+    parse_request,
+    task_prompt,
+)
+from .reminders import Reminder as ReminderItem
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
 from .phonemes import VISEME_BLENDSHAPES
@@ -79,6 +92,11 @@ SELECT_KEYS = {"llm": "DC_LLM_BACKEND", "tts": "DC_TTS_ENGINE", "stt": "DC_STT_E
 
 #: Cosa sta facendo l'utente al PC, aggiornato dalla shell Electron (vedi context.py).
 PC = PCContext()
+
+#: Timer e promemoria, salvati in state/reminders.json (vedi reminders.py).
+REMINDERS = ReminderStore(SETTINGS.state_dir / "reminders.json")
+#: Sveglia il pianificatore quando cambia qualcosa (creato nel loop giusto, all'avvio).
+_reminders_wake: asyncio.Event | None = None
 
 #: Cervelli trovati sul PC (vedi ``llm/detect.py``): ``{id: {"found", "detail"}}``.
 #: Si riempie in background poco dopo l'avvio; prima e' vuoto.
@@ -158,7 +176,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Il caricamento dei modelli (Kokoro, Whisper) e' bloccante: in un thread.
     app.state.companion = await asyncio.to_thread(Companion, SETTINGS)
     await monitor.start()
+    _attach(app.state.companion)
     _spawn(_load_voices(app.state.companion), report=False)
+    global _reminders_wake
+    _reminders_wake = asyncio.Event()
+    reminder_task = asyncio.create_task(_reminder_loop(), name="reminders")
     if SETTINGS.detect_engines:
         _spawn(_detect_engines(), report=False)
 
@@ -174,6 +196,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        reminder_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reminder_task
         await monitor.stop()
         await app.state.companion.close()
         logger.info("Tsukumo arrestato")
@@ -214,6 +239,15 @@ class SayRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Testo da pronunciare")
     voice: str | None = Field(None, description="Voce del motore attivo")
     speed: float | None = Field(None, gt=0.25, le=3.0, description="Velocita' di lettura")
+
+
+class ReminderRequest(BaseModel):
+    phrase: str | None = Field(None, description="Richiesta a parole: 'tra 20 minuti ricordami di bere'")
+    kind: str = Field("reminder", description="timer, reminder, alarm, task")
+    text: str = Field("", description="Cosa ricordare o fare")
+    at: str | None = Field(None, description="Quando, in ISO locale: 2026-12-29T12:00")
+    seconds: float | None = Field(None, gt=0, description="Oppure tra quanti secondi")
+    repeat: str = Field("", description="'' oppure 'daily'")
 
 
 class ContextRequest(BaseModel):
@@ -578,6 +612,115 @@ async def api_chat(request: ChatRequest) -> dict[str, Any]:
     return {"reply": reply, "clients": hub.count}
 
 
+# ---------------------------------------------------------------------------
+# Timer e promemoria
+# ---------------------------------------------------------------------------
+def _attach(instance: Companion) -> None:
+    """Collega al companion i promemoria (e l'avviso quando cambiano)."""
+    instance.reminders = REMINDERS
+    instance.on_reminders_changed = _reminders_changed
+
+
+async def _reminders_changed() -> None:
+    if _reminders_wake is not None:
+        _reminders_wake.set()
+    await hub.broadcast({"type": "reminders", "reminders": [item.as_dict() for item in REMINDERS.all()]})
+
+
+async def _reminder_loop() -> None:
+    """Dorme fino al prossimo promemoria (o a un cambio), poi lo fa scattare."""
+    assert _reminders_wake is not None
+    while True:
+        try:
+            await _fire_due_reminders()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - il pianificatore non deve morire
+            logger.exception("Pianificatore dei promemoria")
+        upcoming = REMINDERS.next_due()
+        delay = 30.0 if upcoming is None else min(30.0, max(0.05, upcoming - time.time()))
+        _reminders_wake.clear()
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(_reminders_wake.wait(), delay)
+
+
+async def _fire_due_reminders(now: float | None = None) -> list[ReminderItem]:
+    now = time.time() if now is None else now
+    fired: list[ReminderItem] = []
+    for reminder in REMINDERS.due(now):
+        late = now - reminder.due
+        REMINDERS.done(reminder, now)
+        if late > MAX_LATE:
+            logger.info("Promemoria troppo vecchio, lo salto: %s", describe(reminder))
+            continue
+        fired.append(reminder)
+        logger.info("Scatta: %s", describe(reminder))
+        await hub.broadcast({"type": "reminder", "event": "fired", "reminder": reminder.as_dict(), "late": round(late)})
+        instance = _current()
+        if instance is None:
+            continue
+        if reminder.kind == "task":
+            _spawn(instance.chat(task_prompt(reminder), hub.broadcast, hidden=True))
+        else:
+            _spawn(instance.announce(announcement(reminder, late), hub.broadcast, event=f"Promemoria scattato: {describe(reminder)}"))
+    if fired:
+        await hub.broadcast({"type": "reminders", "reminders": [item.as_dict() for item in REMINDERS.all()]})
+    return fired
+
+
+@app.get("/api/reminders")
+async def list_reminders() -> dict[str, Any]:
+    return {"reminders": [item.as_dict() for item in REMINDERS.all()]}
+
+
+@app.post("/api/reminders")
+async def add_reminder(request: ReminderRequest) -> dict[str, Any]:
+    """Un promemoria dal pannello: a parole (``phrase``) o con i campi."""
+    if request.phrase:
+        parsed = parse_request(request.phrase)
+        if parsed is None:
+            raise HTTPException(status_code=400, detail="Non ho capito quando: prova con 'tra 20 minuti' o 'domani alle 9'.")
+        reminder = parsed.to_reminder()
+    else:
+        if request.kind not in ("timer", "reminder", "alarm", "task"):
+            raise HTTPException(status_code=400, detail=f"Tipo sconosciuto: {request.kind!r}")
+        if request.seconds:
+            due = time.time() + request.seconds
+        elif request.at:
+            try:
+                due = datetime.fromisoformat(request.at).timestamp()
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=f"Data non valida: {request.at!r}") from exc
+        else:
+            raise HTTPException(status_code=400, detail="Serve 'at' o 'seconds'.")
+        if due <= time.time():
+            raise HTTPException(status_code=400, detail="Quell'ora è già passata.")
+        instance = _current()
+        reminder = ReminderItem(
+            kind=request.kind,
+            due=due,
+            text=request.text.strip(),
+            repeat="daily" if request.repeat == "daily" else "",
+            duration=(request.seconds or 0.0) if request.kind == "timer" else 0.0,
+            language="it" if (instance.voice_language if instance else "it") == "it" else "en",
+        )
+    REMINDERS.add(reminder)
+    await _reminders_changed()
+    return {"ok": True, "reminder": reminder.as_dict()}
+
+
+@app.delete("/api/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: str) -> dict[str, Any]:
+    removed = REMINDERS.remove(reminder_id)
+    if removed is None:
+        raise HTTPException(status_code=404, detail="Promemoria non trovato")
+    await _reminders_changed()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Contesto del PC
+# ---------------------------------------------------------------------------
 @app.post("/api/context")
 async def set_context(request: ContextRequest) -> dict[str, Any]:
     """La shell dice cosa sta facendo l'utente; i client lo sanno solo se cambia."""
@@ -669,6 +812,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "engines": monitor.status,
                 "avatar": _avatar_info(),
                 "context": PC.as_dict(),
+                "reminders": [item.as_dict() for item in REMINDERS.all()],
             }
         )
 

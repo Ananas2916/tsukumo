@@ -18,6 +18,7 @@ import { wsUrl } from './config.js';
 import { el, iconButton, readSetting, writeSetting } from './dom.js';
 import { EnginesView } from './engines.js';
 import { icon } from './icons.js';
+import { AgendaView } from './panel/agenda.js';
 import { CharacterView } from './panel/character.js';
 import { ChatView } from './panel/chat.js';
 import { CompanionSocket } from './ws.js';
@@ -28,6 +29,7 @@ const $ = (id) => document.getElementById(id);
 const TABS = [
   { id: 'chat', label: 'Chat', icon: 'chat' },
   { id: 'character', label: 'Personaggio', icon: 'character' },
+  { id: 'agenda', label: 'Agenda', icon: 'clock' },
   { id: 'engines', label: 'Motori', icon: 'engines' },
 ];
 
@@ -81,6 +83,7 @@ for (const tab of TABS) {
 const views = {
   chat: new ChatView(app, $('view-chat')),
   character: new CharacterView(app, $('view-character')),
+  agenda: new AgendaView(app, $('view-agenda')),
   engines: new EnginesView(app, $('view-engines')),
 };
 

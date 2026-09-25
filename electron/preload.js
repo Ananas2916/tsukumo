@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld('companion', {
    * `{event}` per lock-screen, unlock-screen, suspend, resume.
    */
   onPresence: (callback) => listen('pet:presence', callback),
+  /** Notifica di sistema (promemoria scattato, un agente che ha finito). */
+  notify: (title, body) => ipcRenderer.send('pet:notify', { title, body }),
 
   // --- voce -------------------------------------------------------------
   /**
