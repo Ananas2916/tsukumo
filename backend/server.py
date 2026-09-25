@@ -17,6 +17,7 @@ Server -> client::
     {"type": "hello",  "config": {...}, "voices": [...], "engines": {...}}
     {"type": "engines", "llm": {...}, "tts": {...}, "stt": {...}}   # stato dei motori
     {"type": "voices", "voices": [...], "voice": "..."}  # elenco voci (cambia col motore)
+    {"type": "providers", "kind": "llm", "selected": {...}, "settings": {...}}  # motori cambiati
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "user",   "text": "..."}
     {"type": "token",  "text": "..."}        # streaming del cervello
@@ -56,6 +57,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .config import Settings, save_dotenv
 from .llm import create_llm_client, describe_error
+from .llm.detect import candidates, detect_all
 from .phonemes import VISEME_BLENDSHAPES
 from .pipeline import Companion
 from .providers import REGISTRIES, ProviderSpec, describe_all
@@ -68,6 +70,10 @@ SETTINGS = Settings.from_env()
 
 #: Variabile d'ambiente che dice quale motore e' attivo, per tipo.
 SELECT_KEYS = {"llm": "DC_LLM_BACKEND", "tts": "DC_TTS_ENGINE", "stt": "DC_STT_ENGINE"}
+
+#: Cervelli trovati sul PC (vedi ``llm/detect.py``): ``{id: {"found", "detail"}}``.
+#: Si riempie in background poco dopo l'avvio; prima e' vuoto.
+DETECTED: dict[str, dict[str, Any]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +150,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.companion = await asyncio.to_thread(Companion, SETTINGS)
     await monitor.start()
     _spawn(_load_voices(app.state.companion), report=False)
+    if SETTINGS.detect_engines:
+        _spawn(_detect_engines(), report=False)
 
     companion = app.state.companion
     logger.info(
@@ -259,6 +267,7 @@ async def providers() -> dict[str, Any]:
         "options": {kind: SETTINGS.provider_public(kind) for kind in REGISTRIES},
         "saved": {kind: _saved_options(kind) for kind in REGISTRIES},
         "status": monitor.status,
+        "detected": {"llm": DETECTED},
     }
 
 
@@ -408,8 +417,6 @@ async def set_provider(request: ProviderRequest) -> dict[str, Any]:
     ripristiniamo i valori precedenti e rispondiamo con il motivo, invece di
     lasciare il companion in uno stato a meta'.
     """
-    global SETTINGS
-
     kind = request.kind
     spec = _spec_or_400(kind, request.provider)
     options = _request_options(spec, request.options)
@@ -430,27 +437,87 @@ async def set_provider(request: ProviderRequest) -> dict[str, Any]:
         logger.warning("Cambio di %s a %r fallito: %s", kind, spec.id, exc)
         return {"ok": False, "error": describe_error(exc), "kind": kind, "provider": spec.id}
 
-    SETTINGS = new_settings
-    await _close_engine(old)
+    await _engine_changed(kind, instance, new_settings, old)
     logger.info("Motore %s cambiato in %r", kind, spec.id)
-
-    monitor.poke()
-    if kind == "tts":
-        _spawn(_load_voices(instance), report=False)
-    await hub.broadcast(
-        {
-            "type": "providers",
-            "kind": kind,
-            "selected": {k: SETTINGS.selected(k) for k in REGISTRIES},
-            "settings": instance.current_settings(),
-        }
-    )
     return {
         "ok": True,
         "kind": kind,
         "provider": spec.id,
         "options": SETTINGS.provider_public(kind),
     }
+
+
+async def _engine_changed(kind: str, instance: Companion, new_settings: Settings, old: object | None) -> None:
+    """Dopo un cambio di motore riuscito: nuove impostazioni, vecchio chiuso, client avvisati."""
+    global SETTINGS
+
+    SETTINGS = new_settings
+    await _close_engine(old)
+    monitor.poke()
+    if kind == "tts":
+        _spawn(_load_voices(instance), report=False)
+    await _announce_providers(kind, instance)
+
+
+async def _announce_providers(kind: str, instance: Companion | None) -> None:
+    """Il pannello rilegge ``/api/providers`` quando riceve questo messaggio."""
+    await hub.broadcast(
+        {
+            "type": "providers",
+            "kind": kind,
+            "selected": {k: SETTINGS.selected(k) for k in REGISTRIES},
+            "settings": instance.current_settings() if instance is not None else {},
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Riconoscimento dei cervelli installati
+# ---------------------------------------------------------------------------
+def _llm_chosen() -> bool:
+    """Qualcuno ha scelto il cervello: nel .env, nell'ambiente o dal pannello."""
+    return bool(os.environ.get(SELECT_KEYS["llm"], "").strip())
+
+
+async def _detect_engines() -> None:
+    """Cerca i cervelli sul PC; se nessuno ne ha scelto uno, usa il primo trovato."""
+    global DETECTED
+
+    DETECTED = await detect_all(lambda provider: SETTINGS.provider_config("llm", provider))
+    found = candidates(DETECTED)
+    logger.info("Cervelli trovati sul PC: %s", ", ".join(found) or "nessuno")
+    if await _auto_select_llm(found) is None:
+        # Nessun cambio: il pannello deve comunque vedere i badge.
+        await _announce_providers("llm", _current())
+
+
+async def _auto_select_llm(found: list[str]) -> str | None:
+    """Mette in uso il primo cervello trovato e lo salva nel .env.
+
+    Non tocca mai una scelta esplicita. Se un motore trovato non parte (per
+    esempio OpenClaw acceso ma senza token) prova il successivo. Il turno in
+    corso non viene interrotto: si aspetta che finisca.
+    """
+    instance = _current()
+    if instance is None:
+        return None
+    for provider in found:
+        if _llm_chosen():
+            return None
+        new_settings = dataclasses.replace(SETTINGS, llm_backend=provider)
+        async with instance._turn_lock:
+            if _llm_chosen():  # scelto dal pannello mentre aspettavamo
+                return None
+            try:
+                old = await asyncio.to_thread(instance.replace_engine, "llm", new_settings)
+            except Exception as exc:
+                logger.info("%s c'e' ma non parte: %s", provider, describe_error(exc))
+                continue
+            save_dotenv({SELECT_KEYS["llm"]: provider})
+        await _engine_changed("llm", instance, new_settings, old)
+        logger.info("Cervello scelto in automatico: %s (salvato nel .env)", provider)
+        return provider
+    return None
 
 
 async def _close_engine(engine: object | None) -> None:

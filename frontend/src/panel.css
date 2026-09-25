@@ -1323,6 +1323,10 @@ textarea.field-input {
   display: inline-grid;
 }
 
+.engine-row-text strong .badge {
+  font-weight: 500;
+}
+
 .chevron {
   color: var(--muted);
 }

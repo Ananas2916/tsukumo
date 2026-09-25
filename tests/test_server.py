@@ -3,19 +3,10 @@
 import asyncio
 import time
 
-import pytest
-from fastapi.testclient import TestClient
-
 from backend import server
 from backend.config import save_dotenv
 from backend.llm.openclaw import OpenClawClient
 from backend.providers import REGISTRIES
-
-
-@pytest.fixture(scope="module")
-def client():
-    with TestClient(server.app) as test_client:
-        yield test_client
 
 
 def test_health_is_instant_even_if_the_brain_hangs(client):

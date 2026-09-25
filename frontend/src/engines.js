@@ -219,7 +219,7 @@ export class EnginesView {
       el(
         'span',
         { class: 'engine-row-text' },
-        el('strong', {}, spec.label, spec.recommended ? el('span', { class: 'star', title: 'Consigliato' }, icon('star', 12)) : null),
+        el('strong', {}, spec.label, spec.recommended ? el('span', { class: 'star', title: 'Consigliato' }, icon('star', 12)) : null, isOpen ? null : this._foundBadge(spec)),
         el('small', {}, spec.tagline),
       ),
       el('span', { class: 'chevron' }, icon(isOpen ? 'chevronDown' : 'chevronRight', 16)),
@@ -245,11 +245,19 @@ export class EnginesView {
     return el('span', { class: `engine-avatar cat-${spec.category}` }, icon(glyph, 18));
   }
 
+  /** "Trovato sul PC": il backend ha visto il programma o il servizio acceso. */
+  _foundBadge(spec) {
+    const found = this.data?.detected?.[this.section]?.[spec.id];
+    if (!found?.found) return null;
+    return el('span', { class: 'badge ok', title: found.detail || null }, icon('check', 12), 'Trovato sul PC');
+  }
+
   _badges(spec) {
     const price = PRICING[spec.pricing] ?? PRICING.free;
     return el(
       'div',
       { class: 'badges' },
+      this._foundBadge(spec),
       spec.recommended ? el('span', { class: 'badge accent' }, icon('star', 12), 'Consigliato') : null,
       el('span', { class: `badge ${price.tone}` }, icon(price.icon, 12), price.label),
       el('span', { class: 'badge' }, icon(spec.local ? 'laptop' : 'cloud', 12), spec.local ? 'Sul tuo PC' : 'Passa da internet'),

@@ -151,6 +151,18 @@ scheda con costo, requisiti, campi da compilare e un tasto **Verifica** che
 prova la configurazione *prima* di attivarla. Le scelte finiscono in `.env`,
 quindi si possono anche scrivere a mano.
 
+**Al primo avvio sceglie da solo.** Poco dopo la partenza il backend cerca, in
+background, i cervelli già presenti sul PC: Claude Code e Codex cercando il
+programma (senza lanciarlo), OpenClaw, Ollama e LM Studio con una richiesta
+HTTP da un secondo (`/health` del Gateway, `127.0.0.1:11434/api/tags`,
+`127.0.0.1:1234/v1/models`). Nella scheda Motori quelli trovati hanno il badge
+**Trovato sul PC**. Se `DC_LLM_BACKEND` non è scritto né nel `.env` né
+nell'ambiente, Tsukumo usa il primo trovato in quest'ordine — `claude_code`,
+`codex`, `openclaw`, `ollama`, `openai` — e lo salva nel `.env`; se uno non
+parte (OpenClaw acceso ma senza token, per esempio) prova il successivo. Una
+scelta esplicita non viene mai toccata. `DC_DETECT_ENGINES=0` spegne la
+ricerca.
+
 **Agenti.** Un agente ha memoria e strumenti propri: Tsukumo gli passa solo
 l'ultimo messaggio (più le regole del parlato: lingua della voce, niente
 markdown) e legge ad alta voce la sua risposta. La conversazione continua fra
@@ -527,7 +539,7 @@ usa direttamente le variabili d'ambiente (hanno la precedenza sul file).
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
 | `DC_HOST` / `DC_PORT` | `127.0.0.1` / `8770` | indirizzo del backend |
-| `DC_LLM_BACKEND` | `ollama` | il cervello: `claude_code`, `codex`, `openclaw`, `hermes`, `command`, `openai` (LM Studio e affini), `ollama`, `anthropic`, `gemini`, `groq`, `openrouter`, `deepseek`, `mistral`, `together`, `mock` |
+| `DC_LLM_BACKEND` | primo trovato, altrimenti `ollama` | il cervello: `claude_code`, `codex`, `openclaw`, `hermes`, `command`, `openai` (LM Studio e affini), `ollama`, `anthropic`, `gemini`, `groq`, `openrouter`, `deepseek`, `mistral`, `together`, `mock` |
 | `DC_OLLAMA_URL` | `http://127.0.0.1:11434` | endpoint di Ollama |
 | `DC_OLLAMA_MODEL` | `llama3.2` | modello da usare con Ollama |
 | `DC_OPENAI_BASE_URL` | `http://127.0.0.1:1234/v1` | endpoint stile OpenAI (default di LM Studio) |
@@ -542,6 +554,7 @@ usa direttamente le variabili d'ambiente (hanno la precedenza sul file).
 | `DC_AGENT_COMMAND` | *(vuoto)* | il comando dell'agente generico, con `{prompt}` |
 | `DC_LLM_FALLBACK` | `0` | se il cervello non risponde, rispondi con il mock invece di mostrare l'errore |
 | `DC_STATUS_INTERVAL` | `10` | secondi fra un controllo dei motori e l'altro |
+| `DC_DETECT_ENGINES` | `1` | all'avvio cerca i cervelli installati (badge "Trovato sul PC"; sceglie il primo se `DC_LLM_BACKEND` manca) |
 | `DC_SYSTEM_PROMPT` | vedi `config.py` | personalità (solo per i modelli: gli agenti hanno la loro) |
 | `DC_HISTORY_TURNS` | `12` | turni di conversazione ricordati (gli agenti ricordano da sé) |
 | `DC_TTS_ENGINE` | `kokoro` | `kokoro`, `kokoro_http`, `piper`, `system`, `elevenlabs`, `openai_tts`, `azure`, `google_tts`, `cartesia`, `edge`, `formant` |
@@ -758,7 +771,7 @@ due finestre, entrambe mostrano lo stesso avatar parlare.
 | `GET` | `/api/health` | vivo? Risponde sempre subito, con l'ultimo stato noto dei motori |
 | `GET` | `/api/status` | stato dei motori, forzando un controllo |
 | `GET` | `/api/config` | configurazione pubblica e mappa delle blendshape |
-| `GET` | `/api/providers` | tutti i motori con i loro schemi, quelli attivi, i valori salvati (segreti mascherati) |
+| `GET` | `/api/providers` | tutti i motori con i loro schemi, quelli attivi, i valori salvati (segreti mascherati) e quelli trovati sul PC (`detected`) |
 | `POST` | `/api/providers/check` | prova un motore con dei valori, **senza** attivarlo |
 | `POST` | `/api/providers` | attiva un motore (salva in `.env`, ripristina se fallisce) |
 | `GET` | `/api/voices` | voci del motore attivo, con lingua e genere |
@@ -801,7 +814,7 @@ desk-companion/
 │   ├── visemes.py         # allineamento fonemi <-> energia dell'audio
 │   ├── llm/               # cli_agents.py (Claude Code, Codex, comando), openclaw.py,
 │   │                      # openai_compatible.py (LM Studio, cloud, Hermes), ollama.py,
-│   │                      # anthropic.py, gemini.py, mock.py
+│   │                      # anthropic.py, gemini.py, mock.py, detect.py (chi c'è sul PC)
 │   ├── tts/               # kokoro_engine.py, kokoro_http.py, elevenlabs.py,
 │   │                      # cloud.py (OpenAI, Azure, Google, Cartesia), edge.py, piper.py,
 │   │                      # system.py, formant.py

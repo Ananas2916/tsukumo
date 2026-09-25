@@ -12,6 +12,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -26,6 +28,23 @@ os.environ.update(
         "DC_LLM_FALLBACK": "0",
         "DC_TTS_FALLBACK": "1",
         "DC_STATUS_INTERVAL": "60",
+        # Niente ricerca dei motori installati: sonde vere e .env vero.
+        "DC_DETECT_ENGINES": "0",
         "DC_LOG_LEVEL": "warning",
     }
 )
+
+
+@pytest.fixture(scope="session")
+def client():
+    """Un solo avvio del server per tutti i test, come nel processo vero.
+
+    Il monitor dei motori e' globale e lega i suoi Event al primo event loop:
+    un secondo TestClient (un altro loop) lo romperebbe.
+    """
+    from fastapi.testclient import TestClient
+
+    from backend import server
+
+    with TestClient(server.app) as test_client:
+        yield test_client
