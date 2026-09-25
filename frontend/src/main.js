@@ -66,6 +66,8 @@ const state = {
   sleptLying: false,
   /** Quando e' finito l'ultimo trascinamento: se cade subito dopo, l'hai lanciata. */
   droppedAt: -Infinity,
+  /** Attivita' dell'utente dal backend: `{kind, label, detail, dnd, watching}`. */
+  activity: null,
 };
 
 const voice = new VoiceController({
@@ -102,9 +104,10 @@ const presence = new Presence({
   },
 });
 
-/** Sta facendo qualcosa: niente sonno. */
+/** Sta facendo qualcosa lei, o l'utente sta guardando un video: niente sonno. */
 function busyForSleep() {
   return (
+    Boolean(state.activity?.watching) ||
     player.playing ||
     state.backendState !== 'idle' ||
     (state.dancing && state.musicPlaying) ||
@@ -344,6 +347,7 @@ socket.on('close', () => {
 socket.on('hello', (message) => {
   refreshStatus();
   const config = message.config ?? {};
+  if (message.context) state.activity = message.context.activity ?? null;
   hud.setEngines(message.engines);
   voice.setWakeWord(config.wakeWord ?? 'companion');
   voice.interruptOnSpeech = config.voiceInterrupt !== false;
@@ -372,6 +376,11 @@ socket.on('hello', (message) => {
       );
     }
   }
+});
+
+// Cosa fa l'utente al PC (vedi backend/context.py): guarda un video, e' in riunione...
+socket.on('context', (message) => {
+  state.activity = message.activity ?? null;
 });
 
 socket.on('engines', (message) => {

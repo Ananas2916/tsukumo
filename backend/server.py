@@ -18,6 +18,7 @@ Server -> client::
     {"type": "engines", "llm": {...}, "tts": {...}, "stt": {...}}   # stato dei motori
     {"type": "voices", "voices": [...], "voice": "..."}  # elenco voci (cambia col motore)
     {"type": "providers", "kind": "llm", "selected": {...}, "settings": {...}}  # motori cambiati
+    {"type": "context", "activity": {...}, "present": true, ...}  # cosa fa l'utente al PC
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "user",   "text": "..."}
     {"type": "token",  "text": "..."}        # streaming del cervello
@@ -59,6 +60,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .config import Settings, save_dotenv
+from .context import PCContext
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
 from .phonemes import VISEME_BLENDSHAPES
@@ -74,6 +76,9 @@ SETTINGS = Settings.from_env()
 
 #: Variabile d'ambiente che dice quale motore e' attivo, per tipo.
 SELECT_KEYS = {"llm": "DC_LLM_BACKEND", "tts": "DC_TTS_ENGINE", "stt": "DC_STT_ENGINE"}
+
+#: Cosa sta facendo l'utente al PC, aggiornato dalla shell Electron (vedi context.py).
+PC = PCContext()
 
 #: Cervelli trovati sul PC (vedi ``llm/detect.py``): ``{id: {"found", "detail"}}``.
 #: Si riempie in background poco dopo l'avvio; prima e' vuoto.
@@ -209,6 +214,12 @@ class SayRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Testo da pronunciare")
     voice: str | None = Field(None, description="Voce del motore attivo")
     speed: float | None = Field(None, gt=0.25, le=3.0, description="Velocita' di lettura")
+
+
+class ContextRequest(BaseModel):
+    idle: float = Field(0, ge=0, description="Secondi senza mouse ne' tastiera")
+    locked: bool = Field(False, description="Schermo bloccato")
+    app: dict[str, Any] | None = Field(None, description="Finestra in primo piano: title, exe, fullscreen, own")
 
 
 class VocalRequest(BaseModel):
@@ -567,6 +578,26 @@ async def api_chat(request: ChatRequest) -> dict[str, Any]:
     return {"reply": reply, "clients": hub.count}
 
 
+@app.post("/api/context")
+async def set_context(request: ContextRequest) -> dict[str, Any]:
+    """La shell dice cosa sta facendo l'utente; i client lo sanno solo se cambia."""
+    if PC.update(request.idle, request.locked, request.app):
+        activity = PC.activity
+        logger.info(
+            "Attivita': %s%s%s",
+            activity.kind,
+            f" ({activity.label})" if activity.label else "",
+            " a schermo intero" if activity.fullscreen else "",
+        )
+        await hub.broadcast(PC.as_dict())
+    return {"ok": True, "activity": PC.activity.as_dict()}
+
+
+@app.get("/api/context")
+async def get_context() -> dict[str, Any]:
+    return PC.as_dict()
+
+
 @app.post("/api/vocal")
 async def api_vocal(request: VocalRequest) -> dict[str, Any]:
     """Un versetto con la voce in uso, restituito solo a chi lo chiede.
@@ -637,6 +668,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "voices": instance.voice_list or [],
                 "engines": monitor.status,
                 "avatar": _avatar_info(),
+                "context": PC.as_dict(),
             }
         )
 

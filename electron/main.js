@@ -536,15 +536,46 @@ function sendToPanel(channel, payload) {
 // ---------------------------------------------------------------------------
 // Presenza: da quanto nessuno tocca mouse e tastiera, schermo bloccato
 // ---------------------------------------------------------------------------
-/** Secondi senza input: il personaggio si assopisce e poi dorme (presence.js). */
+let screenLocked = false;
+/** Il backend risponde: da li' in poi gli mandiamo anche il contesto. */
+let backendUp = false;
+
+/**
+ * Ogni pochi secondi: da quanto il PC e' fermo (al personaggio, per il sonno)
+ * e cosa sta facendo l'utente (al backend, per commenti e "non disturbare").
+ */
 function pollPresence() {
-  sendToPet('pet:presence', { idle: powerMonitor.getSystemIdleTime() });
+  const idle = powerMonitor.getSystemIdleTime();
+  sendToPet('pet:presence', { idle });
+  if (backendUp) pushContext(idle);
+}
+
+async function pushContext(idle) {
+  const payload = {
+    idle,
+    locked: screenLocked,
+    app: desktop.foregroundWindow(ownHandles()),
+  };
+  try {
+    await fetch(`${BACKEND_URL}/api/context`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(2000),
+    });
+  } catch {
+    /* backend riavviato o occupato: riproviamo al prossimo giro */
+  }
 }
 
 function watchPresence() {
   // Sblocco dello schermo e ritorno dalla sospensione: si sveglia e saluta.
   for (const event of ['lock-screen', 'unlock-screen', 'suspend', 'resume']) {
-    powerMonitor.on(event, () => sendToPet('pet:presence', { event }));
+    powerMonitor.on(event, () => {
+      if (event === 'lock-screen') screenLocked = true;
+      if (event === 'unlock-screen') screenLocked = false;
+      sendToPet('pet:presence', { event });
+    });
   }
   setInterval(pollPresence, PRESENCE_POLL_MS);
 }
@@ -1104,6 +1135,7 @@ if (!app.requestSingleInstanceLock()) {
       showBackendError(backend);
       return;
     }
+    backendUp = true;
     loadApp(petWindow, petUrl());
     createPanelWindow();
   });
