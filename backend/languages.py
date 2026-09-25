@@ -7,9 +7,18 @@ incomprensibile. Ogni motore TTS sa dire che lingua parla una sua voce
 (``af_heart`` = American female, ``if_sara`` = Italian female...), quelle
 Microsoft e Google col prefisso (``it-IT-...``), le voci multilingua di
 ElevenLabs e OpenAI non ne hanno una sola.
+
+Se nessuno ha scelto una voce, il companion parla la lingua del sistema
+operativo: con Windows in italiano la voce predefinita e' italiana, e di
+conseguenza anche le risposte, i versetti e i commenti.
 """
 
 from __future__ import annotations
+
+import locale
+import os
+import re
+import sys
 
 # Prima lettera della voce Kokoro -> (codice per il phonemizer, nome in inglese).
 _VOICE_PREFIX = {
@@ -88,6 +97,71 @@ def language_name(code: str | None) -> str | None:
         return None
     lowered = code.strip().lower()
     return _NAMES.get(lowered) or _ALIASES.get(lowered) or _ALIASES.get(lowered.split("-")[0])
+
+
+#: Voce Kokoro consigliata per lingua (la migliore del catalogo, femminile
+#: come la predefinita ``af_heart``).
+KOKORO_DEFAULTS = {
+    "en": "af_heart",
+    "it": "if_sara",
+    "es": "ef_dora",
+    "fr": "ff_siwis",
+    "ja": "jf_alpha",
+    "zh": "zf_xiaobei",
+    "pt": "pf_dora",
+    "hi": "hf_alpha",
+}
+
+#: Nomi di lingua che ``locale`` puo' restituire su Windows ("Italian_Italy").
+_ENGLISH_NAMES = {name.lower(): code for code, name in _ALIASES.items() if len(code) == 2}
+_ENGLISH_NAMES.update({"chinese": "zh", "portuguese": "pt"})
+
+
+def short_language(code: str | None) -> str:
+    """``it-IT``, ``it_IT.UTF-8``, ``Italian_Italy``, ``cmn`` -> ``it``/``zh``; ``""`` se non si capisce."""
+    if not code:
+        return ""
+    head = re.split(r"[-_.@ ]", code.strip().lower(), maxsplit=1)[0]
+    if head in ("cmn", "yue"):
+        return "zh"
+    if head in ("c", "posix"):
+        return ""
+    if len(head) == 2 and head.isalpha():
+        return head
+    return _ENGLISH_NAMES.get(head, "")
+
+
+def system_language() -> str:
+    """La lingua dell'interfaccia del sistema operativo, come codice corto (``it``).
+
+    ``DC_SYSTEM_LANGUAGE`` la forza. Su Windows si legge la lingua di
+    visualizzazione dell'utente; altrove le variabili ``LANG``/``LC_*``.
+    Se non si capisce: inglese.
+    """
+    forced = short_language(os.environ.get("DC_SYSTEM_LANGUAGE"))
+    if forced:
+        return forced
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            buffer = ctypes.create_unicode_buffer(85)
+            if kernel32.LCIDToLocaleName(kernel32.GetUserDefaultUILanguage(), buffer, 85, 0):
+                found = short_language(buffer.value)
+                if found:
+                    return found
+        except Exception:  # pragma: no cover - dipende dal sistema
+            pass
+    for variable in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+        found = short_language(os.environ.get(variable))
+        if found:
+            return found
+    try:
+        found = short_language(locale.getlocale()[0])
+    except ValueError:  # pragma: no cover
+        found = ""
+    return found or "en"
 
 
 def reply_language(setting: str | None, voice_code: str | None) -> str | None:

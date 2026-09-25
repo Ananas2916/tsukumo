@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from ..languages import kokoro_voice_info
+from ..languages import KOKORO_DEFAULTS, kokoro_voice_info, short_language
 
 
 @dataclass
@@ -126,6 +126,31 @@ class TTSEngine(ABC):
         if "multilingual" in (voice or "").lower():
             return None
         return locale_language(voice) or None
+
+    def voice_for_language(self, language: str, catalog: list[VoiceInfo] | None = None) -> str | None:
+        """Una voce di questo motore che parla ``language`` (``it``), o ``None``.
+
+        Serve a partire nella lingua del sistema quando nessuno ha scelto una
+        voce. Se la predefinita parla gia' quella lingua, o e' multilingua,
+        resta lei. Fra le candidate si preferisce la voce consigliata (Kokoro),
+        poi una dello stesso genere della predefinita.
+        """
+        code = short_language(language)
+        if not code:
+            return None
+        if self.default_voice and short_language(self.language_of(self.default_voice) or code) == code:
+            return self.default_voice
+        voices = catalog if catalog is not None else self.voice_catalog()
+        ids = {voice.id for voice in voices}
+        preferred = KOKORO_DEFAULTS.get(code)
+        if preferred in ids:
+            return preferred
+        matches = [voice for voice in voices if short_language(voice.language) == code]
+        if not matches:
+            return None
+        default_gender = next((voice.gender for voice in voices if voice.id == self.default_voice), "")
+        matches.sort(key=lambda voice: voice.gender != default_gender)
+        return matches[0].id
 
     def resolve_voice(self, requested: str | None) -> str:
         """La voce richiesta se questo motore la conosce, altrimenti la sua predefinita.

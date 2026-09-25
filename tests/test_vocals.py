@@ -5,6 +5,7 @@ import random
 import pytest
 
 from backend import server
+from backend.tts.base import VoiceInfo
 from backend.vocals import EVENTS, LINES, language_key, vocal_line
 
 
@@ -66,3 +67,19 @@ def test_vocal_stays_quiet_when_muted_and_rejects_unknown_events(client, monkeyp
     monkeypatch.setattr(instance, "muted", True)
     assert client.post("/api/vocal", json={"event": "greet"}).json() == {"ok": False, "reason": "busy"}
     assert client.post("/api/vocal", json={"event": "sing"}).status_code == 400
+
+
+def test_without_a_chosen_voice_the_system_language_picks_it(client, monkeypatch):
+    instance = server.app.state.companion
+    catalog = [VoiceInfo(id="af_heart", language="en", gender="female"), VoiceInfo(id="if_sara", language="it", gender="female")]
+    monkeypatch.setattr(instance.tts, "voice_catalog", lambda: catalog)
+    monkeypatch.setattr(instance.tts, "default_voice", "af_heart", raising=False)
+    monkeypatch.setattr(instance.settings, "system_language", "it")
+    monkeypatch.setattr(instance, "voice", "af_heart")
+    monkeypatch.setattr(instance, "voice_chosen", False)
+    client.portal.call(instance.load_voices)
+    assert instance.voice == "if_sara"
+    # Una voce scelta dal pannello vince, anche se le voci si ricaricano dopo.
+    instance.update_settings(voice="af_heart")
+    client.portal.call(instance.load_voices)
+    assert instance.voice == "af_heart"

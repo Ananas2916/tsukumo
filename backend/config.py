@@ -14,6 +14,7 @@ from typing import Any
 
 from . import __version__
 from . import provider_specs  # noqa: F401  (l'import popola i registri)
+from .languages import system_language
 from .providers import REGISTRIES
 
 # Root del progetto: .../desk-companion
@@ -186,6 +187,11 @@ class Settings:
     kokoro_voices_path: Path = ROOT / "models" / "voices-v1.0.bin"
     kokoro_http_url: str = "http://127.0.0.1:8880"
     voice: str = "af_heart"
+    #: ``DC_VOICE`` e' scritto nel .env o nell'ambiente: vince sulla lingua del sistema.
+    voice_explicit: bool = False
+    #: Lingua dell'interfaccia del sistema operativo (``it``): se nessuno ha
+    #: scelto una voce, si parte con una voce in questa lingua.
+    system_language: str = "en"
     speech_speed: float = 1.0
     # Lingua del phonemizer se la voce non la dice gia' col suo nome.
     language: str = "en-us"
@@ -262,6 +268,8 @@ class Settings:
             kokoro_voices_path=_env_path("KOKORO_VOICES", ROOT / "models" / "voices-v1.0.bin"),
             kokoro_http_url=_env("KOKORO_HTTP_URL", "http://127.0.0.1:8880").rstrip("/"),
             voice=_env("VOICE", "af_heart"),
+            voice_explicit=bool(os.environ.get("DC_VOICE", "").strip()),
+            system_language=system_language(),
             speech_speed=_env_float("SPEED", 1.0),
             language=_env("LANGUAGE", "en-us"),
             reply_language=_env("REPLY_LANGUAGE", "auto"),
@@ -335,6 +343,7 @@ class Settings:
             "voice": self.voice,
             "speed": self.speech_speed,
             "language": self.language,
+            "systemLanguage": self.system_language,
             "replyLanguage": self.reply_language,
             "visemeGain": self.viseme_gain,
             "sttEngine": self.stt_engine,

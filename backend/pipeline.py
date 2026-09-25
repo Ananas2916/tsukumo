@@ -19,7 +19,7 @@ from typing import Any
 
 from .audio import encode_wav_base64
 from .config import Settings
-from .languages import reply_language, speech_directive
+from .languages import reply_language, short_language, speech_directive
 from .llm import LLMClient, Message, MockLLM, create_llm_client, describe_error
 from .phonemes import phones_for
 from .providers import LLM_REGISTRY
@@ -229,6 +229,8 @@ class Companion:
         self.voice_list: list[dict[str, Any]] | None = None
         #: Versetti gia' sintetizzati, per (motore, voce, frase): vedi vocal().
         self._vocals: dict[tuple[str, str, str], dict[str, Any]] = {}
+        #: La voce l'ha scelta qualcuno (.env o pannello): la lingua del sistema non la tocca.
+        self.voice_chosen = settings.voice_explicit
 
     # ------------------------------------------------------------------
     # Motori
@@ -239,9 +241,17 @@ class Companion:
         return spec.label if spec else self.llm.name
 
     async def load_voices(self) -> list[dict[str, Any]]:
-        """Carica (in un thread: puo' fare rete) l'elenco delle voci del motore."""
+        """Carica (in un thread: puo' fare rete) l'elenco delle voci del motore.
+
+        Se nessuno ha scelto una voce, sceglie quella nella lingua del sistema.
+        """
         catalog = await asyncio.to_thread(self.tts.voice_catalog)
         self.voice_list = [voice.as_dict() for voice in catalog]
+        if not self.voice_chosen:
+            picked = self.tts.voice_for_language(self.settings.system_language, catalog)
+            if picked and picked != self.voice:
+                logger.info("Lingua del sistema %r: parlo con la voce %s", self.settings.system_language, picked)
+                self.voice = picked
         return self.voice_list
 
     def replace_engine(self, kind: str, settings: Settings) -> object | None:
@@ -264,6 +274,7 @@ class Companion:
             self.voice = new_tts.default_voice or settings.voice
             self.voice_list = None
             self._vocals.clear()
+            self.voice_chosen = settings.voice_explicit
             self.last_errors.pop("tts", None)
         elif kind == "stt":
             old, self.stt = self.stt, create_stt_engine(settings)
@@ -389,7 +400,7 @@ class Companion:
         if self.muted or self._turn_lock.locked():
             return None
         voice = self.voice
-        text = vocal_line(event, self.tts.language_of(voice))
+        text = vocal_line(event, self.voice_language)
         key = (self.tts.name, voice, text)
         payload = self._vocals.get(key)
         if payload is None:
@@ -426,6 +437,7 @@ class Companion:
             if resolved != voice:
                 logger.warning("Voce %r non disponibile per %s: uso %r", voice, self.tts.name, resolved)
             self.voice = resolved
+            self.voice_chosen = True
         if reply_language:
             self.reply_language = reply_language
         if muted is not None:
@@ -455,8 +467,13 @@ class Companion:
             "muted": self.muted,
         }
 
+    @property
+    def voice_language(self) -> str:
+        """Lingua della voce in uso; per una voce multilingua, quella del sistema."""
+        return short_language(self.tts.language_of(self.voice)) or self.settings.system_language
+
     def _reply_language(self) -> str | None:
-        return reply_language(self.reply_language, self.tts.language_of(self.voice))
+        return reply_language(self.reply_language, self.voice_language)
 
     def cancel(self) -> None:
         """Interrompe il turno in corso, anche mentre l'agente sta ancora pensando."""
