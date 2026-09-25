@@ -1,9 +1,9 @@
 """Registro dei provider (LLM, TTS, STT) e dei loro schemi di configurazione.
 
 Ogni provider si descrive da solo: come si chiama, cosa gli serve per
-funzionare e che tipo e' ogni campo. Il frontend legge questi schemi da
-``GET /api/providers`` e **disegna il pannello da solo**, quindi aggiungere un
-motore nuovo non richiede di toccare una riga di interfaccia.
+funzionare, quanto costa e che tipo e' ogni campo. Il frontend legge questi
+schemi da ``GET /api/providers`` e **disegna il pannello da solo**, quindi
+aggiungere un motore nuovo non richiede di toccare una riga di interfaccia.
 
 E' anche l'unico posto dove sta scritto quale variabile d'ambiente corrisponde
 a quale campo, cosi' ``.env`` e pannello non possono divergere.
@@ -11,13 +11,25 @@ a quale campo, cosi' ``.env`` e pannello non possono divergere.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 Kind = Literal["llm", "tts", "stt"]
 
 #: Tipi di campo che il pannello sa disegnare.
-FieldType = Literal["text", "password", "url", "number", "bool", "select"]
+FieldType = Literal["text", "password", "url", "number", "bool", "select", "textarea"]
+
+#: Famiglie in cui il pannello raggruppa i motori.
+#:  - ``agent``: un agente vero, con memoria e strumenti suoi (OpenClaw,
+#:    Claude Code, Codex, Hermes...). Il companion ne e' la voce e la faccia.
+#:  - ``local``: un modello o una voce che gira sul tuo computer.
+#:  - ``cloud``: un servizio in rete, di solito con una chiave API.
+#:  - ``test``: motori di servizio per provare la catena senza installare nulla.
+Category = Literal["agent", "local", "cloud", "test"]
+
+#: Quanto costa usarlo: ``free`` (gratis), ``freemium`` (piano gratuito, poi a
+#: consumo), ``paid`` (a consumo), ``subscription`` (incluso in un abbonamento).
+Pricing = Literal["free", "freemium", "paid", "subscription"]
 
 
 @dataclass(frozen=True)
@@ -35,6 +47,11 @@ class ProviderField:
     secret: bool = False
     #: Solo per ``type="select"``: ``[{"value": ..., "label": ...}, ...]``.
     options: tuple[dict[str, str], ...] = ()
+    #: Le opzioni arrivano dal motore stesso dopo una verifica (es. ``voices``:
+    #: le voci del tuo account ElevenLabs). Il campo resta scrivibile a mano.
+    source: str = ""
+    #: Campo per chi sa cosa sta facendo: il pannello lo nasconde sotto "Avanzate".
+    advanced: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -50,8 +67,14 @@ class ProviderSpec:
     label: str
     kind: Kind
     description: str = ""
+    #: Una riga sola, per la scheda chiusa nel pannello.
+    tagline: str = ""
     #: Gira interamente in locale, senza chiavi ne' rete verso terzi.
     local: bool = True
+    category: Category = "local"
+    pricing: Pricing = "free"
+    #: Da proporre per primo a chi non sa cosa scegliere.
+    recommended: bool = False
     #: Nomi alternativi accettati in ``DC_*_BACKEND`` per retrocompatibilita'.
     aliases: tuple[str, ...] = ()
     fields: tuple[ProviderField, ...] = ()
@@ -59,6 +82,8 @@ class ProviderSpec:
     requires: tuple[str, ...] = ()
     #: L'engine espone un elenco di voci selezionabili (solo TTS).
     has_voices: bool = False
+    #: Dove si crea la chiave o si scarica il programma.
+    docs: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -66,9 +91,14 @@ class ProviderSpec:
             "label": self.label,
             "kind": self.kind,
             "description": self.description,
+            "tagline": self.tagline or self.description,
             "local": self.local,
+            "category": self.category,
+            "pricing": self.pricing,
+            "recommended": self.recommended,
             "requires": list(self.requires),
             "hasVoices": self.has_voices,
+            "docs": self.docs,
             "fields": [f.as_dict() for f in self.fields],
         }
 

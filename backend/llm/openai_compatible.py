@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from .base import LLMClient, Message
+from .base import LLMClient, Message, describe_error
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,14 @@ class OpenAICompatibleClient(LLMClient):
         temperature: float = 0.7,
         api_key: str | None = None,
         timeout: float = 120.0,
+        name: str | None = None,
+        hint: str | None = None,
     ) -> None:
+        # Lo stesso client serve LM Studio, i servizi cloud e Hermes: il nome
+        # dice al pannello quale dei tre sta rispondendo.
+        if name:
+            self.name = name
+        self._hint = hint
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.temperature = temperature
@@ -125,11 +132,9 @@ class OpenAICompatibleClient(LLMClient):
                 "backend": self.name,
                 "ok": False,
                 "model": self.model,
-                "error": str(exc),
-                "hint": (
-                    "Avvia il server locale (es. LM Studio: tab 'Developer' -> Start Server) "
-                    "oppure usa DC_LLM_BACKEND=mock"
-                ),
+                "error": describe_error(exc),
+                "hint": self._hint
+                or "Avvia il server locale (es. LM Studio: tab 'Developer' -> Start Server)",
             }
 
         if not models:

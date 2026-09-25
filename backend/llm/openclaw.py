@@ -34,10 +34,11 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import websockets
 from websockets.asyncio.client import ClientConnection
 
-from .base import LLMClient, Message
+from .base import LLMClient, Message, describe_error, with_directive
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class OpenClawClient(LLMClient):
     """
 
     name = "openclaw"
+    stateful = True
 
     def __init__(
         self,
@@ -68,8 +70,9 @@ class OpenClawClient(LLMClient):
         session_state_path: Path | None = None,
         connect_timeout: float = 10.0,
     ) -> None:
-        # Il monitor della spia usa http://; qui serve ws:// sullo stesso host.
-        self.ws_url = gateway_url.replace("http://", "ws://").replace("https://", "wss://")
+        # Le sonde di stato usano http://; la chat serve ws:// sullo stesso host.
+        self.http_url = gateway_url.rstrip("/").replace("ws://", "http://").replace("wss://", "https://")
+        self.ws_url = self.http_url.replace("http://", "ws://").replace("https://", "wss://")
         self.token = token
         self.agent_id = agent_id
         self.session_state_path = session_state_path
@@ -232,7 +235,7 @@ class OpenClawClient(LLMClient):
                 raise
             fallback_label = f"{label} ({uuid.uuid4().hex[:6]})"
             logger.warning(
-                "Etichetta sessione %r gia' occupata (probabile residuo di un test "
+                "Etichetta sessione %r già occupata (probabile residuo di un test "
                 "precedente): uso %r",
                 label,
                 fallback_label,
@@ -272,20 +275,18 @@ class OpenClawClient(LLMClient):
         rimandare tutta la cronologia locale (come fanno gli altri backend
         stateless) sarebbe ridondante e sprecherebbe contesto.
         """
-        user_turns = [m for m in messages if m.role == "user"]
-        if not user_turns:
+        if not any(m.role == "user" for m in messages):
             return
-        text = user_turns[-1].content
         # L'agente ha la sua personalita' e non vede il nostro system prompt:
         # gli passiamo solo i vincoli del parlato (lingua della voce, niente
-        # emoji), cioe' l'ultimo messaggio di sistema, davanti al messaggio.
-        # Senza, risponde nella lingua in cui scrivi anche se la voce e'
-        # inglese, e la risposta diventa incomprensibile.
-        directive = next((m.content for m in reversed(messages) if m.role == "system"), "")
-        if directive:
-            text = f"[{directive}]\n\n{text}"
+        # emoji) davanti al messaggio. Senza, risponde nella lingua in cui
+        # scrivi anche se la voce e' inglese, e diventa incomprensibile.
+        text = with_directive(messages)
 
-        await self._ensure_connected()
+        try:
+            await self._ensure_connected()
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise OpenClawError(f"Gateway OpenClaw non raggiungibile ({describe_error(exc)})") from exc
         session_key = await self._ensure_session()
 
         # Svuota eventuali eventi di chat rimasti da un turno precedente
@@ -345,7 +346,8 @@ class OpenClawClient(LLMClient):
                     yield text
 
             if state == "error":
-                raise OpenClawError(payload.get("errorMessage") or "Il turno OpenClaw e' fallito")
+                reason = payload.get("errorMessage") or "turno fallito"
+                raise OpenClawError(f"L'agente OpenClaw ha risposto con un errore: {reason}")
             if state in _TERMINAL_STATES:
                 return
 
@@ -368,24 +370,45 @@ class OpenClawClient(LLMClient):
 
     # ------------------------------------------------------------------
     async def health(self) -> dict[str, Any]:
+        """Stato del Gateway con le sue sonde HTTP, senza aprire la chat.
+
+        Prima qui si apriva la connessione WebSocket e la sessione: con il
+        Gateway spento ogni controllo costava due secondi e si metteva in coda
+        agli altri, cosi' /api/health restava appeso per minuti e la shell
+        Electron dava il backend per morto all'avvio.
+
+        ``/health`` dice se il server e' vivo, ``/readyz`` se e' pronto (canali
+        configurati compresi): acceso ma non pronto vale "degraded".
+        """
+        base = {"backend": self.name, "model": self.agent_id, "session": self._session_key}
         try:
-            await self._ensure_connected()
-            await self._ensure_session()
-        except Exception as exc:
+            # Su Windows una porta chiusa rifiuta dopo ~2 s (ritenta il SYN):
+            # con un connect piu' corto sembrerebbe un timeout, non un "spento".
+            async with httpx.AsyncClient(timeout=httpx.Timeout(3.0, connect=3.0)) as client:
+                alive = await client.get(f"{self.http_url}/health")
+                if alive.status_code >= 400:
+                    return {**base, "ok": False, "error": f"Il Gateway risponde {alive.status_code}"}
+                ready = await client.get(f"{self.http_url}/readyz")
+        except httpx.HTTPError as exc:
+            off = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
             return {
-                "backend": self.name,
+                **base,
                 "ok": False,
-                "model": self.agent_id,
-                "error": str(exc),
-                "hint": "Controlla che il Gateway OpenClaw sia acceso (openclaw gateway status)",
+                "error": "Gateway OpenClaw spento" if off else describe_error(exc),
+                "hint": "Avvialo con: openclaw gateway start",
             }
-        return {
-            "backend": self.name,
-            "ok": True,
-            "model": self.agent_id,
-            "sessionKey": self._session_key,
-            "hint": None,
-        }
+
+        if ready.status_code < 400:
+            return {**base, "ok": True}
+        try:
+            detail = ready.json()
+        except ValueError:
+            detail = {}
+        reason = detail.get("pendingReason") or detail.get("status") or "non pronto"
+        failing = detail.get("failing")
+        if failing:
+            reason = f"{reason}: {', '.join(str(item) for item in failing)}"
+        return {**base, "ok": True, "degraded": True, "error": str(reason)}
 
     async def close(self) -> None:
         self._closing = True

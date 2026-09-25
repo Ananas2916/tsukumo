@@ -1,4 +1,4 @@
-"""Configurazione centralizzata del Desk Companion.
+"""Configurazione centralizzata di Tsukumo.
 
 Ogni parametro puo' essere sovrascritto tramite variabile d'ambiente con
 prefisso ``DC_`` (es. ``DC_PORT=9000``) oppure scrivendo un file ``.env``
@@ -136,7 +136,7 @@ def _collect_provider_options() -> dict[str, str]:
 # La lingua della risposta non sta qui: la aggiunge il pipeline a ogni turno
 # (vedi languages.speech_directive), cosi' segue la voce scelta.
 DEFAULT_SYSTEM_PROMPT = (
-    "You are Desk Companion, a small 3D character living on the user's desktop. "
+    "You are Tsukumo, a small 3D character living on the user's desktop. "
     "You are warm, concise and a little playful. Reply with at most three short "
     "sentences of plain text: no markdown, no bullet points, no emoji, no code "
     "blocks, because everything you write is read aloud by a speech synthesizer."
@@ -171,7 +171,10 @@ class Settings:
     temperature: float = 0.7
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     history_turns: int = 12
-    llm_fallback_to_mock: bool = True
+    # Se il cervello non risponde, rispondere con frasi preconfezionate
+    # nasconde il problema ("Ciao! Che si fa oggi?" al posto di un errore):
+    # di default si mostra l'errore, con il motivo e come rimediare.
+    llm_fallback_to_mock: bool = False
 
     # --- TTS --------------------------------------------------------------
     # "kokoro"      = kokoro-onnx in-process (default, tutto locale)
@@ -207,20 +210,13 @@ class Settings:
     # Interrompi la voce del companion se l'utente inizia a parlare.
     voice_interrupt: bool = True
 
-    # --- OpenClaw -----------------------------------------------------------
-    # Spia verde/rossa: il Gateway OpenClaw e' raggiungibile?
-    openclaw_enabled: bool = True
-    openclaw_url: str = "http://127.0.0.1:18789"
-    openclaw_interval: float = 5.0
-
-    # Usato solo se DC_LLM_BACKEND=openclaw: il companion diventa la voce e la
-    # faccia del tuo agente OpenClaw vero (memoria, personalita' e tool inclusi).
-    openclaw_agent_id: str = "main"
-    # Vuoto = leggi da ~/.openclaw/openclaw.json (gateway.auth.token).
-    openclaw_token: str = ""
-    # Dove salvare la sessionKey della conversazione persistente col companion,
-    # cosi' sopravvive ai riavvii del backend invece di ripartire da zero.
-    openclaw_session_state: Path = ROOT / "state" / "openclaw_session.json"
+    # --- Stato dei motori ---------------------------------------------------
+    # Ogni quanti secondi controllare che cervello e voce rispondano (la spia
+    # nel pannello e gli anelli accanto al personaggio).
+    status_interval: float = 10.0
+    # Sessioni degli agenti (OpenClaw, Claude Code, Codex): sopravvivono ai
+    # riavvii, cosi' la conversazione riprende da dove era rimasta.
+    state_dir: Path = ROOT / "state"
 
     # --- Lip-sync ---------------------------------------------------------
     viseme_gain: float = 1.15
@@ -256,7 +252,7 @@ class Settings:
             temperature=_env_float("TEMPERATURE", 0.7),
             system_prompt=_env("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT),
             history_turns=_env_int("HISTORY_TURNS", 12),
-            llm_fallback_to_mock=_env_bool("LLM_FALLBACK", True),
+            llm_fallback_to_mock=_env_bool("LLM_FALLBACK", False),
             tts_engine=_env("TTS_ENGINE", "kokoro").lower(),
             tts_fallback_to_formant=_env_bool("TTS_FALLBACK", True),
             kokoro_model_path=_env_path("KOKORO_MODEL", ROOT / "models" / "kokoro-v1.0.onnx"),
@@ -274,12 +270,8 @@ class Settings:
             vad_silence=_env_float("VAD_SILENCE", 0.8),
             vad_threshold=_env_float("VAD_THRESHOLD", 0.02),
             voice_interrupt=_env_bool("VOICE_INTERRUPT", True),
-            openclaw_enabled=_env_bool("OPENCLAW_ENABLED", True),
-            openclaw_url=_env("OPENCLAW_URL", "http://127.0.0.1:18789").rstrip("/"),
-            openclaw_interval=_env_float("OPENCLAW_INTERVAL", 5.0),
-            openclaw_agent_id=_env("OPENCLAW_AGENT_ID", "main"),
-            openclaw_token=_env("OPENCLAW_TOKEN", ""),
-            openclaw_session_state=_env_path("OPENCLAW_SESSION_STATE", ROOT / "state" / "openclaw_session.json"),
+            status_interval=_env_float("STATUS_INTERVAL", 10.0),
+            state_dir=_env_path("STATE_DIR", ROOT / "state"),
             viseme_gain=_env_float("VISEME_GAIN", 1.15),
             viseme_silence_threshold=_env_float("VISEME_SILENCE", 0.07),
             viseme_hop=_env_float("VISEME_HOP", 0.01),
@@ -341,7 +333,6 @@ class Settings:
             "language": self.language,
             "replyLanguage": self.reply_language,
             "visemeGain": self.viseme_gain,
-            "openclawEnabled": self.openclaw_enabled,
             "sttEngine": self.stt_engine,
             "voiceMode": self.voice_mode,
             "pushToTalkKey": self.push_to_talk_key,
@@ -355,4 +346,5 @@ class Settings:
                 "stt": self.provider_public("stt"),
             },
             "version": __version__,
+            "app": "tsukumo",
         }

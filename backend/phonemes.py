@@ -389,3 +389,30 @@ def phone_from_symbol(symbol: str) -> Phone:
         if phone is not None:
             return phone.scaled(1.6) if lengthened else phone
     return Phone("e", 0.45, 0.22)
+
+
+def phones_for_letters(
+    characters: list[str], starts: list[float], ends: list[float]
+) -> list[tuple[Phone, float, float]]:
+    """Tempi per lettera (ElevenLabs ``with-timestamps``) -> tempi per fonema.
+
+    Una lettera non e' un fonema, ma con il suo intervallo esatto basta la
+    tabella del G2P euristico per avere una bocca a tempo quanto quella di
+    Kokoro: il difetto dell'euristica e' indovinare le durate, non i suoni.
+    """
+    result: list[tuple[Phone, float, float]] = []
+    for char, start, end in zip(characters, starts, ends):
+        decomposed = unicodedata.normalize("NFD", char or "").lower()
+        letter = "".join(c for c in decomposed if not unicodedata.combining(c))
+        if not letter or letter.isspace():
+            phone = _PAUSE_SHORT
+        elif letter in _PUNCT_PAUSES:
+            phone = _PUNCT_PAUSES[letter]
+        elif letter.isdigit():
+            phone = _IPA_TABLE["a"]
+        else:
+            phone = _LETTER_TABLE.get(letter)
+            if phone is None:
+                continue
+        result.append((phone, float(start), float(end)))
+    return result

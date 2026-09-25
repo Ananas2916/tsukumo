@@ -84,5 +84,5 @@ def create_stt_engine(settings: Settings) -> STTEngine | None:
         raise ValueError(f"Motore STT sconosciuto: {settings.stt_engine!r}")
     except Exception as exc:
         logger.error("Riconoscimento vocale '%s' non disponibile: %s", engine, exc)
-        logger.warning("L'input vocale resta spento; si puo' comunque scrivere.")
+        logger.warning("L'input vocale resta spento; si può comunque scrivere.")
         return None

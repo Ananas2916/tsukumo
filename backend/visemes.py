@@ -26,6 +26,7 @@ decina di millisecondi la bocca resta sincronizzata con il volume percepito.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -62,7 +63,7 @@ def build_timeline(
     sample_rate: int,
     phones: list[Phone],
     *,
-    timings: list[tuple[str, float, float]] | None = None,
+    timings: list[tuple[Any, float, float]] | None = None,
     gain: float = 1.15,
     silence_threshold: float = 0.07,
     hop_s: float = 0.01,
@@ -98,7 +99,7 @@ def build_timeline(
 # Percorso preferito: tempi esatti forniti dal modello
 # --------------------------------------------------------------------------
 def _from_timings(
-    timings: list[tuple[str, float, float]],
+    timings: list[tuple[Any, float, float]],
     envelope: np.ndarray,
     hop_s: float,
     gain: float,
@@ -112,7 +113,8 @@ def _from_timings(
         if end - start <= 1e-4:
             continue
 
-        phone = phone_from_symbol(symbol)
+        # Kokoro da' simboli IPA; ElevenLabs lettere gia' tradotte in Phone.
+        phone = symbol if isinstance(symbol, Phone) else phone_from_symbol(symbol)
         weight = 0.0
         if phone.viseme != "sil":
             # L'energia reale del tratto decide quanto aprire la bocca.

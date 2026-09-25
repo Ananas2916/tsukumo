@@ -1,4 +1,4 @@
-# --- Desk Companion - dipendenze Python ---------------------------------
+# --- Tsukumo - dipendenze Python ---------------------------------
 # Installazione:  pip install -r requirements.txt
 
 # Server / API
@@ -27,12 +27,15 @@ onnxruntime>=1.18
 # tutto locale (Ollama o LM Studio + Kokoro). Installa solo la riga del motore
 # che vuoi usare davvero — il pannello ti dice quale manca quando lo selezioni.
 #
-#   anthropic>=0.40        # LLM: modelli Claude
+#   anthropic>=0.40        # LLM: modelli Claude via API
 #   edge-tts>=6.1          # TTS: voci neurali di Microsoft Edge, senza chiave
+#   soundfile>=0.12        # TTS: serve a Edge TTS per leggere l'MP3
 #   piper-tts>=1.2         # TTS: sintesi locale leggera
 #   pyttsx3>=2.90          # TTS: voci gia' installate nel sistema operativo
 #   faster-whisper>=1.0    # STT: riconoscimento vocale locale (push-to-talk)
 #   sounddevice>=0.4       # STT: cattura dal microfono
 #
-# Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together ed ElevenLabs non
-# richiedono nulla: passano da httpx, che c'e' gia'.
+# Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together, Hermes, ElevenLabs,
+# OpenAI TTS, Azure, Google Cloud TTS e Cartesia non richiedono nulla:
+# passano da httpx, che c'e' gia'. Claude Code e Codex sono programmi a parte:
+# il companion li lancia, non li importa.

@@ -1,4 +1,4 @@
-"""Factory dei client LLM."""
+"""Factory dei client LLM e degli agenti."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path
 
 from ..config import Settings
 from ..providers import LLM_REGISTRY
-from .base import LLMClient, Message
+from .base import LLMClient, Message, describe_error
+from .cli_agents import ClaudeCodeClient, CodexClient, CommandAgentClient
 from .mock import MockLLM
 from .ollama import OllamaClient
 from .openai_compatible import OpenAICompatibleClient
@@ -23,7 +24,11 @@ __all__ = [
     "OllamaClient",
     "OpenAICompatibleClient",
     "OpenClawClient",
+    "ClaudeCodeClient",
+    "CodexClient",
+    "CommandAgentClient",
     "create_llm_client",
+    "describe_error",
 ]
 
 #: Percorso di default del file di configurazione di OpenClaw sull'account
@@ -53,20 +58,29 @@ def _read_openclaw_token() -> str:
 _OPENAI_COMPATIBLE_CLOUD = {"groq", "openrouter", "deepseek", "mistral", "together"}
 
 
-def create_llm_client(settings: Settings) -> LLMClient:
-    """Istanzia il backend LLM indicato da ``DC_LLM_BACKEND``.
+def _number(value: object, default: float) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def create_llm_client(settings: Settings, backend: str | None = None) -> LLMClient:
+    """Istanzia il motore indicato da ``DC_LLM_BACKEND`` (o da ``backend``).
 
     Il nome viene normalizzato dal registro dei provider, quindi gli alias
     storici (``lmstudio``, ``claude``, ``offline``, ...) continuano a valere.
     """
-    backend = LLM_REGISTRY.resolve(settings.llm_backend) or (settings.llm_backend or "ollama").lower()
+    requested = backend or settings.llm_backend
+    backend = LLM_REGISTRY.resolve(requested) or (requested or "ollama").lower()
+    options = settings.provider_config("llm", backend)
+    state = settings.state_dir
 
     if backend == "mock":
         logger.info("Backend LLM: mock (offline)")
         return MockLLM()
 
     if backend in _OPENAI_COMPATIBLE_CLOUD:
-        options = settings.provider_config("llm", backend)
         prefix = backend.upper()
         api_key = str(options.get(f"{prefix}_API_KEY", "") or "")
         if not api_key:
@@ -80,15 +94,15 @@ def create_llm_client(settings: Settings) -> LLMClient:
         return OpenAICompatibleClient(
             base_url=base_url,
             model=model,
-            temperature=float(options.get("TEMPERATURE", settings.temperature)),
+            temperature=_number(options.get("TEMPERATURE"), settings.temperature),
             api_key=api_key,
             timeout=settings.openai_timeout,
+            name=backend,
         )
 
     if backend == "anthropic":
         from .anthropic import AnthropicClient
 
-        options = settings.provider_config("llm", "anthropic")
         api_key = str(options.get("ANTHROPIC_API_KEY", "") or "")
         if not api_key:
             raise RuntimeError(
@@ -98,16 +112,14 @@ def create_llm_client(settings: Settings) -> LLMClient:
         logger.info("Backend LLM: anthropic (%s)", options.get("ANTHROPIC_MODEL"))
         return AnthropicClient(
             api_key=api_key,
-            model=str(options.get("ANTHROPIC_MODEL", "")),
+            model=str(options.get("ANTHROPIC_MODEL") or "claude-opus-5"),
             base_url=str(options.get("ANTHROPIC_BASE_URL", "")).rstrip("/"),
-            max_tokens=int(float(options.get("ANTHROPIC_MAX_TOKENS", 1024))),
-            temperature=float(options.get("TEMPERATURE", settings.temperature)),
+            max_tokens=int(_number(options.get("ANTHROPIC_MAX_TOKENS"), 1024)),
         )
 
     if backend == "gemini":
         from .gemini import GeminiClient
 
-        options = settings.provider_config("llm", "gemini")
         api_key = str(options.get("GEMINI_API_KEY", "") or "")
         if not api_key:
             raise RuntimeError(
@@ -119,49 +131,100 @@ def create_llm_client(settings: Settings) -> LLMClient:
             api_key=api_key,
             model=str(options.get("GEMINI_MODEL", "")),
             base_url=str(options.get("GEMINI_BASE_URL", "")).rstrip("/"),
-            temperature=float(options.get("TEMPERATURE", settings.temperature)),
+            temperature=_number(options.get("TEMPERATURE"), settings.temperature),
         )
 
     if backend == "ollama":
-        logger.info("Backend LLM: ollama (%s @ %s)", settings.ollama_model, settings.ollama_url)
+        url = str(options.get("OLLAMA_URL") or settings.ollama_url).rstrip("/")
+        model = str(options.get("OLLAMA_MODEL") or settings.ollama_model)
+        logger.info("Backend LLM: ollama (%s @ %s)", model, url)
         return OllamaClient(
-            base_url=settings.ollama_url,
-            model=settings.ollama_model,
-            temperature=settings.temperature,
-            timeout=settings.ollama_timeout,
+            base_url=url,
+            model=model,
+            temperature=_number(options.get("TEMPERATURE"), settings.temperature),
+            timeout=_number(options.get("OLLAMA_TIMEOUT"), settings.ollama_timeout),
         )
 
     if backend == "openai":
         # LM Studio, llama.cpp server, vLLM: gli alias li ha gia' normalizzati
         # il registro, e parlano tutti la stessa API.
-        logger.info(
-            "Backend LLM: openai-compatible (%s @ %s)",
-            settings.openai_model,
-            settings.openai_base_url,
-        )
+        url = str(options.get("OPENAI_BASE_URL") or settings.openai_base_url).rstrip("/")
+        model = str(options.get("OPENAI_MODEL") or settings.openai_model)
+        logger.info("Backend LLM: openai-compatible (%s @ %s)", model, url)
         return OpenAICompatibleClient(
-            base_url=settings.openai_base_url,
-            model=settings.openai_model,
+            base_url=url,
+            model=model,
+            temperature=_number(options.get("TEMPERATURE"), settings.temperature),
+            api_key=str(options.get("OPENAI_API_KEY") or "") or None,
+            timeout=_number(options.get("OPENAI_TIMEOUT"), settings.openai_timeout),
+        )
+
+    if backend == "hermes":
+        # Hermes Agent con l'API server attivo parla /v1/chat/completions: per
+        # il companion e' un server OpenAI come gli altri.
+        base_url = str(options.get("HERMES_BASE_URL") or "http://127.0.0.1:8642/v1").rstrip("/")
+        logger.info("Backend LLM: Hermes Agent @ %s", base_url)
+        return OpenAICompatibleClient(
+            base_url=base_url,
+            model=str(options.get("HERMES_MODEL") or "hermes-agent"),
             temperature=settings.temperature,
-            api_key=settings.openai_api_key or None,
-            timeout=settings.openai_timeout,
+            api_key=str(options.get("HERMES_API_KEY") or "") or None,
+            timeout=_number(options.get("HERMES_TIMEOUT"), 300.0),
+            name="hermes",
+            hint="Avvia Hermes con l'API server attivo: API_SERVER_ENABLED=true, poi `hermes gateway`.",
         )
 
     if backend == "openclaw":
-        token = settings.openclaw_token or _read_openclaw_token()
+        token = str(options.get("OPENCLAW_TOKEN") or "") or _read_openclaw_token()
         if not token:
             raise RuntimeError(
                 "Token OpenClaw non trovato. Imposta DC_OPENCLAW_TOKEN oppure "
                 f"assicurati che {_DEFAULT_OPENCLAW_CONFIG} contenga gateway.auth.token."
             )
-        logger.info(
-            "Backend LLM: openclaw (agente %r @ %s)", settings.openclaw_agent_id, settings.openclaw_url
-        )
+        url = str(options.get("OPENCLAW_URL") or "http://127.0.0.1:18789")
+        agent = str(options.get("OPENCLAW_AGENT_ID") or "main")
+        logger.info("Backend LLM: openclaw (agente %r @ %s)", agent, url)
         return OpenClawClient(
-            gateway_url=settings.openclaw_url,
+            gateway_url=url,
             token=token,
-            agent_id=settings.openclaw_agent_id,
-            session_state_path=settings.openclaw_session_state,
+            agent_id=agent,
+            session_state_path=state / "openclaw_session.json",
         )
 
-    raise ValueError(f"Backend LLM sconosciuto: {settings.llm_backend!r}")
+    if backend == "claude_code":
+        client = ClaudeCodeClient(
+            command=str(options.get("CLAUDE_CODE_COMMAND") or "claude"),
+            model=str(options.get("CLAUDE_CODE_MODEL") or ""),
+            cwd=str(options.get("CLAUDE_CODE_CWD") or ""),
+            allowed_tools=str(options.get("CLAUDE_CODE_TOOLS") or ""),
+            permission_mode=str(options.get("CLAUDE_CODE_PERMISSION") or "default"),
+            timeout=_number(options.get("CLAUDE_CODE_TIMEOUT"), 300.0),
+            session_path=state / "claude_code_session.json",
+        )
+        logger.info("Backend LLM: Claude Code (%s)", client.executable or "non trovato")
+        return client
+
+    if backend == "codex":
+        client = CodexClient(
+            command=str(options.get("CODEX_COMMAND") or ""),
+            model=str(options.get("CODEX_MODEL") or ""),
+            cwd=str(options.get("CODEX_CWD") or ""),
+            sandbox=str(options.get("CODEX_SANDBOX") or "read-only"),
+            timeout=_number(options.get("CODEX_TIMEOUT"), 300.0),
+            session_path=state / "codex_session.json",
+        )
+        logger.info("Backend LLM: Codex (%s)", client.executable or "non trovato")
+        return client
+
+    if backend == "command":
+        command = str(options.get("AGENT_COMMAND") or "")
+        if not command.strip():
+            raise RuntimeError("Scrivi nel pannello il comando da lanciare (per esempio: hermes chat -q {prompt}).")
+        logger.info("Backend LLM: comando %r", command)
+        return CommandAgentClient(
+            command=command,
+            cwd=str(options.get("AGENT_CWD") or ""),
+            timeout=_number(options.get("AGENT_TIMEOUT"), 300.0),
+        )
+
+    raise ValueError(f"Backend LLM sconosciuto: {requested!r}")

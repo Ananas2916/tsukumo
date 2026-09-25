@@ -1,7 +1,8 @@
-"""Desk Companion - backend package.
+"""Tsukumo - backend package.
 
-Contiene la logica applicativa: configurazione, motore TTS (Kokoro),
-estrazione dei visemi per il lip-sync, client LLM e server WebSocket.
+Contiene la logica applicativa: configurazione, cervelli (modelli e agenti),
+voci, estrazione dei visemi per il lip-sync, stato dei motori e server
+WebSocket.
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

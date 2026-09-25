@@ -4,22 +4,26 @@ Protocollo WebSocket (``/ws``)
 ------------------------------
 Client -> server::
 
-    {"type": "chat",   "text": "ciao!"}      # LLM + voce
-    {"type": "say",    "text": "ciao!"}      # solo voce
-    {"type": "settings", "voice": "af_heart", "replyLanguage": "auto"}
+    {"type": "chat",   "text": "ciao!"}      # cervello + voce
+    {"type": "say",    "text": "ciao!", "voice": "..."}   # solo voce
+    {"type": "settings", "voice": "af_heart", "replyLanguage": "auto", "muted": false}
+    {"type": "voice",  "audio": "<pcm16 base64>"}          # dal microfono
     {"type": "cancel"}                       # interrompe il turno corrente
     {"type": "reset"}                        # svuota la memoria conversazione
     {"type": "ping"}
 
 Server -> client::
 
-    {"type": "hello",  "config": {...}, "voices": [...]}
+    {"type": "hello",  "config": {...}, "voices": [...], "engines": {...}}
+    {"type": "engines", "llm": {...}, "tts": {...}, "stt": {...}}   # stato dei motori
+    {"type": "voices", "voices": [...], "voice": "..."}  # elenco voci (cambia col motore)
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "user",   "text": "..."}
-    {"type": "token",  "text": "..."}        # streaming dell'LLM
+    {"type": "token",  "text": "..."}        # streaming del cervello
     {"type": "speech", "audio": "<wav base64>", "visemes": [...], ...}
+    {"type": "caption", "text": "..."}       # frase senza audio (muto o voce guasta)
     {"type": "reply",  "text": "..."}        # risposta completa
-    {"type": "notice" | "error", "message": "..."}
+    {"type": "notice" | "error", "message": "...", "source": "llm", "hint": "..."}
     {"type": "pong"}
 
 Il messaggio ``speech`` e' quello che guida il lip-sync: contiene il WAV in
@@ -33,6 +37,8 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import dataclasses
+import importlib.util
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -40,6 +46,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -48,14 +55,19 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .config import Settings, save_dotenv
-from .openclaw import OpenClawMonitor
+from .llm import create_llm_client, describe_error
 from .phonemes import VISEME_BLENDSHAPES
 from .pipeline import Companion
-from .providers import REGISTRIES, describe_all
+from .providers import REGISTRIES, ProviderSpec, describe_all
+from .status import EngineMonitor, llm_entry
+from .tts import build_tts_engine
 
-logger = logging.getLogger("desk-companion")
+logger = logging.getLogger("tsukumo")
 
 SETTINGS = Settings.from_env()
+
+#: Variabile d'ambiente che dice quale motore e' attivo, per tipo.
+SELECT_KEYS = {"llm": "DC_LLM_BACKEND", "tts": "DC_TTS_ENGINE", "stt": "DC_STT_ENGINE"}
 
 
 # ---------------------------------------------------------------------------
@@ -64,9 +76,9 @@ SETTINGS = Settings.from_env()
 class ConnectionHub:
     """Tiene traccia dei client collegati e fa da broadcaster.
 
-    Il broadcast serve perche' possono esserci piu' finestre aperte (per
-    esempio la finestra Electron e una scheda del browser): tutte devono
-    vedere lo stesso avatar parlare.
+    Il broadcast serve perche' ci sono piu' finestre aperte (il personaggio,
+    il pannello, magari una scheda del browser): tutte devono vedere lo stesso
+    stato e lo stesso avatar parlare.
     """
 
     def __init__(self) -> None:
@@ -107,6 +119,13 @@ hub = ConnectionHub()
 _background_tasks: set[asyncio.Task] = set()
 
 
+def _current() -> Companion | None:
+    return getattr(app.state, "companion", None)
+
+
+monitor = EngineMonitor(_current, interval=SETTINGS.status_interval, on_change=hub.broadcast)
+
+
 # ---------------------------------------------------------------------------
 # Ciclo di vita dell'applicazione
 # ---------------------------------------------------------------------------
@@ -117,41 +136,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         format="%(asctime)s  %(levelname)-7s %(name)s  %(message)s",
         datefmt="%H:%M:%S",
     )
-    # Il monitor di OpenClaw sonda il Gateway ogni pochi secondi: senza questo
-    # sarebbero due righe di httpx ogni volta, e basta da sole a riempire il log.
+    # I controlli di stato fanno una richiesta HTTP ogni pochi secondi: senza
+    # questo sarebbero due righe di httpx ogni volta, a riempire il log.
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    logger.info("Desk Companion %s in avvio...", __version__)
-    # Il caricamento del modello ONNX e' bloccante: lo spostiamo in un thread.
+    logger.info("Tsukumo %s in avvio...", __version__)
+    # Il caricamento dei modelli (Kokoro, Whisper) e' bloccante: in un thread.
     app.state.companion = await asyncio.to_thread(Companion, SETTINGS)
+    await monitor.start()
+    _spawn(_load_voices(app.state.companion), report=False)
 
-    # Spia OpenClaw: un task in background che avvisa solo quando cambia stato.
-    app.state.openclaw = None
-    if SETTINGS.openclaw_enabled:
-        monitor = OpenClawMonitor(
-            base_url=SETTINGS.openclaw_url,
-            interval=SETTINGS.openclaw_interval,
-            on_change=hub.broadcast,
-        )
-        app.state.openclaw = monitor
-        await monitor.start()
-
+    companion = app.state.companion
     logger.info(
-        "Pronto: TTS=%s  LLM=%s  -> http://%s:%s",
-        app.state.companion.tts.name,
-        app.state.companion.llm.name,
+        "Pronto: cervello=%s  voce=%s  ascolto=%s  -> http://%s:%s",
+        SETTINGS.selected("llm"),
+        companion.tts.name,
+        SETTINGS.selected("stt") or "none",
         SETTINGS.host,
         SETTINGS.port,
     )
     try:
         yield
     finally:
-        if app.state.openclaw is not None:
-            await app.state.openclaw.stop()
+        await monitor.stop()
         await app.state.companion.close()
-        logger.info("Desk Companion arrestato")
+        logger.info("Tsukumo arrestato")
 
 
-app = FastAPI(title="Desk Companion", version=__version__, lifespan=lifespan)
+app = FastAPI(title="Tsukumo", version=__version__, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=SETTINGS.cors_origins,
@@ -162,18 +173,17 @@ app.add_middleware(
 
 
 def companion() -> Companion:
-    instance = getattr(app.state, "companion", None)
+    instance = _current()
     if instance is None:  # pragma: no cover - solo se si chiama troppo presto
         raise HTTPException(status_code=503, detail="Companion non ancora pronto")
     return instance
 
 
-def openclaw_status() -> dict[str, Any]:
-    """Stato corrente della spia OpenClaw (senza mai interrogare la rete)."""
-    monitor: OpenClawMonitor | None = getattr(app.state, "openclaw", None)
-    if monitor is None:
-        return {"type": "openclaw", "state": "disabled", "connected": False, "error": None}
-    return monitor.status
+async def _load_voices(instance: Companion) -> None:
+    """Carica le voci del motore attivo e le manda a tutti."""
+    voices = await instance.load_voices()
+    if instance is _current():
+        await hub.broadcast({"type": "voices", "voices": voices, **instance.current_settings()})
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +195,7 @@ class ChatRequest(BaseModel):
 
 class SayRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Testo da pronunciare")
-    voice: str | None = Field(None, description="Voce Kokoro, es. af_heart")
+    voice: str | None = Field(None, description="Voce del motore attivo")
     speed: float | None = Field(None, gt=0.25, le=3.0, description="Velocita' di lettura")
 
 
@@ -203,24 +213,26 @@ class ProviderRequest(BaseModel):
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
-    instance = companion()
+    """Il backend e' vivo? Risponde sempre subito: non fa mai rete.
+
+    La shell Electron lo interroga all'avvio con un timeout di pochi secondi:
+    se qui dentro si aspettasse un servizio esterno (come succedeva col
+    Gateway OpenClaw spento) il companion non partirebbe proprio.
+    """
+    instance = _current()
     return {
-        "ok": True,
+        "ok": instance is not None,
+        "app": "tsukumo",
         "version": __version__,
         "clients": hub.count,
-        "tts": {"engine": instance.tts.name, "voices": instance.tts.voices()[:64]},
-        "llm": await instance.llm.health(),
+        "engines": monitor.status,
         "avatar": _avatar_info(),
-        "openclaw": openclaw_status(),
     }
 
 
-@app.get("/api/openclaw")
-async def openclaw() -> dict[str, Any]:
-    """Stato del Gateway OpenClaw, forzando un controllo immediato."""
-    monitor: OpenClawMonitor | None = getattr(app.state, "openclaw", None)
-    if monitor is None:
-        return openclaw_status()
+@app.get("/api/status")
+async def status() -> dict[str, Any]:
+    """Stato dei motori, forzando un controllo immediato."""
     return await monitor.check()
 
 
@@ -243,75 +255,194 @@ async def providers() -> dict[str, Any]:
     """
     return {
         "providers": describe_all(),
-        "selected": {
-            "llm": SETTINGS.selected("llm"),
-            "tts": SETTINGS.selected("tts"),
-            "stt": SETTINGS.selected("stt"),
-        },
-        "options": {
-            "llm": SETTINGS.provider_public("llm"),
-            "tts": SETTINGS.provider_public("tts"),
-            "stt": SETTINGS.provider_public("stt"),
-        },
+        "selected": {kind: SETTINGS.selected(kind) for kind in REGISTRIES},
+        "options": {kind: SETTINGS.provider_public(kind) for kind in REGISTRIES},
+        "saved": {kind: _saved_options(kind) for kind in REGISTRIES},
+        "status": monitor.status,
     }
+
+
+def _saved_options(kind: str) -> dict[str, dict[str, Any]]:
+    """I valori salvati di *ogni* motore (non solo di quello attivo), segreti mascherati.
+
+    Serve al pannello per mostrare la configurazione di un motore prima di
+    attivarlo: "la chiave di ElevenLabs c'e' gia'", senza doverla riscrivere.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for spec in REGISTRIES[kind].all():
+        values: dict[str, Any] = {}
+        for spec_field in spec.fields:
+            raw = SETTINGS.provider_options.get(spec_field.env)
+            if raw is None:
+                continue
+            values[spec_field.env] = bool(raw) if spec_field.secret else raw
+        result[spec.id] = values
+    return result
+
+
+def _spec_or_400(kind: str, provider: str) -> ProviderSpec:
+    if kind not in REGISTRIES:
+        raise HTTPException(status_code=400, detail=f"Tipo sconosciuto: {kind!r}")
+    spec = REGISTRIES[kind].get(provider)
+    if spec is None:
+        raise HTTPException(status_code=400, detail=f"Motore sconosciuto: {provider!r}")
+    return spec
+
+
+def _request_options(spec: ProviderSpec, options: dict[str, str | None]) -> dict[str, str]:
+    """Solo i campi che il motore dichiara: il pannello non puo' scrivere variabili arbitrarie.
+
+    Un segreto lasciato vuoto significa "non l'ho toccato", non "cancellalo".
+    """
+    allowed = {f.env: f for f in spec.fields}
+    unknown = set(options) - set(allowed)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Campi non previsti da {spec.id!r}: {sorted(unknown)}")
+    cleaned: dict[str, str] = {}
+    for env_name, value in options.items():
+        text = "" if value is None else str(value)
+        if allowed[env_name].secret and not text.strip():
+            continue
+        cleaned[env_name] = text
+    return cleaned
+
+
+def _draft_settings(kind: str, spec: ProviderSpec, options: dict[str, str]) -> Settings:
+    """Le impostazioni che si avrebbero applicando ``options``, senza salvarle."""
+    base = Settings.from_env()
+    merged = {**base.provider_options, **options}
+    attr = Settings._SELECTED_ATTR[kind]
+    return dataclasses.replace(base, provider_options=merged, **{attr: spec.id})
+
+
+@app.post("/api/providers/check")
+async def check_provider(request: ProviderRequest) -> dict[str, Any]:
+    """Prova un motore con i valori del pannello *senza* attivarlo.
+
+    E' il tasto "Verifica": dice se la chiave e' valida, quante voci ci sono,
+    quanto resta del piano, se l'agente e' installato — prima di scoprirlo alla
+    prima frase.
+    """
+    spec = _spec_or_400(request.kind, request.provider)
+    options = _request_options(spec, request.options)
+    draft = _draft_settings(request.kind, spec, options)
+    instance = companion()
+    active = SETTINGS.selected(request.kind) == spec.id and not options
+
+    try:
+        if request.kind == "llm":
+            return await _check_llm(spec, draft, instance if active else None)
+        if request.kind == "tts":
+            return await asyncio.wait_for(_check_tts(spec, draft, instance if active else None), 40)
+        return await _check_stt(spec, draft)
+    except Exception as exc:
+        return {"ok": False, "detail": describe_error(exc)}
+
+
+async def _check_llm(spec: ProviderSpec, draft: Settings, instance: Companion | None) -> dict[str, Any]:
+    client = instance.llm if instance else await asyncio.to_thread(create_llm_client, draft)
+    try:
+        probe = await client.probe()
+    finally:
+        if instance is None:
+            await client.close()
+    entry = llm_entry(spec.id, probe)
+    detail = entry["detail"]
+    if not detail and entry["state"] == "online":
+        detail = f"Risponde{' — ' + str(entry['model']) if entry.get('model') else ''}"
+    return {
+        "ok": entry["state"] in ("online", "degraded"),
+        "state": entry["state"],
+        "detail": detail,
+        "hint": entry["hint"],
+        "models": entry.get("models") or [],
+    }
+
+
+async def _check_tts(spec: ProviderSpec, draft: Settings, instance: Companion | None) -> dict[str, Any]:
+    if instance is not None:
+        result = await asyncio.to_thread(instance.tts.check)
+    else:
+
+        def run() -> dict[str, Any]:
+            engine = build_tts_engine(spec.id, draft)
+            try:
+                return engine.check()
+            finally:
+                engine.close()
+
+        result = await asyncio.to_thread(run)
+    if result.get("ok") and "voices" not in result:
+        engine_voices = instance.voice_list if instance else None
+        if engine_voices:
+            result["voices"] = engine_voices
+    return result
+
+
+async def _check_stt(spec: ProviderSpec, draft: Settings) -> dict[str, Any]:
+    options = draft.provider_config("stt", spec.id)
+    if spec.id == "faster_whisper":
+        if importlib.util.find_spec("faster_whisper") is None:
+            return {"ok": False, "detail": "Pacchetto mancante: pip install faster-whisper"}
+        return {"ok": True, "detail": f"Pronto (modello {options.get('WHISPER_MODEL') or 'base'})"}
+    if spec.id == "whisper_cpp":
+        url = str(options.get("WHISPER_CPP_URL") or "")
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.get(url)
+        except httpx.HTTPError as exc:
+            return {"ok": False, "detail": f"Server non raggiungibile: {describe_error(exc)}"}
+        return {"ok": True, "detail": "Server raggiungibile"}
+    if spec.id == "openai_whisper_api" and not options.get("STT_API_KEY"):
+        return {"ok": False, "detail": "Manca la chiave API"}
+    return {"ok": True, "detail": "Nessuna verifica necessaria"}
 
 
 @app.post("/api/providers")
 async def set_provider(request: ProviderRequest) -> dict[str, Any]:
     """Cambia il motore attivo per un tipo, salvando la scelta in ``.env``.
 
-    Prima scriviamo, poi ricostruiamo: se la ricostruzione fallisce (chiave
-    sbagliata, pacchetto mancante, server spento) ripristiniamo i valori
-    precedenti e rispondiamo con il motivo, invece di lasciare il companion in
-    uno stato a meta'.
+    Solo quel motore viene ricostruito: la conversazione e gli altri motori
+    restano come sono. Prima scriviamo, poi ricostruiamo: se la ricostruzione
+    fallisce (chiave sbagliata, pacchetto mancante, programma non installato)
+    ripristiniamo i valori precedenti e rispondiamo con il motivo, invece di
+    lasciare il companion in uno stato a meta'.
     """
     global SETTINGS
 
     kind = request.kind
-    if kind not in REGISTRIES:
-        raise HTTPException(status_code=400, detail=f"Tipo sconosciuto: {kind!r}")
+    spec = _spec_or_400(kind, request.provider)
+    options = _request_options(spec, request.options)
 
-    registry = REGISTRIES[kind]
-    spec = registry.get(request.provider)
-    if spec is None:
-        raise HTTPException(status_code=400, detail=f"Motore sconosciuto: {request.provider!r}")
-
-    # Solo i campi che il motore dichiara: cosi' il pannello non puo' scrivere
-    # variabili arbitrarie nel .env dell'utente.
-    allowed = {field.env for field in spec.fields}
-    unknown = set(request.options) - allowed
-    if unknown:
-        raise HTTPException(
-            status_code=400, detail=f"Campi non previsti da {spec.id!r}: {sorted(unknown)}"
-        )
-
-    select_key = {"llm": "DC_LLM_BACKEND", "tts": "DC_TTS_ENGINE", "stt": "DC_STT_ENGINE"}[kind]
-    updates = {select_key: spec.id}
-    for env_name, value in request.options.items():
-        updates[f"DC_{env_name}"] = "" if value is None else str(value)
-
+    updates = {SELECT_KEYS[kind]: spec.id}
+    updates.update({f"DC_{name}": value for name, value in options.items()})
     previous = {key: os.environ.get(key, "") for key in updates}
     save_dotenv(updates)
 
+    instance = companion()
+    instance.cancel()  # un turno a meta' userebbe il motore che stiamo per chiudere
     try:
-        rebuilt = await asyncio.to_thread(Companion, Settings.from_env())
+        new_settings = Settings.from_env()
+        async with instance._turn_lock:
+            old = await asyncio.to_thread(instance.replace_engine, kind, new_settings)
     except Exception as exc:
         save_dotenv(previous)  # rimettiamo tutto com'era
         logger.warning("Cambio di %s a %r fallito: %s", kind, spec.id, exc)
-        return {"ok": False, "error": str(exc), "kind": kind, "provider": spec.id}
+        return {"ok": False, "error": describe_error(exc), "kind": kind, "provider": spec.id}
 
-    old = getattr(app.state, "companion", None)
-    app.state.companion = rebuilt
-    SETTINGS = rebuilt.settings
-    if old is not None:
-        await old.close()
-
+    SETTINGS = new_settings
+    await _close_engine(old)
     logger.info("Motore %s cambiato in %r", kind, spec.id)
+
+    monitor.poke()
+    if kind == "tts":
+        _spawn(_load_voices(instance), report=False)
     await hub.broadcast(
         {
             "type": "providers",
+            "kind": kind,
             "selected": {k: SETTINGS.selected(k) for k in REGISTRIES},
-            "voices": rebuilt.tts.voices(),
+            "settings": instance.current_settings(),
         }
     )
     return {
@@ -319,24 +450,35 @@ async def set_provider(request: ProviderRequest) -> dict[str, Any]:
         "kind": kind,
         "provider": spec.id,
         "options": SETTINGS.provider_public(kind),
-        "voices": rebuilt.tts.voices() if kind == "tts" else None,
     }
+
+
+async def _close_engine(engine: object | None) -> None:
+    """Chiude un motore sostituito, qualunque sia il suo tipo."""
+    if engine is None:
+        return
+    close = getattr(engine, "close", None)
+    if close is None:
+        return
+    try:
+        result = close()
+        if asyncio.iscoroutine(result):
+            await result
+    except Exception as exc:  # pragma: no cover - chiusura best effort
+        logger.debug("Chiusura del motore precedente: %s", exc)
 
 
 @app.get("/api/voices")
 async def voices() -> dict[str, Any]:
     """Voci del motore TTS attivo: l'elenco cambia con il motore scelto."""
     instance = companion()
-    return {
-        "voices": instance.tts.voices(),
-        "current": SETTINGS.voice,
-        "engine": instance.tts.name,
-    }
+    catalog = instance.voice_list if instance.voice_list is not None else await instance.load_voices()
+    return {"voices": catalog, "engine": instance.tts.name, **instance.current_settings()}
 
 
 @app.post("/api/say")
 async def api_say(request: SayRequest) -> dict[str, Any]:
-    """Sintetizza senza LLM e restituisce audio + visemi (comodo con curl)."""
+    """Sintetizza senza cervello e restituisce audio + visemi (comodo con curl)."""
     payloads = await companion().synthesize_payload(request.text, request.voice, request.speed)
     for payload in payloads:
         await hub.broadcast(payload)
@@ -388,25 +530,27 @@ def _avatar_info() -> dict[str, Any]:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     await hub.add(websocket)
-    instance = companion()
     logger.info("Client connesso (%d totali)", hub.count)
 
     try:
+        instance = companion()
         await websocket.send_json(
             {
                 "type": "hello",
                 "version": __version__,
                 "config": {**SETTINGS.public_dict(), **instance.current_settings()},
                 "blendshapes": VISEME_BLENDSHAPES,
-                "voices": instance.tts.voices(),
+                "voices": instance.voice_list or [],
+                "engines": monitor.status,
                 "avatar": _avatar_info(),
-                "openclaw": openclaw_status(),
             }
         )
 
         while True:
             message = await websocket.receive_json()
             kind = str(message.get("type", "")).lower()
+            # Il motore puo' essere cambiato dal pannello nel frattempo.
+            instance = companion()
 
             if kind == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -421,10 +565,17 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 # esattamente come se fosse stato scritto nella chat.
                 _spawn(_handle_voice(instance, message))
             elif kind == "settings":
-                # Voce e lingua delle risposte scelte dal pannello: le
-                # rimandiamo a tutti, cosi' ogni finestra resta allineata.
-                current = instance.update_settings(message.get("voice"), message.get("replyLanguage"))
+                # Voce, lingua e muto scelti dal pannello: li rimandiamo a
+                # tutti, cosi' ogni finestra resta allineata. La voce si
+                # controlla in un thread: puo' servire l'elenco dal servizio.
+                current = await asyncio.to_thread(
+                    instance.update_settings,
+                    message.get("voice"),
+                    message.get("replyLanguage"),
+                    message.get("muted"),
+                )
                 await hub.broadcast({"type": "settings", **current})
+                monitor.poke()
             elif kind == "cancel":
                 instance.cancel()
                 await hub.broadcast({"type": "cancel"})
@@ -439,7 +590,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # pragma: no cover - errori di trasporto
-        logger.warning("WebSocket chiuso con errore: %s", exc)
+        logger.warning("WebSocket chiuso con errore: %s", describe_error(exc))
     finally:
         await hub.remove(websocket)
         logger.info("Client disconnesso (%d rimasti)", hub.count)
@@ -456,13 +607,19 @@ async def _handle_voice(instance: Companion, message: dict[str, Any]) -> None:
     try:
         pcm16 = base64.b64decode(raw, validate=True)
     except (ValueError, binascii.Error):
-        await hub.broadcast({"type": "error", "message": "Audio non valido"})
+        await hub.broadcast({"type": "error", "source": "stt", "message": "Audio non valido"})
         return
 
     transcript = await instance.transcribe(pcm16)
     if transcript is None:
         await hub.broadcast(
-            {"type": "error", "message": "Il riconoscimento vocale non e' attivo"}
+            {
+                "type": "error",
+                "source": "stt",
+                "message": "Il riconoscimento vocale non è attivo",
+                "hint": "Sceglilo nella scheda Motori, sezione Ascolto.",
+                "action": "engines",
+            }
         )
         return
 
@@ -482,42 +639,43 @@ async def _handle_voice(instance: Companion, message: dict[str, Any]) -> None:
         await instance.chat(transcript.text, hub.broadcast)
 
 
-def _spawn(coro) -> None:
-    """Avvia un turno in background tenendone un riferimento forte."""
-    task = asyncio.create_task(_run_turn(coro))
+def _spawn(coro, report: bool = True) -> None:
+    """Avvia un lavoro in background tenendone un riferimento forte."""
+    task = asyncio.create_task(_run_turn(coro, report))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
 
-async def _run_turn(coro) -> None:
-    """Esegue un turno segnalando gli eventuali errori a tutti i client."""
+async def _run_turn(coro, report: bool = True) -> None:
+    """Esegue un lavoro segnalando gli eventuali errori a tutti i client."""
     try:
         await coro
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.exception("Turno fallito")
-        await hub.broadcast({"type": "error", "message": str(exc)})
+        logger.exception("Lavoro in background fallito")
+        if report:
+            await hub.broadcast({"type": "error", "message": describe_error(exc)})
 
 
 # ---------------------------------------------------------------------------
 # Frontend statico
 # ---------------------------------------------------------------------------
 _PLACEHOLDER = """<!doctype html>
-<html lang="it"><head><meta charset="utf-8"><title>Desk Companion</title>
-<style>body{font-family:system-ui,sans-serif;background:#12141c;color:#e8eaf2;
+<html lang="it"><head><meta charset="utf-8"><title>Tsukumo</title>
+<style>body{font-family:system-ui,sans-serif;background:#111114;color:#ececf1;
 display:grid;place-items:center;height:100vh;margin:0}
-main{max-width:34rem;line-height:1.6}code{background:#222636;padding:.15rem .4rem;
+main{max-width:34rem;line-height:1.6}code{background:#23232a;padding:.15rem .4rem;
 border-radius:.3rem}</style></head>
 <body><main>
-<h1>Desk Companion</h1>
+<h1>Tsukumo</h1>
 <p>Il backend e' attivo, ma il frontend non e' ancora stato compilato.</p>
 <p>Esegui:</p>
 <pre><code>cd frontend
 npm install
 npm run build</code></pre>
 <p>Oppure avvia il dev server con <code>npm run dev</code> e apri
-<a style="color:#8ab4ff" href="http://localhost:5173">http://localhost:5173</a>.</p>
+<a style="color:#9db4ff" href="http://localhost:5173">http://localhost:5173</a>.</p>
 <p>API attiva: <code>GET /api/health</code></p>
 </main></body></html>"""
 
@@ -570,7 +728,7 @@ async def http_exception_handler(request, exc: HTTPException) -> JSONResponse:
 # Entry point
 # ---------------------------------------------------------------------------
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Desk Companion backend")
+    parser = argparse.ArgumentParser(description="Tsukumo - backend")
     parser.add_argument("--host", default=SETTINGS.host)
     parser.add_argument("--port", type=int, default=SETTINGS.port)
     parser.add_argument("--log-level", default=SETTINGS.log_level)

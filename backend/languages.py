@@ -2,9 +2,11 @@
 
 Le due cose devono coincidere: una voce inglese che legge una risposta in
 italiano pronuncia tutto con l'accento e le regole sbagliate, ed e'
-incomprensibile. Il nome delle voci Kokoro dice gia' la lingua con la prima
-lettera (``af_heart`` = American female, ``if_sara`` = Italian female...),
-quindi di default la lingua delle risposte segue la voce scelta.
+incomprensibile. Ogni motore TTS sa dire che lingua parla una sua voce
+(``TTSEngine.language_of``): le voci Kokoro lo dicono con la prima lettera
+(``af_heart`` = American female, ``if_sara`` = Italian female...), quelle
+Microsoft e Google col prefisso (``it-IT-...``), le voci multilingua di
+ElevenLabs e OpenAI non ne hanno una sola.
 """
 
 from __future__ import annotations
@@ -38,39 +40,71 @@ _ALIASES = {
     "fr": "French",
     "french": "French",
     "francese": "French",
+    "de": "German",
+    "german": "German",
+    "tedesco": "German",
     "ja": "Japanese",
     "japanese": "Japanese",
     "giapponese": "Japanese",
     "pt": "Portuguese",
     "portuguese": "Portuguese",
     "portoghese": "Portuguese",
+    "hi": "Hindi",
+    "zh": "Mandarin Chinese",
+    "cmn": "Mandarin Chinese",
 }
+
+
+def is_kokoro_voice(voice: str | None) -> bool:
+    """``af_heart``, ``if_sara``...: prefisso lingua + genere + trattino basso."""
+    return bool(
+        voice and len(voice) > 3 and voice[2] == "_" and voice[1] in "fm" and voice[0].lower() in _VOICE_PREFIX
+    )
 
 
 def voice_language(voice: str | None, fallback: str) -> str:
     """Codice lingua di una voce Kokoro (``if_sara`` -> ``it``), o ``fallback``."""
-    if voice and len(voice) > 2 and voice[2] == "_" and voice[1] in "fm":
-        entry = _VOICE_PREFIX.get(voice[0].lower())
-        if entry:
-            return entry[0]
+    if is_kokoro_voice(voice):
+        return _VOICE_PREFIX[voice[0].lower()][0]  # type: ignore[index]
     return fallback
 
 
-def reply_language(setting: str | None, voice: str | None, fallback_code: str) -> str | None:
+def kokoro_voice_info(voice: str) -> dict[str, str] | None:
+    """Nome leggibile, lingua corta e genere di una voce Kokoro."""
+    if not is_kokoro_voice(voice):
+        return None
+    code = _VOICE_PREFIX[voice[0].lower()][0]
+    base = voice[3:].replace("_", " ").strip()
+    return {
+        "name": base[:1].upper() + base[1:],
+        "language": code.split("-")[0],
+        "gender": "female" if voice[1] == "f" else "male",
+    }
+
+
+def language_name(code: str | None) -> str | None:
+    """``it`` / ``it-IT`` / ``italiano`` -> ``Italian``; ``None`` se sconosciuta."""
+    if not code:
+        return None
+    lowered = code.strip().lower()
+    return _NAMES.get(lowered) or _ALIASES.get(lowered) or _ALIASES.get(lowered.split("-")[0])
+
+
+def reply_language(setting: str | None, voice_code: str | None) -> str | None:
     """In che lingua deve rispondere il companion.
 
-    ``auto`` (default) = la lingua della voce; ``same`` = la stessa lingua in
-    cui scrive l'utente (restituisce ``None``); altrimenti un codice o un nome
-    di lingua, anche in italiano ("inglese").
+    ``auto`` (default) = la lingua della voce, se la voce ne ha una sola;
+    ``same`` = la stessa lingua in cui scrive l'utente (restituisce ``None``,
+    come ``auto`` con una voce multilingua); altrimenti un codice o un nome di
+    lingua, anche in italiano ("inglese").
     """
     value = (setting or "auto").strip()
     lowered = value.lower()
     if lowered == "same":
         return None
     if lowered == "auto":
-        code = voice_language(voice, fallback_code)
-        return _NAMES.get(code) or _ALIASES.get(code.split("-")[0], "English")
-    return _NAMES.get(lowered) or _ALIASES.get(lowered) or value
+        return language_name(voice_code)
+    return language_name(lowered) or value
 
 
 def speech_directive(language: str | None) -> str:

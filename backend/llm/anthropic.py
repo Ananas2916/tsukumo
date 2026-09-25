@@ -82,8 +82,10 @@ class AnthropicClient(LLMClient):
             "model": self.model,
             "max_tokens": self.max_tokens,
             "messages": turns,
-            "output_config": {"effort": _EFFORT},
         }
+        # Haiku 4.5 non accetta `effort` (risponde 400): li' si usa il default.
+        if "haiku" not in self.model:
+            payload["output_config"] = {"effort": _EFFORT}
         if system:
             payload["system"] = system
 

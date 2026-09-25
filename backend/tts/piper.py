@@ -42,6 +42,8 @@ class PiperTTS(TTSEngine):
             )
 
         self.model_path = path
+        # Una installazione di Piper = una voce; il nome del file dice la lingua (it_IT-...).
+        self.default_voice = path.stem
         self.default_speed = default_speed
         self._voice = PiperVoice.load(str(path))
         logger.info("Piper caricato: %s", path.name)
