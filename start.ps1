@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Avvio e installazione del Desk Companion su Windows.
+    Avvio e installazione di Tsukumo su Windows.
 
 .DESCRIPTION
     Uno script unico per non dover ricordare la sequenza dei comandi.
@@ -24,7 +24,11 @@
 
 .EXAMPLE
     .\start.ps1 -Shortcut
-    Crea sul desktop il collegamento "Desk Companion" (niente terminale).
+    Crea sul desktop il collegamento "Tsukumo" (niente terminale).
+
+.EXAMPLE
+    .\start.ps1 -Test
+    Esegue i test del backend (pytest).
 #>
 
 [CmdletBinding()]
@@ -33,6 +37,7 @@ param(
     [switch]$Dev,
     [switch]$Electron,
     [switch]$Shortcut,
+    [switch]$Test,
     [ValidateSet('full', 'fp16', 'int8')]
     [string]$KokoroVariant = 'full'
 )
@@ -101,16 +106,38 @@ if ($Setup) {
 # ------------------------------------------------------------- shortcut ----
 if ($Shortcut) {
     $desktop = [Environment]::GetFolderPath('Desktop')
-    $link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop 'Desk Companion.lnk'))
+    $shell = New-Object -ComObject WScript.Shell
+
+    # Il collegamento del vecchio nome punta a uno script che non c'e' piu'.
+    $legacy = Join-Path $desktop 'Desk Companion.lnk'
+    if (Test-Path $legacy) {
+        $old = $shell.CreateShortcut($legacy)
+        if ($old.Arguments -like '*Desk Companion.vbs*') {
+            Remove-Item $legacy
+            Write-Host "Rimosso il vecchio collegamento: $legacy"
+        }
+    }
+
+    $target = Join-Path $desktop 'Tsukumo.lnk'
+    $link = $shell.CreateShortcut($target)
     $link.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
-    $link.Arguments = '"' + (Join-Path $root 'Desk Companion.vbs') + '"'
+    $link.Arguments = '"' + (Join-Path $root 'Tsukumo.vbs') + '"'
     $link.WorkingDirectory = $root
     $icon = Join-Path $root 'electron\icon.ico'
     if (Test-Path $icon) { $link.IconLocation = "$icon,0" }
-    $link.Description = 'Avvia il Desk Companion'
+    $link.Description = 'Avvia Tsukumo'
     $link.Save()
-    Write-Host "Collegamento creato: $(Join-Path $desktop 'Desk Companion.lnk')" -ForegroundColor Green
+    Write-Host "Collegamento creato: $target" -ForegroundColor Green
     return
+}
+
+# ----------------------------------------------------------------- test ----
+if ($Test) {
+    $python = Get-Python
+    & $python -m pip show pytest *> $null
+    if ($LASTEXITCODE -ne 0) { & $python -m pip install -r requirements-dev.txt }
+    & $python -m pytest -q
+    exit $LASTEXITCODE
 }
 
 $python = Get-Python
@@ -172,5 +199,5 @@ if (-not (Test-Path (Join-Path $root 'frontend\dist\index.html'))) {
     Pop-Location
 }
 
-Write-Step 'Avvio il Desk Companion su http://127.0.0.1:8770'
+Write-Step 'Avvio Tsukumo su http://127.0.0.1:8770'
 & $python -m backend

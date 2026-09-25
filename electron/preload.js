@@ -61,7 +61,7 @@ contextBridge.exposeInMainWorld('companion', {
   /**
    * Push-to-talk con scorciatoia **globale**: arriva anche quando il
    * companion non ha il fuoco, che e' tutto il punto di un tasto "parla".
-   * Il payload e' `{down: boolean}`.
+   * Il payload e' `{action: 'toggle'}`.
    */
   onPushToTalk: (callback) => listen('voice:push-to-talk', callback),
   /** Cambia il tasto del push-to-talk. @returns {Promise<{ok, key, error}>} */
@@ -74,6 +74,8 @@ contextBridge.exposeInMainWorld('companion', {
   togglePanel: (focus) => ipcRenderer.invoke('panel:toggle', focus),
   openPanel: (focus) => ipcRenderer.invoke('panel:open', focus),
   hidePanel: () => ipcRenderer.invoke('panel:hide'),
+  /** Il pannello dice quale scheda mostra: i dock evidenziano quella. */
+  setPanelTab: (tab) => ipcRenderer.send('panel:tab', tab),
   /** @returns {Promise<object>} scala, primo piano, fantasma, aggancio... */
   getState: () => ipcRenderer.invoke('panel:state'),
   onState: (callback) => listen('panel:state', callback),

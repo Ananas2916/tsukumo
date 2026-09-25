@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Avvio e installazione del Desk Companion su macOS / Linux.
+# Avvio e installazione di Tsukumo su macOS / Linux.
 #
 #   ./start.sh --setup      installa tutto (venv, pip, npm, pesi Kokoro, build)
 #   ./start.sh              avvia il backend su http://127.0.0.1:8770
 #   ./start.sh --dev        backend + dev server Vite con hot reload
 #   ./start.sh --electron   finestra desktop senza cornice
+#   ./start.sh --test       test del backend (pytest)
 
 set -euo pipefail
 
@@ -20,6 +21,7 @@ for arg in "$@"; do
     --setup) MODE="setup" ;;
     --dev) MODE="dev" ;;
     --electron) MODE="electron" ;;
+    --test) MODE="test" ;;
     --fp16) KOKORO_VARIANT="fp16" ;;
     --int8) KOKORO_VARIANT="int8" ;;
     *) echo "Argomento sconosciuto: $arg" >&2; exit 2 ;;
@@ -66,6 +68,9 @@ ls frontend/public/models/*.vrm >/dev/null 2>&1 || {
 }
 
 case "$MODE" in
+  test)
+    "$PY" -m pytest -q || { "$PY" -m pip install -r requirements-dev.txt && "$PY" -m pytest -q; }
+    ;;
   electron)
     [ -d electron/node_modules ] || (cd electron && npm install)
     step "Apro la finestra desktop"
@@ -84,7 +89,7 @@ case "$MODE" in
       echo "Frontend non compilato: lo compilo adesso."
       (cd frontend && { [ -d node_modules ] || npm install; } && npm run build)
     fi
-    step "Avvio il Desk Companion su http://127.0.0.1:8770"
+    step "Avvio Tsukumo su http://127.0.0.1:8770"
     exec "$PY" -m backend
     ;;
 esac

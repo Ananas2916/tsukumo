@@ -1,5 +1,5 @@
 /**
- * Shell Electron del Desk Companion, in stile Desktop Mate.
+ * Shell Electron di Tsukumo, in stile Desktop Mate.
  *
  * Due finestre:
  *  - il personaggio: senza cornice, trasparente, sempre davanti a tutto, che
@@ -29,7 +29,7 @@ const {
   screen,
   shell,
 } = require('electron');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
@@ -40,20 +40,66 @@ const { PetPhysics } = require('./pet-physics');
 const spotify = require('./spotify');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+const APP_NAME = 'Tsukumo';
+
+// Il nome dell'app (package.json) decide la cartella delle impostazioni,
+// %APPDATA%\Tsukumo. Prima si chiamava desk-companion-shell: la copiamo una
+// volta sola, cosi' dimensione, posizione del pannello, chat e preferenze non
+// vanno perse.
+// Electron crea la cartella nuova prima che questo codice giri: per sapere se
+// la copia e' gia' stata fatta serve un segnaposto, non l'esistenza della cartella.
+const LEGACY_USER_DATA = path.join(app.getPath('appData'), 'desk-companion-shell');
+const MIGRATED_MARK = path.join(app.getPath('userData'), '.migrato-da-desk-companion');
+if (fs.existsSync(LEGACY_USER_DATA) && !fs.existsSync(MIGRATED_MARK)) {
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    if (!fs.existsSync(path.join(app.getPath('userData'), 'pet-settings.json'))) {
+      fs.cpSync(LEGACY_USER_DATA, app.getPath('userData'), {
+        recursive: true,
+        force: false,
+        // I lucchetti del profilo vecchio non vanno copiati: bloccherebbero questo.
+        filter: (source) => !/(lockfile|Singleton\w*|LOCK)$/i.test(source),
+      });
+    }
+    fs.writeFileSync(MIGRATED_MARK, new Date().toISOString());
+  } catch (error) {
+    process.stderr.write(`[electron] impostazioni precedenti non copiate: ${error.message}\n`);
+  }
+}
 
 // Avviata dal collegamento sul desktop non c'e' nessun terminale dove
 // guardare, e su Windows un'app GUI non scrive nemmeno su uno stdout
-// rediretto: se ci danno un file, i messaggi finiscono li'.
-if (process.env.DC_LOG_FILE) {
-  const stream = fs.createWriteStream(process.env.DC_LOG_FILE, { flags: 'a' });
+// rediretto: tutto finisce anche in logs/companion.log, sempre.
+const LOG_FILE = process.env.DC_LOG_FILE || path.join(PROJECT_ROOT, 'logs', 'companion.log');
+(() => {
+  try {
+    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+    // Oltre i 5 MB il log vecchio diventa .1: basta per capire l'ultimo avvio.
+    if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > 5 * 1024 * 1024) {
+      fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
+    }
+  } catch {
+    /* un log mancante non deve impedire l'avvio */
+  }
+  const stream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+  const original = { log: console.log, error: console.error, warn: console.warn };
   const write =
-    (prefix) =>
-    (...args) =>
-      stream.write(`${new Date().toISOString()} ${prefix}${args.join(' ')}\n`);
-  console.log = write('');
-  console.error = write('ERRORE ');
+    (prefix, target) =>
+    (...args) => {
+      const line = args.map((arg) => (arg instanceof Error ? arg.stack : String(arg))).join(' ');
+      stream.write(`${new Date().toISOString()} ${prefix}${line}\n`);
+      try {
+        target(...args);
+      } catch {
+        /* nessuna console: e' normale quando parte dal collegamento */
+      }
+    };
+  console.log = write('', original.log);
+  console.warn = write('ATTENZIONE ', original.warn);
+  console.error = write('ERRORE ', original.error);
   process.on('uncaughtException', (error) => console.error(error.stack ?? String(error)));
-}
+})();
+
 const HOST = process.env.DC_HOST || '127.0.0.1';
 const PORT = Number(process.env.DC_PORT || 8770);
 const BACKEND_URL = `http://${HOST}:${PORT}`;
@@ -81,7 +127,7 @@ const SIDE_ASPECT = 1;
 const SIDE_EXIT_MS = 1000;
 const MUSIC_POLL_MS = 1500;
 
-const PANEL_SIZE = { width: 380, height: 560 };
+const PANEL_SIZE = { width: 400, height: 620 };
 const PANEL_GAP = 10;
 
 const TICK_MS = 16; // ~60 fps: cadute e viaggi sulle finestre devono essere fluidi
@@ -104,6 +150,8 @@ let lastPetBounds = null;
 /** Finestra larga per la posa sdraiata sul fianco. */
 let petWide = false;
 let narrowSince = null;
+/** Scheda aperta nel pannello (la dice il pannello stesso). */
+let panelTab = 'chat';
 /** Ultimo stato di Spotify mandato alle pagine. */
 let music = { open: false, playing: false, artist: '', title: '' };
 
@@ -148,6 +196,11 @@ const alive = (win) => win && !win.isDestroyed();
 // ---------------------------------------------------------------------------
 // Backend Python
 // ---------------------------------------------------------------------------
+/** Ultime righe scritte dal backend: se muore all'avvio, spiegano perche'. */
+const backendTail = [];
+/** Codice di uscita del backend, se e' gia' morto (null = vivo o mai partito). */
+let backendExit = null;
+
 function startBackend() {
   if (!SPAWN_BACKEND) {
     console.log('[electron] DC_NO_SPAWN=1: uso un backend gia in esecuzione');
@@ -155,28 +208,73 @@ function startBackend() {
   }
 
   console.log(`[electron] avvio backend: ${PYTHON} -m backend`);
-  backendProcess = spawn(PYTHON, ['-m', 'backend', '--host', HOST, '--port', String(PORT)], {
+  backendExit = null;
+  backendTail.length = 0;
+  const child = spawn(PYTHON, ['-m', 'backend', '--host', HOST, '--port', String(PORT)], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
     stdio: ['ignore', 'pipe', 'pipe'],
     // Avviata dal collegamento sul desktop non c'e' un terminale: senza
     // questo Windows aprirebbe una console nera per python.exe.
     windowsHide: true,
   });
+  backendProcess = child;
 
-  backendProcess.stdout.on('data', (chunk) => console.log(`[py] ${String(chunk).trimEnd()}`));
-  backendProcess.stderr.on('data', (chunk) => console.log(`[py] ${String(chunk).trimEnd()}`));
+  const collect = (chunk) => {
+    const text = String(chunk).trimEnd();
+    console.log(`[py] ${text}`);
+    backendTail.push(...text.split(/\r?\n/));
+    backendTail.splice(0, Math.max(0, backendTail.length - 12));
+  };
+  child.stdout.on('data', collect);
+  child.stderr.on('data', collect);
 
-  backendProcess.on('error', (error) => {
+  child.on('error', (error) => {
     console.error(`[electron] impossibile avviare "${PYTHON}":`, error.message);
+    backendTail.push(`Impossibile avviare ${PYTHON}: ${error.message}`);
+    backendExit = -1;
   });
 
-  backendProcess.on('exit', (code) => {
-    backendProcess = null;
+  child.on('exit', (code) => {
+    if (backendProcess === child) backendProcess = null;
+    backendExit = code ?? -1;
     if (code !== 0 && code !== null) {
       console.error(`[electron] il backend e uscito con codice ${code}`);
     }
   });
+}
+
+/**
+ * Chi occupa la porta del backend, se e' un nostro backend rimasto appeso
+ * (un avvio precedente chiuso male): lo chiudiamo, altrimenti il nuovo non
+ * potrebbe ascoltare. Un altro programma sulla stessa porta non si tocca.
+ */
+function reclaimPort() {
+  if (process.platform !== 'win32') return false;
+  try {
+    const netstat = spawnSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+    const line = (netstat.stdout || '')
+      .split(/\r?\n/)
+      .find((row) => /LISTENING|IN ASCOLTO/i.test(row) && new RegExp(`[:.]${PORT}\\s`).test(row));
+    const pid = line?.trim().split(/\s+/).pop();
+    if (!pid || !/^\d+$/.test(pid)) return false;
+    const query = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+      { encoding: 'utf8', windowsHide: true, timeout: 8000 },
+    );
+    const commandLine = query.stdout || '';
+    if (!/-m\s+backend/.test(commandLine)) {
+      console.error(`[electron] la porta ${PORT} e' occupata da un altro programma (pid ${pid}): non lo tocco`);
+      return false;
+    }
+    console.log(`[electron] chiudo un backend rimasto appeso (pid ${pid})`);
+    spawnSync('taskkill', ['/PID', pid, '/T', '/F'], { windowsHide: true, timeout: 5000 });
+    return true;
+  } catch (error) {
+    console.error('[electron] controllo della porta fallito:', error.message);
+    return false;
+  }
 }
 
 function stopBackend() {
@@ -202,31 +300,56 @@ function stopBackend() {
   backendProcess = null;
 }
 
-/** Interroga /api/health finche' non risponde (o finche' scade il tempo). */
-function waitForBackend(timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs;
-
+/**
+ * Una sola occhiata a /api/health: il JSON se risponde un backend di
+ * Tsukumo, altrimenti null. Il backend risponde sempre subito (non aspetta
+ * mai agenti o servizi esterni), quindi un timeout breve basta.
+ */
+function probeBackend(timeoutMs = 1500) {
   return new Promise((resolve) => {
-    const attempt = () => {
-      const request = http.get(`${BACKEND_URL}/api/health`, (response) => {
-        response.resume();
-        if (response.statusCode === 200) return resolve(true);
-        retry();
+    const request = http.get(`${BACKEND_URL}/api/health`, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => (body += chunk));
+      response.on('end', () => {
+        try {
+          resolve(response.statusCode === 200 ? JSON.parse(body) : null);
+        } catch {
+          resolve(null);
+        }
       });
-      request.setTimeout(2000, () => {
-        request.destroy();
-        retry();
-      });
-      request.on('error', retry);
-    };
-
-    const retry = () => {
-      if (Date.now() > deadline) return resolve(false);
-      setTimeout(attempt, 500);
-    };
-
-    attempt();
+    });
+    request.setTimeout(timeoutMs, () => request.destroy());
+    request.on('error', () => resolve(null));
   });
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Aspetta che il backend sia pronto; si arrende subito se il processo muore. */
+async function waitForBackend(timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = await probeBackend();
+    if (health?.ok) return { ok: true, health };
+    if (SPAWN_BACKEND && backendExit !== null && !backendProcess) return { ok: false, reason: 'exited' };
+    await sleep(400);
+  }
+  return { ok: false, reason: 'timeout' };
+}
+
+/** Avvia (o riusa) il backend e aspetta che risponda. */
+async function ensureBackend() {
+  const existing = await probeBackend(1200);
+  if (existing?.app === 'tsukumo' && existing.ok) {
+    console.log(`[electron] backend gia' attivo su ${BACKEND_URL} (v${existing.version}): lo riuso`);
+    return { ok: true, health: existing };
+  }
+  if (SPAWN_BACKEND) {
+    reclaimPort();
+    startBackend();
+  }
+  return waitForBackend();
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +378,7 @@ function createPetWindow() {
     skipTaskbar: false,
     hasShadow: false,
     backgroundColor: '#00000000',
-    title: 'Desk Companion',
+    title: APP_NAME,
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -273,8 +396,10 @@ function createPetWindow() {
 
   if (settings.pinned) petWindow.setAlwaysOnTop(true, 'screen-saver');
   petHandle = desktop.handleOf(petWindow);
-  const pageUrl = process.env.DC_PET_DEBUG === '1' ? `${BACKEND_URL}/?petdebug` : BACKEND_URL;
-  petWindow.loadURL(pageUrl);
+  keepLoaded(petWindow, 'personaggio');
+  // Finche' il backend non risponde si vede un biglietto d'attesa: prima la
+  // finestra restava trasparente e vuota, e sembrava che non fosse partito niente.
+  showSplash(petWindow, { title: `${APP_NAME} si sta svegliando…`, detail: 'Avvio il cervello e la voce.' });
 
   // I link esterni vanno nel browser di sistema, non dentro la finestra.
   petWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -296,6 +421,90 @@ function createPetWindow() {
   if (process.env.DC_DEVTOOLS === '1') {
     petWindow.webContents.openDevTools({ mode: 'detach' });
   }
+}
+
+const petUrl = () => (process.env.DC_PET_DEBUG === '1' ? `${BACKEND_URL}/?petdebug` : `${BACKEND_URL}/`);
+
+/** Carica la pagina vera dal backend (e da li' in poi la tiene caricata). */
+function loadApp(win, url) {
+  if (!alive(win)) return;
+  win.__appUrl = url;
+  win.__loadAttempts = 0;
+  win.loadURL(url);
+}
+
+/**
+ * Una pagina che non si carica non deve lasciare una finestra vuota per
+ * sempre: era esattamente il "vedo la chat ma non il personaggio". Si
+ * riprova da soli, con attese crescenti, e si ricarica anche se il renderer
+ * va in crash.
+ */
+function keepLoaded(win, name) {
+  win.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    // -3 = navigazione sostituita da un'altra: non e' un errore.
+    if (!isMainFrame || code === -3 || !win.__appUrl) return;
+    win.__loadAttempts = (win.__loadAttempts ?? 0) + 1;
+    const delay = Math.min(8000, 400 * 2 ** Math.min(win.__loadAttempts, 5));
+    console.error(`[electron] ${name}: ${url} non caricata (${description}), riprovo fra ${delay} ms`);
+    setTimeout(() => alive(win) && win.__appUrl && win.loadURL(win.__appUrl), delay);
+  });
+  win.webContents.on('did-finish-load', () => {
+    if (win.webContents.getURL().startsWith(BACKEND_URL)) win.__loadAttempts = 0;
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[electron] ${name}: renderer terminato (${details.reason}), ricarico`);
+    if (details.reason !== 'clean-exit') setTimeout(() => alive(win) && win.reload(), 1000);
+  });
+}
+
+/** Biglietto d'attesa (o d'errore) disegnato senza backend, dentro la finestra. */
+function showSplash(win, { title, detail = '', error = false, lines = [] }) {
+  if (!alive(win)) return;
+  const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const html = `<!doctype html><html lang="it"><head><meta charset="utf-8"><style>
+    html,body{margin:0;height:100%;background:transparent;font:13px/1.45 'Segoe UI',system-ui,sans-serif;color:#ececf1;overflow:hidden}
+    .card{position:fixed;left:10px;right:10px;bottom:12px;padding:14px;border-radius:16px;background:rgba(20,20,25,.95);
+      border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 40px rgba(0,0,0,.45);text-align:center}
+    .spin{width:22px;height:22px;margin:0 auto 8px;border-radius:50%;border:2.5px solid rgba(255,255,255,.12);
+      border-top-color:#a58bff;animation:s .9s linear infinite}
+    .err .spin{animation:none;border-color:#ff6b81}
+    b{display:block;font-weight:600}p{margin:6px 0 0;color:#b4b4c0;font-size:12px}
+    pre{margin:8px 0 0;max-height:120px;overflow:auto;text-align:left;white-space:pre-wrap;color:#85858f;font:10.5px/1.35 Consolas,monospace}
+    @keyframes s{to{transform:rotate(360deg)}}</style></head>
+    <body><div class="card${error ? ' err' : ''}"><div class="spin"></div><b>${escape(title)}</b>
+    ${detail ? `<p>${escape(detail)}</p>` : ''}${lines.length ? `<pre>${escape(lines.join('\n'))}</pre>` : ''}</div></body></html>`;
+  win.__appUrl = null;
+  win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+}
+
+/** Il backend non e' partito: lo si dice nella finestra, con il perche'. */
+function showBackendError(result) {
+  const exited = result.reason === 'exited';
+  const lines = backendTail.filter((line) => line.trim()).slice(-8);
+  const portBusy = lines.some((line) => /10048|address already in use|only one usage/i.test(line));
+  const detail = portBusy
+    ? `La porta ${PORT} e' occupata da un altro programma. Chiudilo, poi usa "Riavvia" dall'icona nell'area di notifica.`
+    : exited
+      ? 'Il backend si e\' chiuso da solo. Il motivo e\' qui sotto e nel log (icona nell\'area di notifica -> Apri il log).'
+      : 'Il backend non risponde. Controlla il log dall\'icona nell\'area di notifica.';
+  console.error(`[electron] backend non disponibile (${result.reason})`);
+  showSplash(petWindow, { title: 'Non riesco ad avviare Tsukumo', detail, error: true, lines });
+}
+
+/** Riavvia il backend (se e' nostro) e ricarica le finestre. */
+async function restartBackend() {
+  if (alive(petWindow)) showSplash(petWindow, { title: 'Riavvio…', detail: 'Un attimo.' });
+  if (backendProcess) {
+    stopBackend();
+    await sleep(900);
+  }
+  const result = await ensureBackend();
+  if (!result.ok) {
+    showBackendError(result);
+    return;
+  }
+  loadApp(petWindow, petUrl());
+  if (alive(panelWindow)) loadApp(panelWindow, `${BACKEND_URL}/panel.html`);
 }
 
 /** Applica il click-through solo quando lo stato cambia davvero. */
@@ -478,7 +687,7 @@ function createPanelWindow() {
     alwaysOnTop: settings.panelPinned,
     hasShadow: true,
     backgroundColor: '#00000000',
-    title: 'Desk Companion - pannello',
+    title: `${APP_NAME} - pannello`,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -488,7 +697,11 @@ function createPanelWindow() {
     },
   });
   panelHandle = desktop.handleOf(panelWindow);
-  panelWindow.loadURL(`${BACKEND_URL}/panel.html`);
+  keepLoaded(panelWindow, 'pannello');
+  loadApp(panelWindow, `${BACKEND_URL}/panel.html`);
+  // I dock del personaggio evidenziano la scheda aperta: devono saperlo.
+  panelWindow.on('show', broadcastState);
+  panelWindow.on('hide', broadcastState);
 
   panelWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -562,7 +775,9 @@ function showPanel(focus) {
 }
 
 function togglePanel(focus) {
-  if (alive(panelWindow) && panelWindow.isVisible() && panelWindow.isFocused()) {
+  // Stessa scheda gia' davanti: il bottone la richiude. Un'altra: ci si sposta.
+  const sameTab = !focus?.tab || focus.tab === panelTab;
+  if (alive(panelWindow) && panelWindow.isVisible() && sameTab) {
     panelWindow.hide();
     return;
   }
@@ -578,6 +793,9 @@ function panelState() {
     docked: settings.docked,
     panelPinned: settings.panelPinned,
     windowsAvailable: desktop.available(),
+    panelVisible: alive(panelWindow) && panelWindow.isVisible(),
+    panelTab,
+    voice: voiceState,
     music,
   };
 }
@@ -648,7 +866,7 @@ function trayImage(size = 32) {
 
 function createTray() {
   tray = new Tray(trayImage());
-  tray.setToolTip('Desk Companion');
+  tray.setToolTip(APP_NAME);
   tray.on('click', () => togglePanel({ tab: 'chat' }));
   updateTrayMenu();
 }
@@ -658,7 +876,9 @@ function updateTrayMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Apri la chat', click: () => showPanel({ tab: 'chat' }) },
-      { label: 'Impostazioni', click: () => showPanel({ tab: 'menu' }) },
+      { label: 'Personaggio', click: () => showPanel({ tab: 'character' }) },
+      { label: 'Motori', click: () => showPanel({ tab: 'engines' }) },
+      { label: 'Mostra i comandi accanto a lei', click: () => sendToPet('pet:command', { type: 'hud' }) },
       { type: 'separator' },
       {
         label: 'Modalita fantasma',
@@ -672,6 +892,9 @@ function updateTrayMenu() {
         checked: settings.pinned,
         click: togglePinned,
       },
+      { type: 'separator' },
+      { label: 'Riavvia', click: () => restartBackend() },
+      { label: 'Apri il log', click: () => shell.openPath(LOG_FILE) },
       { type: 'separator' },
       { label: 'Esci', click: () => app.quit() },
     ]),
@@ -755,6 +978,11 @@ ipcMain.handle('pet:pick-model', async () => {
 /** Comandi dal pannello al personaggio (guadagno della bocca, azioni, debug...). */
 ipcMain.on('pet:command', (_event, command) => sendToPet('pet:command', command));
 
+ipcMain.on('panel:tab', (_event, tab) => {
+  panelTab = String(tab || 'chat');
+  sendToPet('pet:state', panelState());
+});
+
 ipcMain.handle('panel:toggle', (_event, focus) => togglePanel(focus));
 ipcMain.handle('panel:open', (_event, focus) => showPanel(focus));
 ipcMain.handle('panel:hide', () => panelWindow?.hide());
@@ -835,29 +1063,29 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    console.log(`[electron] ${APP_NAME} ${app.getVersion()} in avvio`);
     loadSettings();
     physics.windowsEnabled = settings.windows;
-    startBackend();
 
-    const ready = await waitForBackend();
-    if (!ready) {
-      console.error(
-        `[electron] backend non raggiungibile su ${BACKEND_URL}. ` +
-          'Controlla di aver installato le dipendenze Python (pip install -r requirements.txt).',
-      );
-    }
-
+    // Prima le finestre, poi il backend: lei compare subito col biglietto
+    // d'attesa invece di far pensare che il doppio click non abbia funzionato.
     createPetWindow();
-    createPanelWindow();
     createTray();
-
-    const key = process.env.DC_PUSH_TO_TALK_KEY || settings.pushToTalkKey || 'Control+Space';
-    const result = registerPushToTalk(key);
-    if (!result.ok) console.warn(`[electron] push-to-talk: ${result.error}`);
-
     setInterval(tick, TICK_MS);
     setInterval(keepOnTop, ON_TOP_MS);
     setInterval(pollMusic, MUSIC_POLL_MS);
+
+    const key = process.env.DC_PUSH_TO_TALK_KEY || settings.pushToTalkKey || 'Control+Space';
+    const shortcut = registerPushToTalk(key);
+    if (!shortcut.ok) console.warn(`[electron] push-to-talk: ${shortcut.error}`);
+
+    const backend = await ensureBackend();
+    if (!backend.ok) {
+      showBackendError(backend);
+      return;
+    }
+    loadApp(petWindow, petUrl());
+    createPanelWindow();
   });
 }
 
