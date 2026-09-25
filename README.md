@@ -10,14 +10,21 @@ Di default gira **tutto offline** sulla tua macchina, senza chiamate a servizi
 esterni — e se vuoi puoi collegarlo a un servizio in rete, ma è una scelta
 esplicita, mai il default.
 
+Il cervello può essere un **agente vero** — Claude Code, Codex, OpenClaw,
+Hermes Agent o qualunque programma da riga di comando — e Tsukumo ne diventa
+la voce e la faccia, con la sua memoria e i suoi strumenti. Oppure un modello
+locale (LM Studio, Ollama) o un servizio in rete. Le voci vanno da Kokoro in
+locale a ElevenLabs, OpenAI, Azure, Google e Cartesia.
+
 Puoi parlargli a voce (push-to-talk, ascolto continuo o a chiamata) e scegliere
-dal pannello quale cervello, quale voce e quale ascolto usare fra quelli
-supportati: **11 motori di conversazione, 7 di sintesi vocale, 5 di
-riconoscimento**.
+dal pannello quale cervello, quale voce e quale ascolto usare: **15 cervelli
+(5 agenti), 11 voci, 5 modi di ascolto**, ognuno con una verifica che dice
+subito se funziona prima di attivarlo.
 
 > *Tsukumo is a 3D desk companion with a VRM avatar, local text-to-speech,
-> lip-sync and voice input. It runs fully offline by default; 11 LLM backends,
-> 7 TTS engines and 5 speech-recognition engines are selectable from the panel.
+> lip-sync and voice input. Its brain can be a real agent (Claude Code, Codex,
+> OpenClaw, Hermes, any CLI agent), a local model or a cloud API; 15 brains,
+> 11 voices and 5 speech-recognition engines are selectable from the panel.
 > Named after the tsukumogami — objects that come alive in Japanese folklore.
 > Documentation is in Italian; the code and configuration keys are in English.*
 
@@ -56,7 +63,7 @@ riconoscimento**.
 |------------|----------|------|
 | Python | 3.10+ | testato su 3.11 |
 | Node.js | 18+ | serve solo per compilare il frontend |
-| Ollama **o** LM Studio | opzionale | per l'LLM locale; senza nessuno dei due, si usa il risponditore offline |
+| Un cervello | opzionale | un agente (Claude Code, Codex, OpenClaw, Hermes...), LM Studio/Ollama, o una chiave di un servizio in rete; per provare basta il risponditore offline |
 | Disco | ~800 MB | 350 MB di pesi Kokoro + ONNX Runtime + node_modules |
 
 Non serve installare `espeak-ng` a parte: `kokoro-onnx` porta con sé
@@ -137,10 +144,40 @@ npm run build          # produce frontend/dist, servito dal backend
 cd ..
 ```
 
-### 4. LLM locale (opzionale ma consigliato)
+### 4. Il cervello: un agente o un modello
 
-Il backend parla con **qualunque** motore locale tu preferisca — bastano due
-righe in `.env`.
+Si sceglie dal pannello, scheda **Motori → Cervello**: ogni motore ha la sua
+scheda con costo, requisiti, campi da compilare e un tasto **Verifica** che
+prova la configurazione *prima* di attivarla. Le scelte finiscono in `.env`,
+quindi si possono anche scrivere a mano.
+
+**Agenti.** Un agente ha memoria e strumenti propri: Tsukumo gli passa solo
+l'ultimo messaggio (più le regole del parlato: lingua della voce, niente
+markdown) e legge ad alta voce la sua risposta. La conversazione continua fra
+un messaggio e l'altro e sopravvive ai riavvii (`state/*_session.json`).
+"Nuova" nella chat la azzera.
+
+| Agente | Come si collega | Costo |
+|--------|-----------------|-------|
+| **Claude Code** | lancia `claude -p` già autenticato; di default può solo cercare sul web e leggere file | il tuo abbonamento Claude |
+| **Codex** | lancia `codex exec`; se non è nel PATH usa quello dell'estensione di VS Code | il tuo account ChatGPT |
+| **OpenClaw** | il Gateway locale via WebSocket (vedi sotto) | quello del modello dietro |
+| **Hermes Agent** | il suo API server compatibile OpenAI (`API_SERVER_ENABLED=true`, porta 8642) | gratis |
+| **Altro agente** | qualunque comando: `{prompt}` diventa il messaggio, altrimenti va sullo standard input | — |
+
+```env
+DC_LLM_BACKEND=claude_code
+DC_CLAUDE_CODE_MODEL=          # vuoto = quello del tuo account; haiku risponde prima
+DC_CLAUDE_CODE_CWD=            # cartella che puo' leggere (vuoto = la tua cartella utente)
+```
+
+Per Claude Code e Codex il companion parte in modalità prudente: Claude Code
+ha solo gli strumenti elencati in `DC_CLAUDE_CODE_TOOLS` (ricerca web e
+lettura) e Codex gira con `-s read-only`. Si allargano dalle impostazioni
+avanzate della loro scheda, sapendo che poi potranno modificare file.
+
+**Modelli locali.** Il backend parla con **qualunque** motore locale tu
+preferisca — bastano due righe in `.env`.
 
 **Ollama:**
 
@@ -216,16 +253,19 @@ fine elaborazione, quindi il companion inizia a parlare un po' più tardi
 migliorare abilitando il *block streaming* lato OpenClaw
 (`agents.defaults.blockStreamingDefault`), non ancora necessario di default.
 
-Senza nessuno dei tre, il backend risponde comunque usando il risponditore
-offline integrato (`DC_LLM_BACKEND=mock`, oppure automaticamente come
-fallback se il motore configurato non risponde).
+Se il cervello non risponde, nella chat compare una scheda d'errore con il
+motivo ("Gateway OpenClaw spento", "chiave API non valida"...) e un tasto che
+porta dritto alla scheda Motori. Il risponditore offline (`DC_LLM_BACKEND=mock`)
+resta disponibile per provare voce e animazioni; come ripiego automatico va
+acceso a mano (`DC_LLM_FALLBACK=1`), perché una risposta preconfezionata al
+posto di un errore nasconde il problema.
 
 > **Modelli "reasoning" (minicpm, deepseek-r1, qwq, ...) e agenti che
-> "pensano" (OpenClaw):** questi modelli mandano il ragionamento interno su
-> un canale separato prima della risposta vera. I client `openai` e
-> `openclaw` lo scartano sempre — verificato mandando messaggi veri a
-> entrambi durante lo sviluppo — quindi il companion pronuncia solo la
-> risposta finale e mai il "pensiero ad alta voce" del modello.
+> "pensano":** questi modelli mandano il ragionamento interno su un canale
+> separato prima della risposta vera. Tutti i client lo scartano sempre
+> (`reasoning_content`, gli eventi `thinking` di OpenClaw, i `thinking_delta`
+> di Claude Code, gli item `reasoning` di Codex), quindi il companion pronuncia
+> solo la risposta finale e mai il "pensiero ad alta voce" del modello.
 
 ### 5. Finestra desktop (opzionale)
 
@@ -311,11 +351,19 @@ Vite inoltra `/api` e `/ws` al backend, quindi funziona tutto anche da 5173.
 .\start.ps1 -Shortcut
 ```
 
-Crea sul desktop il collegamento **Desk Companion**: doppio click e parte
-tutto (Electron + backend), senza finestre nere e senza terminale. Dietro c'è
-`Desk Companion.vbs` nella cartella del progetto, che si può anche mettere in
-`shell:startup` per averla a ogni accesso. Tutto quello che stampa finisce in
-`logs\companion.log`: è la prima cosa da guardare se non parte.
+Crea sul desktop il collegamento **Tsukumo** (e toglie quello col vecchio nome
+"Desk Companion"): doppio click e parte tutto (Electron + backend), senza
+finestre nere e senza terminale. Dietro c'è `Tsukumo.vbs` nella cartella del
+progetto, che si può anche mettere in `shell:startup` per averla a ogni
+accesso.
+
+Il personaggio compare subito con un biglietto "si sta svegliando…" mentre il
+backend parte; se qualcosa va storto il biglietto dice cosa, con le ultime
+righe del backend. Tutto finisce anche in `logs\companion.log` (icona
+nell'area di notifica → **Apri il log**), qualunque sia il modo in cui l'hai
+avviato. Se trova un backend di Tsukumo già acceso lo riusa; se sulla porta è
+rimasto appeso un backend di un avvio precedente lo chiude; se una pagina non
+si carica la riprova da solo invece di lasciare la finestra vuota.
 
 ### Modalità desktop — finestra senza cornice
 
@@ -338,9 +386,10 @@ c'è), poi apre due finestre:
   titolo si stacca e resta dove lo metti (il pulsante con la catena lo
   riaggancia, quello con la puntina lo tiene in primo piano).
 
-Nell'area di notifica c'è un'icona sempre raggiungibile: apre chat e
-impostazioni, attiva la modalità fantasma, chiude tutto. Serve soprattutto in
-modalità fantasma, quando i click attraversano il personaggio.
+Nell'area di notifica c'è un'icona sempre raggiungibile: apre chat,
+personaggio e motori, mostra i comandi accanto a lei, attiva la modalità
+fantasma, riavvia, apre il log, chiude tutto. Serve soprattutto in modalità
+fantasma, quando i click attraversano il personaggio.
 
 Se il backend è già avviato a parte, usa `npm run start:attach`.
 
@@ -352,21 +401,37 @@ serve.
 
 | Azione | Effetto |
 |--------|---------|
-| **tasto destro** sul personaggio | apre il pannello sulle impostazioni (voce, lingua, dimensione, comportamenti, modello 3D) |
+| **tasto destro** sul personaggio | apre (o chiude) i **dock** ai suoi lati |
 | **doppio click** sul personaggio | apre il pannello sulla chat |
 | inizia a digitare | apre la chat e ci scrive dentro |
 | `Invio` / `Maiusc+Invio` | manda il messaggio / va a capo |
-| `Esc` | chiude il pannello, oppure interrompe la voce |
+| `Esc` | chiude i dock o il pannello, oppure interrompe la voce |
 | trascina un `.vrm` | carica un altro modello al volo |
 | **rotellina** sul personaggio | la ingrandisce o rimpicciolisce (nel browser: zoom della camera) |
 
-Nel browser (senza Electron) il pannello non c'è: tasto destro e doppio click
-aprono il menu e la casella dentro la pagina.
+**I dock.** Due archi di vetro scuro ai lati del busto, che la seguono anche
+seduta o sdraiata, e si richiudono da soli quando il cursore se ne va:
 
-Le due **spie di stato** (backend e OpenClaw) stanno in alto a sinistra: si
-mostrano da sole quando qualcosa cambia e poi svaniscono, ma restano fisse se
-c'è un problema. Passandoci sopra il mouse ricompaiono, e il tooltip dice cosa
-non va.
+| A sinistra: lo stato | A destra: dove andare |
+|----------------------|------------------------|
+| **cervello** — verde se risponde, ambra che gira mentre pensa, rosso se è spento; clic = scheda Motori | **chat** |
+| **voce** — l'anello si riempie col volume mentre parla; clic = voce spenta/accesa | **personaggio** — voce, aspetto, comportamento, azioni |
+| **microfono** — livello mentre ti ascolta; clic = parla | **motori** — cervello, voce, ascolto |
+| **musica** — batte a tempo con Spotify; clic = balla o no | **spegni** — secondo clic per confermare |
+
+Passando sopra un bottone compare una didascalia con il dettaglio ("Claude
+Code: pronto", "OpenClaw: spento — Gateway OpenClaw spento"...). Con la voce
+spenta risponde solo per iscritto, e una voce a consumo non spende caratteri.
+
+**Il pannello** ha tre schede. **Chat**, con le risposte in markdown, gli
+errori spiegati in una scheda con il rimedio, il microfono e "fai solo
+leggere"; in alto si vede sempre chi sta rispondendo. **Personaggio**, con il
+selettore delle voci (ricerca, filtro per lingua, ascolto di prova: le
+anteprime di ElevenLabs non costano caratteri), la lingua delle risposte,
+dimensione, bocca, comportamenti e azioni. **Motori**, descritta sotto.
+
+Nel browser (senza Electron) i dock ci sono lo stesso: la chat si apre dentro
+la pagina, personaggio e motori in una finestra a parte.
 
 ### Comportamento da mascotte (solo Electron)
 
@@ -399,7 +464,9 @@ la fisica (cadute, bordi, finestre) in `electron/pet-physics.js`. Su macOS e
 Linux restano pavimento e bordi dello schermo.
 
 Scala, primo piano e aggancio del pannello si salvano in `pet-settings.json`
-nella cartella dati di Electron (`%APPDATA%/desk-companion-shell` su Windows).
+nella cartella dati di Electron (`%APPDATA%\Tsukumo` su Windows). Al primo
+avvio col nuovo nome le impostazioni, la chat e le preferenze di
+`%APPDATA%\desk-companion-shell` vengono copiate lì da sole.
 
 Variabili utili per il debug: `DC_PET_DEBUG=1` scrive nel terminale cosa vede
 il renderer (cursore, alpha, stato della finestra), `DC_PET_WIDTH` /
@@ -407,8 +474,11 @@ il renderer (cursore, alpha, stato della finestra), `DC_PET_WIDTH` /
 
 ### Le animazioni del corpo
 
-Tutto il movimento è procedurale (`frontend/src/body.js`), senza clip di
-animazione, ispirato a come si muovono i personaggi di Desktop Mate:
+Tutto il movimento è procedurale, senza clip di animazione, ispirato a come si
+muovono i personaggi di Desktop Mate. `frontend/src/body.js` è l'animatore;
+in `frontend/src/body/` ci sono i suoi mattoni: curve e molle (`motion.js`),
+l'accumulatore della posa (`pose.js`), le azioni spontanee e i gesti del
+parlato (`actions.js`), le costanti (`constants.js`).
 
 | Quando | Cosa fa |
 |--------|---------|
@@ -457,26 +527,29 @@ usa direttamente le variabili d'ambiente (hanno la precedenza sul file).
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
 | `DC_HOST` / `DC_PORT` | `127.0.0.1` / `8770` | indirizzo del backend |
-| `DC_LLM_BACKEND` | `ollama` | `ollama`, `openai` (LM Studio e affini) oppure `mock` |
+| `DC_LLM_BACKEND` | `ollama` | il cervello: `claude_code`, `codex`, `openclaw`, `hermes`, `command`, `openai` (LM Studio e affini), `ollama`, `anthropic`, `gemini`, `groq`, `openrouter`, `deepseek`, `mistral`, `together`, `mock` |
 | `DC_OLLAMA_URL` | `http://127.0.0.1:11434` | endpoint di Ollama |
 | `DC_OLLAMA_MODEL` | `llama3.2` | modello da usare con Ollama |
 | `DC_OPENAI_BASE_URL` | `http://127.0.0.1:1234/v1` | endpoint stile OpenAI (default di LM Studio) |
 | `DC_OPENAI_MODEL` | `auto` | modello da usare, o `auto` per il primo caricato |
 | `DC_OPENAI_API_KEY` | *(vuoto)* | quasi mai necessaria per un server locale |
+| `DC_OPENCLAW_URL` | `http://127.0.0.1:18789` | Gateway OpenClaw |
 | `DC_OPENCLAW_AGENT_ID` | `main` | quale agente OpenClaw "diventa" il companion (meglio un agente dedicato: vedi sopra) |
 | `DC_OPENCLAW_TOKEN` | *(vuoto)* | letto da `~/.openclaw/openclaw.json` se vuoto |
-| `DC_LLM_FALLBACK` | `1` | se l'LLM non risponde, usa il mock |
-| `DC_SYSTEM_PROMPT` | vedi `config.py` | personalità del companion |
-| `DC_HISTORY_TURNS` | `12` | turni di conversazione ricordati |
-| `DC_TTS_ENGINE` | `kokoro` | `kokoro`, `kokoro_http` o `formant` |
-| `DC_VOICE` | `af_heart` | voce Kokoro |
+| `DC_CLAUDE_CODE_MODEL` / `_CWD` / `_TOOLS` | account / home / web+lettura | modello, cartella e strumenti di Claude Code |
+| `DC_CODEX_MODEL` / `_CWD` / `_SANDBOX` | config.toml / home / `read-only` | modello, cartella e permessi di Codex |
+| `DC_HERMES_BASE_URL` | `http://127.0.0.1:8642/v1` | API server di Hermes Agent |
+| `DC_AGENT_COMMAND` | *(vuoto)* | il comando dell'agente generico, con `{prompt}` |
+| `DC_LLM_FALLBACK` | `0` | se il cervello non risponde, rispondi con il mock invece di mostrare l'errore |
+| `DC_STATUS_INTERVAL` | `10` | secondi fra un controllo dei motori e l'altro |
+| `DC_SYSTEM_PROMPT` | vedi `config.py` | personalità (solo per i modelli: gli agenti hanno la loro) |
+| `DC_HISTORY_TURNS` | `12` | turni di conversazione ricordati (gli agenti ricordano da sé) |
+| `DC_TTS_ENGINE` | `kokoro` | `kokoro`, `kokoro_http`, `piper`, `system`, `elevenlabs`, `openai_tts`, `azure`, `google_tts`, `cartesia`, `edge`, `formant` |
+| `DC_VOICE` | `af_heart` | voce Kokoro (gli altri motori hanno il loro campo, es. `DC_ELEVENLABS_VOICE`) |
 | `DC_SPEED` | `1.0` | velocità di lettura |
 | `DC_LANGUAGE` | `en-us` | pronuncia di riserva, se il nome della voce non dice la lingua |
 | `DC_REPLY_LANGUAGE` | `auto` | `auto` (lingua della voce), `same` (lingua in cui scrivi) o una lingua (`English`, `it`...) |
-| `DC_TTS_FALLBACK` | `1` | se Kokoro non parte, usa la voce di servizio |
-| `DC_OPENCLAW_ENABLED` | `1` | mostra la spia del Gateway OpenClaw |
-| `DC_OPENCLAW_URL` | `http://127.0.0.1:18789` | Gateway da sondare |
-| `DC_OPENCLAW_INTERVAL` | `5` | secondi fra un controllo e l'altro |
+| `DC_TTS_FALLBACK` | `1` | se la voce non parte all'avvio, usa la voce di servizio (il pannello dice perché) |
 | `DC_VISEME_GAIN` | `1.15` | quanto si apre la bocca |
 | `DC_VISEME_SILENCE` | `0.07` | soglia di silenzio (0–1) |
 | `DC_KOKORO_MODEL` | `models/kokoro-v1.0.onnx` | percorso del modello |
@@ -493,10 +566,16 @@ portoghese, `z` cinese). Con `af_heart` risponde sempre in inglese anche se le
 scrivi in italiano; scegliendo `if_sara` o `im_nicola` passa tutto
 all'italiano, pronuncia compresa.
 
-A ogni turno il backend aggiunge all'LLM un'istruzione esplicita ("rispondi
-sempre in inglese, testo semplice, niente emoji"). Con OpenClaw, che ha una
-personalità sua e non riceve il nostro system prompt, l'istruzione viaggia
-davanti al messaggio: senza, l'agente risponderebbe nella lingua in cui scrivi.
+Le voci Microsoft e Google lo dicono col prefisso (`it-IT-ElsaNeural`); le voci
+**multilingua** (ElevenLabs, OpenAI, le `…Multilingual…` di Azure) sanno
+pronunciare tutto, e con loro risponde nella lingua in cui scrivi. Con
+ElevenLabs e Cartesia la lingua si può anche forzare dal pannello.
+
+A ogni turno il backend aggiunge al cervello un'istruzione esplicita ("rispondi
+sempre in inglese, testo semplice, niente emoji"). Gli agenti, che hanno una
+personalità loro e non ricevono il nostro system prompt, la ricevono davanti al
+messaggio (Claude Code come `--append-system-prompt`): senza, risponderebbero
+nella lingua in cui scrivi e in markdown.
 
 Voce e lingua si cambiano al volo dal pannello; da `.env`:
 
@@ -509,41 +588,62 @@ DC_REPLY_LANGUAGE=auto
 L'elenco completo delle voci disponibili è in `GET /api/voices` e nella
 tendina del pannello, raggruppato per lingua.
 
-### La spia di OpenClaw
+### Lo stato dei motori
 
-Sotto il badge di stato, in alto a sinistra, c'è una seconda pillola che dice
-se il [Gateway OpenClaw](https://openclaw.ai) è raggiungibile:
+Prima c'era una spia sola, per il Gateway OpenClaw, anche quando il cervello
+era un altro. Ora il backend controlla **qualunque** motore attivo ogni
+`DC_STATUS_INTERVAL` secondi e avvisa solo quando qualcosa cambia (messaggio
+WebSocket `engines`). Lo stato si vede nell'anello del cervello accanto al
+personaggio, nel cerchio accanto al nome nel pannello, nella scheda Motori:
 
 | Colore | Stato | Significato |
 |--------|-------|-------------|
-| 🟢 verde | `online` | il Gateway risponde e si dichiara pronto |
-| 🟡 giallo | `degraded` | risponde, ma `/readyz` segnala qualcosa che non va (es. un canale che non parte) |
-| 🔴 rosso | `offline` | il Gateway non è in ascolto |
-| ⚪ grigio | `unknown` | il backend del companion non è raggiungibile, quindi non lo sappiamo |
+| 🟢 verde | `online` | risponde |
+| 🟡 giallo | `degraded` | risponde, ma con un problema (Gateway non pronto, modello non caricato, ultimo turno fallito, voce di ripiego) |
+| 🔴 rosso | `offline` | non raggiungibile: il motivo è scritto accanto |
+| ⚪ grigio | `unknown` / `off` | non ancora controllato, o spento di proposito (ascolto disattivato) |
 
-Il backend interroga le probe **non autenticate** del Gateway — `GET /health`
-per la liveness e `GET /readyz` per la readiness — ogni 5 secondi, e manda un
-messaggio WebSocket `{"type": "openclaw", ...}` **solo quando lo stato
-cambia**. Passando il mouse sulla pillola compaiono URL, versione del Gateway
-e il motivo dell'eventuale problema.
-
-Non serve nessun token: quelle due probe sono pubbliche per progetto. Se il tuo
-Gateway è su un'altra porta, cambia `DC_OPENCLAW_URL`; con
-`DC_OPENCLAW_ENABLED=0` la pillola sparisce.
-
-Per uno snapshot da riga di comando:
+Ogni motore sa controllarsi senza effetti collaterali: OpenClaw con le probe
+pubbliche del Gateway (`/health` e `/readyz`, senza token e senza aprire la
+chat), Claude Code e Codex cercando il programma e il login, i server HTTP con
+una richiesta leggera. Nessun controllo può bloccare il backend: `/api/health`
+risponde sempre subito dalla cache. Era proprio un controllo di OpenClaw fatto
+dentro `/api/health`, col Gateway spento, a far dare per morto il backend
+all'avvio dal desktop.
 
 ```bash
-curl http://127.0.0.1:8770/api/openclaw
+curl http://127.0.0.1:8770/api/status     # forza un controllo adesso
 ```
 
-### I tre motori TTS
+### Le voci
 
-| `DC_TTS_ENGINE` | Cosa usa | Quando serve |
-|-----------------|----------|--------------|
-| `kokoro` | `kokoro-onnx` in-process | **default**, tutto locale |
-| `kokoro_http` | un server [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) già avviato | se lo hai già, magari con GPU |
-| `formant` | sintetizzatore di vocali integrato | provare la catena senza scaricare i pesi |
+| `DC_TTS_ENGINE` | Cosa usa | Costo |
+|-----------------|----------|-------|
+| `kokoro` | `kokoro-onnx` in-process, tempi esatti per fonema | **default**, gratis e locale |
+| `kokoro_http` | un server [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) già avviato | gratis |
+| `piper` | voci Piper leggerissime | gratis |
+| `system` | le voci di Windows (SAPI) | gratis |
+| `elevenlabs` | ElevenLabs, con i tempi di ogni lettera per il lip-sync | piano gratuito, poi a consumo |
+| `openai_tts` | `gpt-4o-mini-tts` (accetta istruzioni sul tono) o qualunque server `/v1/audio/speech` | a consumo |
+| `azure` | Azure Speech, centinaia di voci neurali | 500 mila caratteri gratis al mese |
+| `google_tts` | Google Cloud Text-to-Speech | quota gratuita mensile |
+| `cartesia` | Cartesia Sonic, latenza bassissima | piano gratuito, poi a consumo |
+| `edge` | le voci di Microsoft Edge, senza chiave (servizio non ufficiale) | gratis |
+| `formant` | sintetizzatore di vocali integrato, per provare il lip-sync | gratis |
+
+Per le voci a pagamento la scheda Motori fa quasi tutto da sola: incolli la
+chiave, premi **Verifica** e vedi se è valida, le voci del tuo account (che
+diventano suggerimenti nel campo Voce) e, per ElevenLabs, quanti caratteri ti
+restano nel mese e quando si rinnova il piano. Poi **Usa questo**: se qualcosa
+non va il backend rimette il motore di prima e ti dice perché, invece di
+ripiegare in silenzio su una voce robotica. Il selettore delle voci nella
+scheda Personaggio si riempie con l'elenco del motore attivo; ogni motore
+ricorda la sua voce.
+
+Con ElevenLabs il companion chiede l'endpoint `with-timestamps`: oltre
+all'audio arrivano l'inizio e la fine di ogni lettera, e la bocca resta
+precisa quanto con Kokoro. Tutte le voci in rete chiedono audio PCM grezzo (o
+WAV), quindi non serve nessun decoder in più.
 
 `formant` non è una voce realistica: genera le formanti corrette di A/E/I/O/U,
 quindi è perfetto per verificare che il lip-sync funzioni, ma non per
@@ -611,9 +711,10 @@ si muove sulla sola ampiezza, come un lip-sync "a volume".
 **Client → server**
 
 ```jsonc
-{ "type": "chat",   "text": "ciao, come va?" }   // LLM + voce
-{ "type": "say",    "text": "buongiorno" }        // solo voce
-{ "type": "settings", "voice": "if_sara", "replyLanguage": "auto" }  // voce e lingua, a caldo
+{ "type": "chat",   "text": "ciao, come va?" }   // cervello + voce
+{ "type": "say",    "text": "buongiorno", "voice": "if_sara" }   // solo voce
+{ "type": "settings", "voice": "if_sara", "replyLanguage": "auto", "muted": false }  // a caldo
+{ "type": "voice",  "audio": "<pcm16 16 kHz in base64>" }         // dal microfono
 { "type": "cancel" }                              // interrompe il turno
 { "type": "reset" }                               // svuota la conversazione
 { "type": "ping" }
@@ -622,19 +723,25 @@ si muove sulla sola ampiezza, come un lip-sync "a volume".
 **Server → client**
 
 ```jsonc
-{ "type": "hello",  "version": "1.0.0", "config": {...}, "voices": [...],
-                    "blendshapes": {...}, "avatar": {...} }
+{ "type": "hello",  "version": "2.0.0", "config": {...}, "voices": [...],
+                    "engines": {...}, "blendshapes": {...}, "avatar": {...} }
+{ "type": "engines", "llm": { "id": "claude_code", "label": "Claude Code",
+                              "state": "online", "detail": null, ... },
+                     "tts": {...}, "stt": {...} }  // solo quando qualcosa cambia
+{ "type": "voices", "voices": [ { "id": "if_sara", "name": "Sara",
+                     "language": "it", "gender": "female", "preview": "" } ] }
 { "type": "state",  "value": "thinking" | "speaking" | "idle" }
 { "type": "token",  "text": "frammento " }        // streaming dell'LLM
 { "type": "speech", "text": "Ciao!", "format": "wav", "sampleRate": 24000,
                     "duration": 1.42, "audio": "<wav in base64>",
                     "visemes": [ { "t": 0.08, "d": 0.11, "v": "a", "w": 0.73 } ],
                     "mood": "happy" }             // umore dalle emoji tolte, o null
-{ "type": "settings", "voice": "...", "replyLanguage": "auto", "replyLanguageResolved": "English" }
-{ "type": "reply",  "text": "risposta completa", "elapsed": 2.31 }
-{ "type": "openclaw", "state": "online" | "degraded" | "offline",
-                    "connected": true, "url": "...", "version": "...", "error": null }
-{ "type": "notice" | "error", "message": "..." }
+{ "type": "caption", "text": "Ciao!" }         // frase senza audio (voce spenta o guasta)
+{ "type": "settings", "voice": "...", "replyLanguage": "auto", "replyLanguageResolved": "English",
+                    "voiceLanguage": "en", "muted": false }
+{ "type": "reply",  "text": "risposta completa", "elapsed": 2.31, "failed": false }
+{ "type": "notice" | "error", "message": "...", "source": "llm" | "tts" | "stt",
+                    "hint": "come rimediare", "action": "engines" }
 { "type": "pong" }
 ```
 
@@ -648,10 +755,13 @@ due finestre, entrambe mostrano lo stesso avatar parlare.
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
-| `GET` | `/api/health` | stato di TTS, LLM e avatar |
+| `GET` | `/api/health` | vivo? Risponde sempre subito, con l'ultimo stato noto dei motori |
+| `GET` | `/api/status` | stato dei motori, forzando un controllo |
 | `GET` | `/api/config` | configurazione pubblica e mappa delle blendshape |
-| `GET` | `/api/voices` | voci disponibili |
-| `GET` | `/api/openclaw` | stato del Gateway OpenClaw (forza un controllo) |
+| `GET` | `/api/providers` | tutti i motori con i loro schemi, quelli attivi, i valori salvati (segreti mascherati) |
+| `POST` | `/api/providers/check` | prova un motore con dei valori, **senza** attivarlo |
+| `POST` | `/api/providers` | attiva un motore (salva in `.env`, ripristina se fallisce) |
+| `GET` | `/api/voices` | voci del motore attivo, con lingua e genere |
 | `POST` | `/api/say` | sintetizza un testo (l'audio va ai client WS) |
 | `POST` | `/api/chat` | turno completo con l'LLM |
 | `POST` | `/api/cancel` | interrompe |
@@ -679,37 +789,55 @@ La documentazione interattiva generata da FastAPI è su
 desk-companion/
 ├── backend/
 │   ├── __main__.py        # python -m backend
-│   ├── server.py          # FastAPI: WebSocket, REST, file statici
-│   ├── pipeline.py        # LLM -> frasi -> TTS -> visemi -> broadcast
+│   ├── server.py          # FastAPI: WebSocket, REST, verifica/cambio motori, file statici
+│   ├── pipeline.py        # cervello -> frasi -> voce -> visemi -> broadcast
+│   ├── status.py          # stato dei motori attivi (sostituisce la vecchia spia OpenClaw)
+│   ├── providers.py       # registro dei motori: schema, categoria, costo
+│   ├── provider_specs.py  # la dichiarazione di ogni motore: il pannello si disegna da qui
 │   ├── config.py          # impostazioni da env / .env
+│   ├── languages.py       # lingua della voce e lingua delle risposte
 │   ├── audio.py           # WAV, base64, inviluppo RMS
-│   ├── openclaw.py        # spia verde/rossa del Gateway OpenClaw
-│   ├── phonemes.py        # IPA e G2P -> visemi (fcl_mth_*)
+│   ├── phonemes.py        # IPA, G2P e tempi per lettera -> visemi (fcl_mth_*)
 │   ├── visemes.py         # allineamento fonemi <-> energia dell'audio
-│   ├── llm/               # ollama.py, openai_compatible.py (LM Studio...), openclaw.py, mock.py
-│   └── tts/               # kokoro_engine.py, kokoro_http.py, formant.py
+│   ├── llm/               # cli_agents.py (Claude Code, Codex, comando), openclaw.py,
+│   │                      # openai_compatible.py (LM Studio, cloud, Hermes), ollama.py,
+│   │                      # anthropic.py, gemini.py, mock.py
+│   ├── tts/               # kokoro_engine.py, kokoro_http.py, elevenlabs.py,
+│   │                      # cloud.py (OpenAI, Azure, Google, Cartesia), edge.py, piper.py,
+│   │                      # system.py, formant.py
+│   └── stt/               # faster_whisper_engine.py, http_engines.py
 ├── frontend/
-│   ├── index.html
+│   ├── index.html         # il personaggio
+│   ├── panel.html         # il pannello
 │   └── src/
-│       ├── main.js        # collega tutti i pezzi
+│       ├── main.js        # collega tutti i pezzi del personaggio
+│       ├── hud.js         # i dock ad arco ai suoi lati
 │       ├── vrm.js         # Three.js + three-vrm, sguardo, blink, blendshape
 │       ├── body.js        # animazione del corpo: postura, IK, gesti, reazioni
-│       ├── panel.js       # pannello Electron: chat e impostazioni
+│       ├── body/          # motion.js, pose.js, actions.js, constants.js
+│       ├── panel.js       # il pannello: schede, testata, connessione
+│       ├── panel/         # chat.js, character.js (voci, aspetto, comportamento)
+│       ├── engines.js     # scheda Motori, disegnata da /api/providers
+│       ├── markdown.js    # markdown sicuro per la chat
+│       ├── icons.js       # icone a tratto, offline
 │       ├── lipsync.js     # timeline + RMS -> pesi della bocca
 │       ├── audio.js       # coda WebAudio + misura RMS
 │       ├── ws.js          # WebSocket con riconnessione
-│       ├── ui.js          # DOM
-│       └── style.css
+│       ├── ui.js          # DOM del personaggio
+│       └── theme.css, style.css, panel.css
 ├── electron/
-│   ├── main.js            # finestre (personaggio + pannello), icona, IPC
+│   ├── main.js            # finestre, avvio del backend con attesa e riprova, icona, IPC
 │   ├── pet-physics.js     # cadute, barra, bordi, finestre su cui sedersi
 │   ├── desktop.js         # finestre degli altri programmi (Windows, via koffi)
 │   └── preload.js
+├── tests/                 # pytest: testo, lingue, visemi, agenti, pipeline, API
 ├── scripts/
 │   └── download_models.py # pesi Kokoro, con ripresa del download
 ├── models/                # <- i pesi finiscono qui (non versionati)
-├── requirements.txt
-├── start.ps1 / start.sh
+├── state/                 # sessioni degli agenti (non versionate)
+├── Tsukumo.vbs            # avvio dal desktop senza terminale
+├── requirements.txt / requirements-dev.txt
+├── start.ps1 / start.sh   # -Setup, -Dev, -Electron, -Shortcut, -Test
 └── .env.example
 ```
 
@@ -717,9 +845,21 @@ desk-companion/
 
 ## Risoluzione dei problemi
 
-**«Backend non raggiungibile»**
-Il server Python non è partito. Avvialo con `python -m backend` e guarda il
-log: se dice `Motore TTS 'kokoro' non disponibile`, mancano i pesi.
+**Doppio click sul collegamento e non succede niente, o «Non riesco ad avviare Tsukumo»**
+Il biglietto accanto al personaggio mostra le ultime righe del backend; il resto
+è in `logs\companion.log` (icona nell'area di notifica → **Apri il log**). Le
+cause più comuni: dipendenze Python mancanti (`.\start.ps1 -Setup`), un altro
+programma sulla porta 8770 (cambia `DC_PORT`), frontend non compilato. Dopo aver
+sistemato, **Riavvia** dalla stessa icona.
+
+**Il cervello non risponde**
+Nella chat compare una scheda rossa con il motivo e un tasto per la scheda
+Motori; lì **Verifica** ripete il controllo e dice cosa manca. Per OpenClaw
+controlla che il Gateway sia acceso (`openclaw gateway status`); per Claude
+Code e Codex che il programma sia installato e abbia fatto il login; per i
+servizi in rete la chiave. Se l'agente risponde ma con un errore suo ("provider
+rejected the request schema or tool payload" di OpenClaw, per esempio) il
+problema è nella configurazione dell'agente, non in Tsukumo.
 
 **«Manca il modello 3D»**
 Copia un `.vrm` in `frontend/public/models/avatar.vrm`, oppure trascinalo sulla
@@ -750,8 +890,9 @@ molto più rapide. Sulle CPU lente, `--variant int8` fa una bella differenza.
 **Ollama risponde con markdown che viene letto ad alta voce**
 Il backend toglie già `* _ ` # >` ed emoji/faccine (`:)`, `<3`...), ma la cosa
 migliore è irrobustire `DC_SYSTEM_PROMPT`: «plain text only, no markdown».
-Con OpenClaw il system prompt non passa (la personalità è quella dell'agente),
-quindi lì conta solo la ripulitura lato backend.
+Agli agenti il system prompt non passa (la personalità è la loro): ricevono
+invece la regola del parlato davanti al messaggio, e il resto lo toglie la
+ripulitura lato backend. In chat il markdown resta, formattato.
 
 **Errori ONNX Runtime all'avvio (`DLL load failed`, `onnxruntime` non importabile)**
 Su Windows serve il
@@ -760,7 +901,12 @@ Nel frattempo il backend continua a funzionare con `DC_TTS_ENGINE=formant`.
 
 **La finestra Electron è tutta nera invece che trasparente**
 Su alcune configurazioni Linux la trasparenza richiede un compositore attivo.
-Attiva la casella **Sfondo** nell'interfaccia per avere uno sfondo opaco.
+
+**Test**
+`.\start.ps1 -Test` (o `./start.sh --test`) esegue i test del backend: testo
+e frasi, lingue, visemi, parser degli agenti con righe registrate dal vivo,
+pipeline con errori e interruzioni, API e WebSocket. Non usano rete, modelli
+né il tuo `.env`.
 
 ---
 
