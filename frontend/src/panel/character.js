@@ -81,6 +81,7 @@ export class CharacterView {
 
   shown() {
     this._showWeather?.();
+    this._loadIntegrations?.();
   }
 
   // ----------------------------------------------------------------- DOM
@@ -218,6 +219,7 @@ export class CharacterView {
       this.ghost.node,
     );
     const chatterCard = this._chatterCard();
+    const agentsCard = this._agentsCard();
 
     // Azioni ---------------------------------------------------------------
     const chips = ACTIONS.map((action) =>
@@ -251,7 +253,72 @@ export class CharacterView {
     if (!this.companion) {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
     }
-    this.root.append(voiceCard, chatterCard, lookCard, behaviourCard, actionsCard, moreCard);
+    this.root.append(voiceCard, chatterCard, agentsCard, lookCard, behaviourCard, actionsCard, moreCard);
+  }
+
+  /**
+   * Avvisi da Claude Code e Codex usati per conto tuo (vedi backend/notify.py).
+   * Collegarli scrive nelle loro configurazioni: solo quando premi il pulsante.
+   */
+  _agentsCard() {
+    const list = el('div', { class: 'integration-list' });
+    const render = (status) => {
+      list.replaceChildren(
+        ...['claude', 'codex'].map((tool) => {
+          const item = status?.[tool];
+          if (!item) return null;
+          const state = item.installed ? 'Collegato' : item.conflict ? 'Ha già un suo avviso' : item.available ? 'Non collegato' : 'Non installato';
+          const button = el(
+            'button',
+            {
+              class: `btn${item.installed ? '' : ' primary'}`,
+              type: 'button',
+              disabled: !item.available || item.conflict,
+              onClick: () => change(tool, item.installed ? 'uninstall' : 'install'),
+            },
+            el('span', {}, item.installed ? 'Scollega' : 'Collega'),
+          );
+          return el(
+            'div',
+            { class: 'integration' },
+            el('span', { class: 'integration-text' }, el('strong', {}, item.label), el('small', { title: item.file }, state)),
+            button,
+          );
+        }),
+      );
+    };
+    const load = () =>
+      fetch(apiUrl('/api/integrations'))
+        .then((response) => (response.ok ? response.json() : null))
+        .then(render)
+        .catch(() => {});
+    const change = async (tool, action) => {
+      try {
+        const response = await fetch(apiUrl('/api/integrations'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tool, action }),
+        });
+        const data = await response.json();
+        if (!data.ok) throw new Error(data.error ?? data.detail ?? `HTTP ${response.status}`);
+        render(data.status);
+        this.app.toast(action === 'install' ? 'Collegato: ti chiamo quando ha finito.' : 'Scollegato.');
+      } catch (error) {
+        this.app.toast(error.message, 'error');
+      }
+    };
+    load();
+    this._loadIntegrations = load;
+    return this._card(
+      'robot',
+      'Avvisi dagli agenti',
+      el(
+        'p',
+        { class: 'card-sub' },
+        'Quando Claude Code o Codex, usati per conto tuo, finiscono un lavoro (o ti aspettano), lei ti chiama. Se stai già guardando l’editor basta una bolla.',
+      ),
+      list,
+    );
   }
 
   /**

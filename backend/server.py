@@ -23,6 +23,8 @@ Server -> client::
     {"type": "reminder", "event": "fired", "reminder": {...}}  # uno e' appena scattato
     {"type": "gesture", "name": "yawn"}      # un gesto che accompagna un commento spontaneo
     {"type": "preferences", ...}             # quanto chiacchiera e di cosa
+    {"type": "notify", "source": "claude", "title": "Claude Code", ...}  # un agente esterno ha finito
+    {"type": "capture", "text": "..."}       # "guarda lo schermo": fai uno screenshot
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "user",   "text": "..."}
     {"type": "token",  "text": "..."}        # streaming del cervello
@@ -48,6 +50,7 @@ import binascii
 import contextlib
 import dataclasses
 import importlib.util
+import json
 import logging
 import os
 import time
@@ -69,6 +72,7 @@ from .attachments import MAX_UPLOAD_BYTES, store_upload
 from .config import Settings, save_dotenv
 from .context import PCContext
 from .news import NewsService
+from . import notify as agent_notify
 from .preferences import Preferences
 from .proactive import Proactive
 from .reminders import (
@@ -211,6 +215,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _spawn(_load_voices(app.state.companion), report=False)
     global _reminders_wake
     _reminders_wake = asyncio.Event()
+    _write_running_marker()
     reminder_task = asyncio.create_task(_reminder_loop(), name="reminders")
     if SETTINGS.proactive:
         await PROACTIVE.start()
@@ -233,6 +238,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with contextlib.suppress(asyncio.CancelledError):
             await reminder_task
         await PROACTIVE.stop()
+        _running_marker().unlink(missing_ok=True)
         await monitor.stop()
         await app.state.companion.close()
         logger.info("Tsukumo arrestato")
@@ -273,6 +279,17 @@ class SayRequest(BaseModel):
     text: str = Field(..., min_length=1, description="Testo da pronunciare")
     voice: str | None = Field(None, description="Voce del motore attivo")
     speed: float | None = Field(None, gt=0.25, le=3.0, description="Velocita' di lettura")
+
+
+class NotifyRequest(BaseModel):
+    message: str = Field("", description="L'ultimo messaggio dell'agente")
+    source: str = Field("", description="claude, codex, o un nome qualsiasi")
+    kind: str = Field("done", description="done (ha finito) oppure waiting (ti aspetta)")
+
+
+class IntegrationRequest(BaseModel):
+    tool: str = Field(..., description="claude oppure codex")
+    action: str = Field(..., description="install oppure uninstall")
 
 
 class ReminderRequest(BaseModel):
@@ -781,6 +798,74 @@ async def delete_reminder(reminder_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Promemoria non trovato")
     await _reminders_changed()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Avvisi dagli agenti esterni (Claude Code, Codex)
+# ---------------------------------------------------------------------------
+def _running_marker() -> Path:
+    return SETTINGS.state_dir / "running.json"
+
+
+def _write_running_marker() -> None:
+    """Dice agli hook (scripts/tsukumo_notify.py) che il backend e' acceso e dove."""
+    try:
+        SETTINGS.state_dir.mkdir(parents=True, exist_ok=True)
+        _running_marker().write_text(
+            json.dumps({"host": SETTINGS.host, "port": SETTINGS.port, "pid": os.getpid()}), encoding="utf-8"
+        )
+    except OSError as exc:  # pragma: no cover
+        logger.warning("Segnale per gli hook non scritto: %s", exc)
+
+
+#: Quando ha parlato l'ultima volta di un agente esterno (per non ripetersi).
+_last_notice = {"at": 0.0}
+
+
+@app.post("/api/notify")
+async def api_notify(request: NotifyRequest) -> dict[str, Any]:
+    """Un agente esterno ha finito (o ti aspetta): lei ti chiama.
+
+    Se stai gia' guardando l'editor o il terminale basta una bolla; se sei
+    altrove suona, bussa e lo dice; a schermo intero o in riunione solo la
+    notifica di Windows.
+    """
+    instance = companion()
+    source = request.source.strip().lower()
+    kind = "waiting" if request.kind == "waiting" else "done"
+    name = agent_notify.NAMES.get(source, request.source.strip() or "Agente")
+    summary = agent_notify.summary_of(request.message)
+    looking = PC.fresh and PC.idle < 30 and PC.activity.kind == "coding"
+    silent = PC.fresh and PC.activity.dnd
+    now = time.time()
+    quiet = looking or silent or now - _last_notice["at"] < 15
+    await hub.broadcast(
+        {"type": "notify", "source": source, "kind": kind, "title": name, "message": summary, "quiet": quiet, "silent": silent}
+    )
+    if quiet:
+        return {"ok": True, "spoken": False}
+    _last_notice["at"] = now
+    text = agent_notify.announcement(source, kind, summary, instance.voice_language, brief=False)
+    _spawn(instance.announce(text, hub.broadcast, event=f"Avviso da {name}: {summary or kind}"), report=False)
+    return {"ok": True, "spoken": True}
+
+
+@app.get("/api/integrations")
+async def get_integrations() -> dict[str, Any]:
+    return await asyncio.to_thread(agent_notify.status)
+
+
+@app.post("/api/integrations")
+async def set_integration(request: IntegrationRequest) -> dict[str, Any]:
+    """Collega o scollega gli hook di Claude Code / Codex (file fuori dal progetto: solo su richiesta)."""
+    try:
+        result = await asyncio.to_thread(agent_notify.change, request.tool, request.action)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"Richiesta non valida: {exc}") from exc
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc), "status": await asyncio.to_thread(agent_notify.status)}
+    logger.info("Avvisi da %s: %s", request.tool, result)
+    return {"ok": True, "result": result, "status": await asyncio.to_thread(agent_notify.status)}
 
 
 # ---------------------------------------------------------------------------

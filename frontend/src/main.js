@@ -449,16 +449,48 @@ socket.on('gesture', (message) => {
   if (!player.playing || message.name === 'yawn') stage.body?.play(message.name);
 });
 
+/** Ti chiama: campanello, bussa sul vetro, notifica di Windows. */
+function callUser(title, body) {
+  presence.touch();
+  sfx.chime();
+  if (stage.body?.play('knock')) setTimeout(() => sfx.knock(), 520);
+  else stage.body?.play('wave');
+  pet?.notify?.(title, body);
+}
+
+// Un agente che usi per conto tuo (Claude Code, Codex) ha finito o ti aspetta.
+socket.on('notify', (message) => {
+  const title = message.kind === 'waiting' ? `${message.title} ti aspetta` : `${message.title} ha finito`;
+  if (message.silent) {
+    pet?.notify?.(title, message.message ?? '');
+  } else if (message.quiet) {
+    ui.showBubble(`${title} ✓`, 3000);
+  } else {
+    callUser(title, message.message ?? '');
+  }
+});
+
+// Una risposta sua che ci ha messo tanto (un agente al lavoro): quando arriva ti chiama.
+const LONG_TURN_MS = 25_000;
+const turnWatch = { since: 0, called: false };
+socket.on('state', (message) => {
+  if (message.value === 'thinking') {
+    turnWatch.since = performance.now();
+    turnWatch.called = false;
+  }
+});
+socket.on('speech', (message) => {
+  if (turnWatch.called || !turnWatch.since || message.vocal || message.index !== 0) return;
+  turnWatch.called = true;
+  const waited = performance.now() - turnWatch.since;
+  if (waited > LONG_TURN_MS && state.activity?.kind !== 'tsukumo') callUser('Tsukumo', message.text ?? 'Ho finito!');
+});
+
 // Un promemoria o un timer e' scattato: campanello, bussa sul vetro, notifica.
 socket.on('reminder', (message) => {
   if (message.event !== 'fired') return;
-  presence.touch();
-  sfx.chime();
   // Il toc-toc arriva quando il pugno tocca il vetro (vedi l'azione knock).
-  if (stage.body?.play('knock')) setTimeout(() => sfx.knock(), 520);
-  else stage.body?.play('wave');
-  const label = message.reminder?.label ?? 'Promemoria';
-  pet?.notify?.('Tsukumo', label);
+  callUser('Tsukumo', message.reminder?.label ?? 'Promemoria');
 });
 
 // Cosa fa l'utente al PC (vedi backend/context.py): guarda un video, e' in riunione...

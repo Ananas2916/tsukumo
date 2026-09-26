@@ -176,6 +176,8 @@ export const ACTIONS = {
   /** Bussa sul vetro dello schermo, verso di te: promemoria e notifiche. */
   knock: {
     duration: 1.9,
+    // Una reazione: la voce che parte subito dopo non la interrompe.
+    reaction: true,
     modes: ['stand', 'sit'],
     run(pose, u, w, t, action) {
       const side = action.sign > 0 ? 'left' : 'right';

@@ -122,7 +122,9 @@ async def stream_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd or None,
-        env={**os.environ, **(env or {})},
+        # TSUKUMO_INTERNAL: gli hook di Claude Code e Codex (scripts/tsukumo_notify.py)
+        # non devono avvisare di una risposta che il companion sta gia' dicendo.
+        env={**os.environ, "TSUKUMO_INTERNAL": "1", **(env or {})},
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
