@@ -224,12 +224,35 @@ const backendTail = [];
 /** Codice di uscita del backend, se e' gia' morto (null = vivo o mai partito). */
 let backendExit = null;
 
+/**
+ * Installata, l'avatar sta nei dati dell'utente: quello scelto dal pannello
+ * resta anche dopo un riavvio o un aggiornamento. La prima volta ci si copia
+ * quello incluso nell'installer.
+ */
+const AVATAR_DIR = path.join(DATA_ROOT, 'avatars');
+
+function prepareAvatars() {
+  if (!PACKAGED) return;
+  try {
+    fs.mkdirSync(AVATAR_DIR, { recursive: true });
+    if (fs.readdirSync(AVATAR_DIR).some((name) => name.toLowerCase().endsWith('.vrm'))) return;
+    const bundled = path.join(PROJECT_ROOT, 'frontend', 'public', 'models');
+    for (const name of fs.readdirSync(bundled)) {
+      if (name.toLowerCase().endsWith('.vrm')) fs.copyFileSync(path.join(bundled, name), path.join(AVATAR_DIR, name));
+    }
+  } catch (error) {
+    console.error('[electron] avatar non preparati:', error.message);
+  }
+}
+
 /** Installata: stato e impostazioni del backend nei dati dell'utente, non fra le risorse. */
 function packagedEnvironment() {
   if (!PACKAGED) return {};
+  prepareAvatars();
   return {
     DC_STATE_DIR: process.env.DC_STATE_DIR || path.join(DATA_ROOT, 'state'),
     DC_ENV_FILE: process.env.DC_ENV_FILE || path.join(DATA_ROOT, 'tsukumo.env'),
+    DC_AVATAR_DIR: process.env.DC_AVATAR_DIR || AVATAR_DIR,
     // Il Python incluso non deve leggere pacchetti installati altrove sul PC.
     PYTHONNOUSERSITE: '1',
   };
@@ -1086,6 +1109,10 @@ ipcMain.handle('pet:pick-model', async () => {
   const file = result.filePaths[0];
   const data = await fs.promises.readFile(file);
   sendToPet('pet:model', { name: path.basename(file), data });
+  // Installata: diventa l'avatar di tutti i prossimi avvii (il backend preferisce avatar.vrm).
+  if (PACKAGED) {
+    fs.promises.writeFile(path.join(AVATAR_DIR, 'avatar.vrm'), data).catch((error) => console.error('[electron] avatar non salvato:', error.message));
+  }
   return true;
 });
 

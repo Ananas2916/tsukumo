@@ -7,7 +7,7 @@ models/*.part
 frontend/public/models/*.vrm
 frontend/public/animations/*.vrma
 frontend/public/animations/CREDITS-*.txt
-# Motion capture scaricato da scripts/import_mocap.mjs (CC BY-NC)
+# Motion capture scaricato a mano (BVH con licenze loro)
 models/mocap/
 
 # Python

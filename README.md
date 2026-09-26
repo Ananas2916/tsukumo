@@ -4,6 +4,12 @@
 > prendono un'anima e cominciano a muoversi. Questo fa lo stesso con la tua
 > scrivania, ma senza aspettare tanto.*
 
+> **Scarica e installa (Windows 10/11):** l'ultimo `Tsukumo Setup <versione>.exe`
+> dalla pagina [Releases](https://github.com/Ananas2916/tsukumo/releases/latest).
+> Non servono Python né Node: doppio click, avanti, fine. Windows SmartScreen
+> la prima volta avvisa che l'app non è firmata: *Ulteriori informazioni →
+> Esegui comunque*.
+
 Un assistente 3D che vive sulla tua scrivania: carica un avatar **VRM**, parla
 con **Kokoro TTS** in locale e muove la bocca in sincronia con l'audio.
 Di default gira **tutto offline** sulla tua macchina, senza chiamate a servizi
@@ -93,22 +99,28 @@ cd desk-companion
 Prima di avviare, copia un file `.vrm` in `frontend/public/models/avatar.vrm`
 (vedi [L'avatar VRM](#lavatar-vrm)).
 
-**Un installer per chi non ha Python né Node**
+**Costruire l'installer**
 
 ```powershell
 .\scripts\build_installer.ps1     # -> electron\dist\Tsukumo Setup <versione>.exe
 ```
 
 Crea un setup per Windows che porta con sé un Python embeddable con le
-dipendenze già installate, il backend, l'interfaccia compilata, le clip,
-l'avatar di `frontend/public/models` e Kokoro (variante `int8`, 92 MB: con
-`-KokoroVariant full` quella da 326 MB). Si installa per l'utente, senza
-diritti di amministratore; impostazioni, stato e log dell'app installata
-stanno in `%APPDATA%\Tsukumo`, così un aggiornamento non li tocca.
-`-SkipInstaller` si ferma a `electron\dist\win-unpacked`, da provare senza
-installare. L'installer non è firmato: Windows SmartScreen chiede conferma
-la prima volta. Distribuiscilo solo se le licenze dell'avatar e delle clip lo
-permettono (le clip Bandai Namco sono CC BY-NC).
+dipendenze già installate, il backend, l'interfaccia compilata, un avatar e
+Kokoro (variante `int8`, 92 MB: con `-KokoroVariant full` quella da 326 MB).
+Si installa per l'utente, senza diritti di amministratore; impostazioni,
+stato, log e l'avatar scelto dell'app installata stanno in
+`%APPDATA%\Tsukumo`, così un aggiornamento non li tocca. `-SkipInstaller` si
+ferma a `electron\dist\win-unpacked`, da provare senza installare.
+
+Di norma l'installer è **pubblico**: l'avatar è Sendagaya Shino, modello di
+esempio di VRoid Studio rilasciato in CC0, non ci sono clip, e la build si
+ferma se un avatar incluso non si può ridistribuire (lo controlla
+`scripts/package_audit.py` leggendo la licenza scritta dentro il `.vrm`).
+Accanto al programma finiscono `LICENSE` e `THIRD-PARTY-NOTICES.txt` con le
+licenze di ogni componente. Con `-IncludeLocalAssets` entrano invece il tuo
+avatar e le tue clip: il file si chiama `... (personale).exe` e non va
+pubblicato.
 
 Al primo avvio il pannello si apre con una presentazione in cinque passi: come
 si usa, come ti chiami, il cervello (fra quelli trovati sul PC), la voce, e un
@@ -553,12 +565,11 @@ le altre dai pulsanti del pannello). Si mescolano alla posa procedurale in
 dissolvenza, solo nelle rotazioni delle ossa. Vedi il README della cartella e
 `frontend/src/clips.js`.
 
-**Motion capture vero, già pronto:** `node scripts/import_mocap.mjs` scarica
-una selezione del Bandai Namco Research Motion Dataset (attori professionisti,
-CC BY-NC 4.0) e la installa: quattro saluti, due inchini, "indica", "chiama",
-"alza la mano" e due balli. Qualunque altro BVH (Mixamo, CMU...) si converte
-con `node scripts/bvh2vrma.mjs clip.bvh clip.vrma --trim`, che lo porta in
-T-pose qualunque sia la sua posa di riposo e lo tiene rivolto verso di te.
+**Da motion capture:** un BVH (Mixamo, CMU...) si converte con
+`node scripts/bvh2vrma.mjs clip.bvh clip.vrma --trim`, che lo porta in T-pose
+qualunque sia la sua posa di riposo e lo tiene rivolto verso di te. Scegli
+riprese naturali: quelle recitate "con stile" (i dataset per la style
+transfer) su una mascotte sembrano un balletto.
 
 Le emoji nelle risposte non vengono lette: diventano l'espressione del viso
 mentre pronuncia quella frase (😊 sorride, 😢 si rattrista, 😮 si stupisce...).
@@ -1169,8 +1180,8 @@ un prodotto proprietario senza restituire le proprie modifiche.
 Hanno licenze proprie, da rispettare separatamente:
 
 - **Kokoro** — modello TTS, Apache 2.0
-- **Bandai Namco Research Motion Dataset** — le clip installate da
-  `scripts/import_mocap.mjs`, CC BY-NC 4.0 (niente uso commerciale)
+- **Sendagaya Shino** — avatar dell'installer, modello di esempio di VRoid
+  Studio (pixiv), CC0
 - **three.js**, **@pixiv/three-vrm** — MIT
 - **Electron**, **FastAPI**, **ONNX Runtime** — MIT / Apache 2.0
 - **Il tuo modello VRM** — licenza dell'autore: se lo hai scaricato, controlla

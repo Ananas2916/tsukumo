@@ -18,17 +18,6 @@ espressioni della clip vengono ignorati, cosi' il personaggio non esce dalla
 finestra e la faccia resta quella del lip-sync. Le clip in piedi funzionano
 meglio: da seduta o sdraiata non partono.
 
-## Motion capture pronto
-
-```
-node scripts/import_mocap.mjs
-```
-
-scarica una selezione del Bandai Namco Research Motion Dataset (attori
-professionisti, licenza CC BY-NC 4.0: uso non commerciale) e la installa qui:
-quattro saluti diversi, due inchini, "indica", "chiama", "alza la mano" e due
-balli. I crediti finiscono in `CREDITS-bandai-namco.txt`.
-
 ## Da un BVH qualsiasi
 
 ```

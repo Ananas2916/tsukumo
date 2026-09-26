@@ -11,6 +11,10 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // public/ contiene solo l'avatar e le clip dell'utente, con licenze loro:
+    // il backend le serve da li' (/models, /animations). Copiarle in dist le
+    // farebbe finire nei pacchetti e nell'installer.
+    copyPublicDir: false,
     target: 'es2022',
     // three.js + three-vrm superano i 500 kB: alziamo la soglia per non
     // riempire il log di warning inutili.

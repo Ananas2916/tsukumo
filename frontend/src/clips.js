@@ -15,7 +15,7 @@
  *   - `alza*`, `here*`, `raise*` quando la chiami per nome (ascolto a chiamata);
  *   - le altre       solo a richiesta, dal pannello (anche bow e alza).
  *
- * `scripts/import_mocap.mjs` ne installa una selezione da motion capture vero.
+ * Da un BVH di motion capture: `scripts/bvh2vrma.mjs`.
  *
  * Si usano solo le rotazioni delle ossa: niente spostamento dei fianchi (la
  * mascotte non deve uscire dalla finestra), niente espressioni ne' sguardo
