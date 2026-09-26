@@ -16,6 +16,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
 import { BodyAnimator } from './body.js';
+import { ClipPlayer } from './clips.js';
 import { DEFAULT_BLENDSHAPES, VISEME_KEYS } from './config.js';
 
 /** Espressioni del viso pilotate dal corpo (umore, spavento, sorriso...). */
@@ -269,6 +270,11 @@ export class VrmStage {
     this.body.dancing = this._dancing;
     this.body.setSleep(this._sleep);
     this.body.onPostureRequest = (posture) => this.onPostureRequest?.(posture);
+    // Clip .vrma (vedi clips.js): ogni tanto al posto di un gesto spontaneo.
+    this.clips = new ClipPlayer(vrm, this.body.managed);
+    this.body.onIdleClip = () => this.body.mode === 'stand' && this.clips.playRole('idle');
+    this.body.isClipPlaying = () => this.clips.playing;
+    if (this._clipList) this.clips.load(this._clipList);
     this.mouthDriver = this._detectMouthDriver(vrm);
     this.blinkDriver = this._detectBlinkDriver(vrm);
     this.moodExpressions = MOOD_EXPRESSIONS.filter((name) => vrm.expressionManager?.getExpression(name));
@@ -282,7 +288,20 @@ export class VrmStage {
 
   /** Saluta con la mano (lo fa quando compare). */
   greet() {
+    if (this.body?.mode === 'stand' && this.clips?.playRole('greet')) return;
     this.body?.play('wave', { sign: -1 });
+  }
+
+  /** Le clip .vrma disponibili (dal backend): si caricano sul modello attuale e sui prossimi. */
+  setClipList(list) {
+    this._clipList = list ?? [];
+    return this.clips ? this.clips.load(this._clipList) : Promise.resolve([]);
+  }
+
+  /** Suona una clip a richiesta (dal pannello). */
+  playClip(name) {
+    if (!this.clips || !['stand', 'sit'].includes(this.body?.mode)) return false;
+    return this.clips.play(name);
   }
 
   _disposeVrm() {
@@ -388,6 +407,13 @@ export class VrmStage {
   /** Ritmo della musica (vedi music.js), a ogni frame. */
   setMusic(state) {
     this.body?.setMusic(state);
+    // Con una clip dance*.vrma balla quella, in loop, finche' la musica suona.
+    const clips = this.clips;
+    if (!clips) return;
+    const dancing = state?.active && this._dancing && this.body?.mode === 'stand';
+    const current = clips.active?.clip;
+    if (dancing && !current && clips.has('dance')) clips.playRole('dance', { loop: true });
+    else if (!dancing && current?.role === 'dance' && !clips.active.stopping) clips.stop();
   }
 
   /** Ballare con la musica si puo' spegnere dal pannello. */
@@ -748,6 +774,9 @@ export class VrmStage {
         viewer: this.camera.position,
         metersPerPixel: this.metersPerPixel,
       });
+      // Le clip .vrma sopra la posa procedurale; solo in piedi o seduta.
+      if (this.clips?.playing && !['stand', 'sit'].includes(this.body.mode)) this.clips.stop();
+      this.clips?.apply(dt);
       this._updateBlink(dt);
       this._applyMoods();
 

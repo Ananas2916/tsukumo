@@ -414,6 +414,10 @@ socket.on('hello', (message) => {
   refreshStatus();
   const config = message.config ?? {};
   if (message.context) state.activity = message.context.activity ?? null;
+  // Clip .vrma della cartella animations (vedi clips.js).
+  stage.setClipList(message.animations ?? []).then((loaded) => {
+    if (loaded?.length) console.info(`[clips] ${loaded.length} animazioni:`, loaded.map((clip) => clip.name).join(', '));
+  });
   hud.setEngines(message.engines);
   voice.setWakeWord(config.wakeWord ?? 'companion');
   voice.interruptOnSpeech = config.voiceInterrupt !== false;
@@ -814,6 +818,9 @@ if (pet) {
         break;
       case 'look-screen':
         lookAtScreen();
+        break;
+      case 'play-clip':
+        stage.playClip(command.name);
         break;
       case 'sleep':
         presence.setEnabled(command.value);

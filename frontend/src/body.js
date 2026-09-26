@@ -168,6 +168,10 @@ export class BodyAnimator {
     this.postureTimer = randomBetween(...POSTURE_DELAY);
     /** Chiamata quando vuole sedersi/sdraiarsi/alzarsi: la esegue Electron. */
     this.onPostureRequest = null;
+    /** Clip .vrma: una a caso al posto di un gesto spontaneo (vero se e' partita). */
+    this.onIdleClip = null;
+    /** Mentre suona una clip il corpo non inizia gesti suoi. */
+    this.isClipPlaying = () => false;
 
     // --- musica -------------------------------------------------------------
     this.music = { active: false, bpm: 0, phase: 0, beat: 0, energy: 0, confidence: 0 };
@@ -750,11 +754,12 @@ export class BodyAnimator {
       return;
     }
 
-    // Mentre balla non si mette a fare altro.
-    if (this.actions.length || this.vibe.x > 0.3) return;
+    // Mentre balla (o suona una clip) non si mette a fare altro.
+    if (this.actions.length || this.vibe.x > 0.3 || this.isClipPlaying()) return;
     this.fidgetTimer -= dt;
     if (this.fidgetTimer > 0) return;
     this.fidgetTimer = randomBetween(...FIDGET_DELAY);
+    if (this.onIdleClip && Math.random() < 0.35 && this.onIdleClip()) return;
 
     const candidates = Object.entries(ACTIONS).filter(
       ([name, def]) => def.idle && def.modes.includes(this.mode) && name !== this.lastFidget,

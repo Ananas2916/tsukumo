@@ -237,10 +237,14 @@ export class CharacterView {
         el('span', {}, action.label),
       ),
     );
+    // Le clip .vrma "a richiesta" (vedi clips.js) si aggiungono qui quando arrivano.
+    this.clipChips = el('div', { class: 'action-grid' });
+    this.app.on('hello', (message) => this._renderClipChips(message.animations ?? []));
     const actionsCard = this._card(
       'hand',
       'Falle fare qualcosa',
       el('div', { class: 'action-grid' }, chips),
+      this.clipChips,
       el('p', { class: 'hint' }, 'Sedersi e sdraiarsi funzionano quando è sulla barra delle applicazioni.'),
     );
 
@@ -254,6 +258,21 @@ export class CharacterView {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
     }
     this.root.append(voiceCard, chatterCard, agentsCard, lookCard, behaviourCard, actionsCard, moreCard);
+  }
+
+  _renderClipChips(animations) {
+    const onDemand = animations.filter((item) => !/^(greet|wave|hello|idle|dance)/i.test(item.name));
+    this.clipChips.replaceChildren(
+      ...onDemand.map((item) => {
+        const name = item.name.replace(/\.vrma$/i, '');
+        return el(
+          'button',
+          { class: 'action-chip', type: 'button', onClick: () => this.companion?.sendToPet({ type: 'play-clip', name }) },
+          icon('play', 15),
+          el('span', {}, name),
+        );
+      }),
+    );
   }
 
   /**

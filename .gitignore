@@ -3,8 +3,9 @@ models/*.onnx
 models/*.bin
 models/*.part
 
-# Avatar VRM dell'utente
+# Avatar VRM dell'utente e le sue clip .vrma (hanno licenze loro)
 frontend/public/models/*.vrm
+frontend/public/animations/*.vrma
 
 # Python
 __pycache__/

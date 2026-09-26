@@ -954,6 +954,18 @@ def _without_audio(payload: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in payload.items() if k != "audio"}
 
 
+def _animations_info() -> list[dict[str, str]]:
+    """Le clip .vrma della cartella delle animazioni, con l'URL da cui caricarle."""
+    directory: Path = SETTINGS.animations_dir
+    files = sorted(p.name for p in directory.glob("*.vrma")) if directory.is_dir() else []
+    return [{"name": name, "url": f"/animations/{name}"} for name in files]
+
+
+@app.get("/api/animations")
+async def animations() -> dict[str, Any]:
+    return {"directory": str(SETTINGS.animations_dir), "animations": _animations_info()}
+
+
 def _avatar_info() -> dict[str, Any]:
     """Cerca un modello .vrm nella cartella degli avatar."""
     directory: Path = SETTINGS.avatar_dir
@@ -988,6 +1000,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "avatar": _avatar_info(),
                 "context": PC.as_dict(),
                 "reminders": [item.as_dict() for item in REMINDERS.all()],
+                "animations": _animations_info(),
             }
         )
 
@@ -1156,6 +1169,8 @@ def mount_frontend() -> None:
     if SETTINGS.avatar_dir.is_dir():
         # L'avatar puo' essere sostituito a caldo: niente cache aggressiva.
         app.mount("/models", BuildAwareStatics(directory=SETTINGS.avatar_dir), name="models")
+    SETTINGS.animations_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/animations", BuildAwareStatics(directory=SETTINGS.animations_dir), name="animations")
 
     if SETTINGS.frontend_dist.is_dir() and (SETTINGS.frontend_dist / "index.html").is_file():
         app.mount("/", BuildAwareStatics(directory=SETTINGS.frontend_dist, html=True), name="frontend")
