@@ -8,13 +8,58 @@
   "scripts": {
     "start": "electron .",
     "start:devtools": "cross-env DC_DEVTOOLS=1 electron .",
-    "start:attach": "cross-env DC_NO_SPAWN=1 electron ."
+    "start:attach": "cross-env DC_NO_SPAWN=1 electron .",
+    "dist": "electron-builder --win nsis --x64 --publish never"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
-    "electron": "^32.2.0"
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "koffi": "^2.16.3"
+  },
+  "build": {
+    "appId": "app.tsukumo.desktop",
+    "productName": "Tsukumo",
+    "copyright": "Tsukumo",
+    "directories": {
+      "output": "dist",
+      "buildResources": "."
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "desktop.js",
+      "pet-physics.js",
+      "spotify.js",
+      "icon.ico",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../build/app",
+        "to": "tsukumo"
+      },
+      {
+        "from": "../build/python",
+        "to": "python"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tsukumo",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

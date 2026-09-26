@@ -42,7 +42,19 @@ const desktop = require('./desktop');
 const { PetPhysics } = require('./pet-physics');
 const spotify = require('./spotify');
 
-const PROJECT_ROOT = path.resolve(__dirname, '..');
+// Per le prove dell'installer: impostazioni in una cartella a parte.
+if (process.env.DC_USER_DATA) app.setPath('userData', process.env.DC_USER_DATA);
+
+/**
+ * Installata (electron-builder) il progetto sta nelle risorse dell'app, con
+ * un Python suo (scripts/build_installer.ps1); in sviluppo e' la cartella
+ * sopra questa. I dati dell'utente installato (stato, impostazioni dei
+ * motori, log) stanno in %APPDATA%\Tsukumo: un aggiornamento sostituisce le
+ * risorse e non deve cancellarli.
+ */
+const PACKAGED = app.isPackaged && !process.env.DC_PROJECT_ROOT;
+const PROJECT_ROOT = process.env.DC_PROJECT_ROOT || (PACKAGED ? path.join(process.resourcesPath, 'tsukumo') : path.resolve(__dirname, '..'));
+const DATA_ROOT = PACKAGED ? app.getPath('userData') : PROJECT_ROOT;
 const APP_NAME = 'Tsukumo';
 
 // Il nome dell'app (package.json) decide la cartella delle impostazioni,
@@ -73,7 +85,7 @@ if (fs.existsSync(LEGACY_USER_DATA) && !fs.existsSync(MIGRATED_MARK)) {
 // Avviata dal collegamento sul desktop non c'e' nessun terminale dove
 // guardare, e su Windows un'app GUI non scrive nemmeno su uno stdout
 // rediretto: tutto finisce anche in logs/companion.log, sempre.
-const LOG_FILE = process.env.DC_LOG_FILE || path.join(PROJECT_ROOT, 'logs', 'companion.log');
+const LOG_FILE = process.env.DC_LOG_FILE || path.join(DATA_ROOT, 'logs', 'companion.log');
 (() => {
   try {
     fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
@@ -114,6 +126,8 @@ const SPAWN_BACKEND = process.env.DC_NO_SPAWN !== '1';
  */
 function pythonExecutable() {
   if (process.env.DC_PYTHON) return process.env.DC_PYTHON;
+  const bundled = path.join(process.resourcesPath ?? '', 'python', 'python.exe');
+  if (PACKAGED && fs.existsSync(bundled)) return bundled;
   const venv = path.join(PROJECT_ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   if (fs.existsSync(venv)) return venv;
   return process.platform === 'win32' ? 'python' : 'python3';
@@ -173,11 +187,15 @@ const settings = {
   panelBounds: null,
 };
 
+/** Nessuna impostazione salvata: e' la prima volta, il pannello si apre con la presentazione. */
+let firstRun = false;
+
 function loadSettings() {
   try {
     Object.assign(settings, JSON.parse(fs.readFileSync(settingsPath(), 'utf8')));
   } catch {
     /* primo avvio: restano i default */
+    firstRun = !fs.existsSync(settingsPath());
   }
   settings.scale = clamp(Number(settings.scale) || 1, ...SCALE_RANGE);
 }
@@ -206,6 +224,17 @@ const backendTail = [];
 /** Codice di uscita del backend, se e' gia' morto (null = vivo o mai partito). */
 let backendExit = null;
 
+/** Installata: stato e impostazioni del backend nei dati dell'utente, non fra le risorse. */
+function packagedEnvironment() {
+  if (!PACKAGED) return {};
+  return {
+    DC_STATE_DIR: process.env.DC_STATE_DIR || path.join(DATA_ROOT, 'state'),
+    DC_ENV_FILE: process.env.DC_ENV_FILE || path.join(DATA_ROOT, 'tsukumo.env'),
+    // Il Python incluso non deve leggere pacchetti installati altrove sul PC.
+    PYTHONNOUSERSITE: '1',
+  };
+}
+
 function startBackend() {
   if (!SPAWN_BACKEND) {
     console.log('[electron] DC_NO_SPAWN=1: uso un backend gia in esecuzione');
@@ -217,7 +246,7 @@ function startBackend() {
   backendTail.length = 0;
   const child = spawn(PYTHON, ['-m', 'backend', '--host', HOST, '--port', String(PORT)], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
+    env: { ...process.env, ...packagedEnvironment(), PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
     stdio: ['ignore', 'pipe', 'pipe'],
     // Avviata dal collegamento sul desktop non c'e' un terminale: senza
     // questo Windows aprirebbe una console nera per python.exe.
@@ -1173,6 +1202,12 @@ if (!app.requestSingleInstanceLock()) {
     backendUp = true;
     loadApp(petWindow, petUrl());
     createPanelWindow();
+    // Prima volta: il pannello si apre da solo con la presentazione (panel/welcome.js).
+    if (firstRun) {
+      // Da qui in poi non e' piu' la prima volta, anche se nessuna impostazione cambia.
+      saveSettings();
+      setTimeout(() => showPanel({ tab: 'chat', welcome: true }), 2500);
+    }
   });
 }
 

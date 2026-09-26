@@ -859,6 +859,9 @@ if (pet) {
       case 'play':
         stage.body?.play(command.name, { sign: command.sign });
         break;
+      case 'greet':
+        stage.greet();
+        break;
       case 'posture':
         pet.requestPosture(command.value);
         break;

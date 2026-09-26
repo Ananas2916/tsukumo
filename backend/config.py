@@ -21,13 +21,23 @@ from .providers import REGISTRIES
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def env_file() -> Path:
+    """Il file delle impostazioni: ``.env`` del progetto, o ``DC_ENV_FILE``.
+
+    L'app installata lo tiene fra i dati dell'utente (vedi electron/main.js):
+    le risorse dell'app vengono sostituite a ogni aggiornamento.
+    """
+    override = os.environ.get("DC_ENV_FILE")
+    return Path(override) if override else ROOT / ".env"
+
+
 def load_dotenv(path: Path | None = None) -> None:
     """Carica un file ``.env`` molto semplice (KEY=VALUE) nelle env vars.
 
     Le variabili gia' presenti nell'ambiente hanno la precedenza, cosi' e'
     sempre possibile sovrascrivere il file da riga di comando.
     """
-    path = path or (ROOT / ".env")
+    path = path or env_file()
     if not path.is_file():
         return
     for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -50,7 +60,7 @@ def save_dotenv(updates: dict[str, str], path: Path | None = None) -> Path:
     Un valore vuoto **rimuove** la riga, cosi' si torna al default invece di
     imporre una stringa vuota.
     """
-    path = path or (ROOT / ".env")
+    path = path or env_file()
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
     remaining = dict(updates)
     output: list[str] = []

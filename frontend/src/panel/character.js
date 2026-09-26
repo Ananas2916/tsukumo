@@ -314,7 +314,13 @@ export class CharacterView {
     this.debug = this._switch('Pannello di debug del lip-sync');
     this.debug.input.addEventListener('change', () => this.companion?.sendToPet({ type: 'debug', value: this.debug.input.checked }));
     const quit = el('button', { class: 'btn danger', type: 'button', onClick: () => this.companion?.quit() }, icon('power', 16), el('span', {}, 'Chiudi Tsukumo'));
-    const moreCard = this._card('bug', 'Altro', this.debug.node, quit);
+    const replay = el(
+      'button',
+      { class: 'btn', type: 'button', onClick: () => this.app.welcome?.start() },
+      icon('star', 16),
+      el('span', {}, 'Rifai la presentazione'),
+    );
+    const moreCard = this._card('bug', 'Altro', this.debug.node, replay, quit);
 
     if (!this.companion) {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');

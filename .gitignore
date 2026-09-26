@@ -24,6 +24,8 @@ logs/
 
 # Node / build
 node_modules/
+# Installer: Python incluso, risorse, cache dei download (scripts/build_installer.ps1)
+build/
 frontend/dist/
 electron/dist/
 

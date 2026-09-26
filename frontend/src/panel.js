@@ -21,6 +21,7 @@ import { icon } from './icons.js';
 import { AgendaView } from './panel/agenda.js';
 import { CharacterView } from './panel/character.js';
 import { ChatView } from './panel/chat.js';
+import { Welcome } from './panel/welcome.js';
 import { CompanionSocket } from './ws.js';
 
 const companion = window.companion ?? null;
@@ -155,7 +156,11 @@ if (companion) {
   });
   // Il personaggio chiede di mostrare una scheda (doppio click o iniziare a
   // scrivere = chat, col primo tasto gia' dentro; i dock = le altre).
-  companion.onFocus((focus = {}) => showTab(focus.tab ?? 'chat', focus));
+  companion.onFocus((focus = {}) => {
+    showTab(focus.tab ?? 'chat', focus);
+    // Electron sa se e' il primo avvio (nessuna impostazione salvata): allora la presentazione.
+    if (focus.welcome) welcome.maybeStart();
+  });
 }
 
 window.addEventListener('keydown', (event) => {
@@ -191,6 +196,9 @@ socket.on('close', () => {
 });
 
 socket.on('hello', (message) => {
+  showIdentity(message.memory?.persona);
+  // Nel browser (senza Electron) il primo avvio si riconosce da localStorage.
+  if (!companion) welcome.maybeStart();
   app.settings = { ...(message.config ?? {}) };
   app.voices = message.voices ?? [];
   app.engines = message.engines ?? null;
@@ -228,12 +236,25 @@ socket.on('state', (message) => {
   app.emit('busy', app.busy);
 });
 
+// Il nome scelto per lei (Personaggio -> Chi e' e cosa sa di te) anche nella barra del titolo.
+socket.on('memory', (message) => showIdentity(message.persona));
+
+function showIdentity(persona) {
+  const name = persona?.name?.trim();
+  if (!name) return;
+  document.querySelector('.titles strong').textContent = name;
+  document.querySelector('.badge-letter').textContent = name.charAt(0).toUpperCase();
+  document.title = `${name} - pannello`;
+}
+
 function pickSettings(message) {
   const keys = ['voice', 'ttsEngine', 'replyLanguage', 'replyLanguageResolved', 'voiceLanguage', 'canClone', 'muted'];
   return Object.fromEntries(keys.filter((key) => key in message).map((key) => [key, message[key]]));
 }
 
 // ---------------------------------------------------------------- avvio
+const welcome = new Welcome(app, document.querySelector('.app'));
+app.welcome = welcome;
 const initialTab = (location.hash || '').replace('#', '') || readSetting('dc:panel-tab', 'chat');
 showTab(initialTab);
 renderHeader();

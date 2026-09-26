@@ -93,6 +93,27 @@ cd desk-companion
 Prima di avviare, copia un file `.vrm` in `frontend/public/models/avatar.vrm`
 (vedi [L'avatar VRM](#lavatar-vrm)).
 
+**Un installer per chi non ha Python né Node**
+
+```powershell
+.\scripts\build_installer.ps1     # -> electron\dist\Tsukumo Setup <versione>.exe
+```
+
+Crea un setup per Windows che porta con sé un Python embeddable con le
+dipendenze già installate, il backend, l'interfaccia compilata, le clip,
+l'avatar di `frontend/public/models` e Kokoro (variante `int8`, 92 MB: con
+`-KokoroVariant full` quella da 326 MB). Si installa per l'utente, senza
+diritti di amministratore; impostazioni, stato e log dell'app installata
+stanno in `%APPDATA%\Tsukumo`, così un aggiornamento non li tocca.
+`-SkipInstaller` si ferma a `electron\dist\win-unpacked`, da provare senza
+installare. L'installer non è firmato: Windows SmartScreen chiede conferma
+la prima volta. Distribuiscilo solo se le licenze dell'avatar e delle clip lo
+permettono (le clip Bandai Namco sono CC BY-NC).
+
+Al primo avvio il pannello si apre con una presentazione in cinque passi: come
+si usa, come ti chiami, il cervello (fra quelli trovati sul PC), la voce, e un
+saluto. Si rifà da Personaggio → Altro.
+
 ---
 
 ## Installazione passo per passo
@@ -517,6 +538,7 @@ parlato (`actions.js`), le costanti (`constants.js`).
 | **Fermo** | peso su una gamba che ogni tanto passa all'altra, bacino e spalle che compensano, ginocchia morbide, piedi piantati (IK sulle gambe), respiro, braccia che pendono per gravità, dita rilassate |
 | **Ogni tanto, da solo** | si stiracchia, si guarda intorno, si sistema i capelli, mette le mani dietro la schiena, canticchia, inclina la testa |
 | **Mentre pensa** | mano al mento, l'altra a sostenere il gomito, occhi in alto |
+| **Mentre un agente lavora** | legge un tablet olografico (quando l'agente legge file o cerca) o batte su una tastiera olografica (quando scrive o esegue comandi), con il passo in corso nella bolla |
 | **Mentre parla** | annuisce a tempo con la voce, gesticola (palmi aperti, mano che spiega, mano sul cuore), alza le spalle alle domande |
 | **All'avvio** | saluta con la mano e con la voce ("Ciao!", o il saluto adatto all'ora) |
 | **Se non usi il PC** | assonnata: palpebre pesanti, sguardo basso, la testa che cade piano e si rialza di scatto, qualche sbadiglio con la mano davanti alla bocca; addormentata: occhi chiusi, testa reclinata, respiro lento e profondo |
@@ -526,9 +548,17 @@ parlato (`actions.js`), le costanti (`constants.js`).
 Oltre al movimento procedurale può usare **clip `.vrma`** (VRM Animation):
 mettile in `frontend/public/animations/` e il nome dice quando usarle
 (`greet*` al posto del saluto, `idle*` fra i gesti spontanei, `dance*` in loop
-con Spotify, le altre dai pulsanti del pannello). Si mescolano alla posa
-procedurale in dissolvenza, solo nelle rotazioni delle ossa. Vedi il README
-della cartella e `frontend/src/clips.js`.
+con Spotify, `inchino*` quando la ringrazi, `alza*` quando la chiami per nome,
+le altre dai pulsanti del pannello). Si mescolano alla posa procedurale in
+dissolvenza, solo nelle rotazioni delle ossa. Vedi il README della cartella e
+`frontend/src/clips.js`.
+
+**Motion capture vero, già pronto:** `node scripts/import_mocap.mjs` scarica
+una selezione del Bandai Namco Research Motion Dataset (attori professionisti,
+CC BY-NC 4.0) e la installa: quattro saluti, due inchini, "indica", "chiama",
+"alza la mano" e due balli. Qualunque altro BVH (Mixamo, CMU...) si converte
+con `node scripts/bvh2vrma.mjs clip.bvh clip.vrma --trim`, che lo porta in
+T-pose qualunque sia la sua posa di riposo e lo tiene rivolto verso di te.
 
 Le emoji nelle risposte non vengono lette: diventano l'espressione del viso
 mentre pronuncia quella frase (😊 sorride, 😢 si rattrista, 😮 si stupisce...).
@@ -645,6 +675,38 @@ messaggio (se il modello le vede). **"Guarda lo schermo"**, scritto o detto, fa
 uno screenshot dello schermo dove sta il cursore e lo passa al cervello; c'è
 anche il pulsante *Schermo* in chat e la voce nel menu della tray. Lo
 screenshot si fa solo quando lo chiedi.
+
+### Mentre un agente lavora
+
+Claude Code, Codex e OpenClaw possono lavorare un minuto prima di rispondere.
+In quel tempo lei racconta cosa stanno facendo: i tool che usano diventano
+passi leggibili ("legge main.js", "esegue git status", "cerca in rete
+«meteo»") nella bolla e nella chat, e la posa cambia (tablet per leggere,
+tastiera per scrivere). Se l'agente tace per 7 secondi dice "un attimo, ci
+sto lavorando" con la voce in uso (e dopo 45 "ancora un pochino"); a risposta
+arrivata i passi restano sotto il messaggio, chiusi ("3 passi"). Il puntatore
+sopra la risposta dice quanto ha fatto aspettare (primo testo, prima voce,
+totale). Il ragionamento interno degli agenti non viene mai letto.
+
+### Interromperla a voce
+
+In ascolto continuo e a chiamata il microfono resta aperto anche mentre lei
+parla, ma "sorvegliato": serve una voce forte e continua per mezzo secondo, e
+il backend scarta le trascrizioni che sono la sua stessa voce tornata dal
+microfono. Se le parli sopra si ferma e ti ascolta. Con casse alte e senza
+cuffie, se si interrompe da sola, spegni Personaggio → Microfono → **Puoi
+interromperla parlando**. La prima frase di ogni risposta parte dal primo
+inciso, senza aspettare il punto: la senti prima.
+
+### Chi è e cosa sa di te
+
+Nome e carattere si scelgono in Personaggio → **Chi è e cosa sa di te** e
+valgono per ogni cervello: cambiando agente o modello resta la stessa. Lo
+stesso vale per i ricordi: dille "ricordati che lavoro in Python", chiedi
+"cosa ricordi di me?", "dimentica che..."; anche il cervello può annotarne uno
+da solo quando gli racconti qualcosa di duraturo. Stanno in
+`state/memory.json`, si vedono e si cancellano dal pannello, e partono solo
+dentro il messaggio al cervello che hai scelto tu.
 
 ### Avvisi da Claude Code e Codex
 
@@ -1107,6 +1169,8 @@ un prodotto proprietario senza restituire le proprie modifiche.
 Hanno licenze proprie, da rispettare separatamente:
 
 - **Kokoro** — modello TTS, Apache 2.0
+- **Bandai Namco Research Motion Dataset** — le clip installate da
+  `scripts/import_mocap.mjs`, CC BY-NC 4.0 (niente uso commerciale)
 - **three.js**, **@pixiv/three-vrm** — MIT
 - **Electron**, **FastAPI**, **ONNX Runtime** — MIT / Apache 2.0
 - **Il tuo modello VRM** — licenza dell'autore: se lo hai scaricato, controlla
