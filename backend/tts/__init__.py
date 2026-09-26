@@ -132,6 +132,17 @@ def build_tts_engine(engine: str, settings: Settings) -> TTSEngine:
             language=str(options.get("CARTESIA_LANGUAGE") or "it"),
         )
 
+    if engine == "chatterbox":
+        from .chatterbox_engine import ChatterboxTTS
+
+        return ChatterboxTTS(
+            voices_dir=settings.state_dir / "voices" / "chatterbox",
+            device=str(options.get("CHATTERBOX_DEVICE") or "auto"),
+            language=str(options.get("CHATTERBOX_LANGUAGE") or "it"),
+            exaggeration=_number(options.get("CHATTERBOX_EXAGGERATION"), 0.5),
+            cfg_weight=_number(options.get("CHATTERBOX_CFG_WEIGHT"), 0.5),
+        )
+
     if engine == "piper":
         from .piper import PiperTTS
 

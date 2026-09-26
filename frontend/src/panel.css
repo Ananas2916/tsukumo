@@ -1064,6 +1064,47 @@ textarea.field-input {
   text-overflow: ellipsis;
 }
 
+.clone-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clone-box > .btn {
+  align-self: flex-start;
+}
+
+.clone-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.clone-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mic-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.mic-meter-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.06s linear;
+}
+
 /* Azioni */
 .action-grid {
   display: grid;

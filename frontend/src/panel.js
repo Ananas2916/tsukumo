@@ -229,7 +229,7 @@ socket.on('state', (message) => {
 });
 
 function pickSettings(message) {
-  const keys = ['voice', 'ttsEngine', 'replyLanguage', 'replyLanguageResolved', 'voiceLanguage', 'muted'];
+  const keys = ['voice', 'ttsEngine', 'replyLanguage', 'replyLanguageResolved', 'voiceLanguage', 'canClone', 'muted'];
   return Object.fromEntries(keys.filter((key) => key in message).map((key) => [key, message[key]]));
 }
 

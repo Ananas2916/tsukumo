@@ -9,6 +9,12 @@
 import { apiUrl } from '../config.js';
 import { el, iconButton, languageLabel, readSetting, writeSetting } from '../dom.js';
 import { icon } from '../icons.js';
+import { MIC_SETTING, SAMPLE_RATE, VoiceInput, listMicrophones } from '../mic.js';
+
+/** Quanto dura la registrazione di prova. */
+const MIC_TEST_SECONDS = 4;
+/** Sotto questo livello il rilevatore del parlato (mic.js, modo `vad`) non si accorge che parli. */
+const VAD_THRESHOLD = 0.02;
 
 const SAMPLES = {
   it: 'Ciao! Sono io, con questa voce. Ti piaccio?',
@@ -54,6 +60,9 @@ const ACTIONS = [
 
 const GENDER = { female: 'donna', male: 'uomo' };
 
+/** Le lingue in cui una voce clonata può parlare (quelle di Chatterbox che il pannello sa nominare). */
+const CLONE_LANGUAGES = ['it', 'en', 'es', 'fr', 'de', 'pt', 'ja', 'zh', 'hi'];
+
 /** Come il backend chiama le lingue (`replyLanguageResolved`), per codice. */
 const ENGLISH_NAMES = {
   it: 'Italian',
@@ -68,6 +77,23 @@ const ENGLISH_NAMES = {
   cmn: 'Mandarin Chinese',
 };
 
+/** Riproduce PCM 16 bit mono a 16 kHz e aspetta che finisca. */
+async function playPcm16(buffer) {
+  const samples = new Int16Array(buffer);
+  const context = new AudioContext();
+  const audio = context.createBuffer(1, samples.length, SAMPLE_RATE);
+  const channel = audio.getChannelData(0);
+  for (let i = 0; i < samples.length; i += 1) channel[i] = samples[i] / 32768;
+  const source = context.createBufferSource();
+  source.buffer = audio;
+  source.connect(context.destination);
+  await new Promise((resolve) => {
+    source.onended = resolve;
+    source.start();
+  });
+  await context.close();
+}
+
 export class CharacterView {
   constructor(app, root) {
     this.app = app;
@@ -80,6 +106,7 @@ export class CharacterView {
   }
 
   shown() {
+    this._loadMicrophones();
     this._showWeather?.();
     this._loadIntegrations?.();
   }
@@ -113,6 +140,8 @@ export class CharacterView {
       this.socket.send({ type: 'settings', muted });
     });
 
+    this.cloneBox = this._buildClone();
+
     const voiceCard = this._card(
       'volume',
       'Voce',
@@ -120,9 +149,29 @@ export class CharacterView {
       this.search,
       this.languageChips,
       this.voiceList,
+      this.cloneBox,
       this._row('Risponde', this.replyLanguage),
       this.languageHint,
       this.muted.node,
+    );
+
+    // Microfono -----------------------------------------------------------
+    this.micSelect = el('select', { class: 'field-input' });
+    this.micMeter = el('span', { class: 'mic-meter-fill' });
+    this.micStatus = el('p', { class: 'hint' }, 'Parla per 4 secondi: poi ti faccio riascoltare e ti dico cosa ho capito.');
+    this.micTest = el('button', { class: 'btn', type: 'button', onClick: () => this._testMicrophone() }, icon('mic', 16), el('span', {}, 'Prova il microfono'));
+    this.micSelect.addEventListener('change', () => {
+      writeSetting(MIC_SETTING, this.micSelect.value);
+      this.companion?.sendToPet({ type: 'mic-device', value: this.micSelect.value });
+    });
+    navigator.mediaDevices?.addEventListener?.('devicechange', () => this._loadMicrophones());
+    const micCard = this._card(
+      'mic',
+      'Microfono',
+      this._row('Usa', this.micSelect),
+      el('div', { class: 'mic-meter' }, this.micMeter),
+      this.micTest,
+      this.micStatus,
     );
 
     // Aspetto ------------------------------------------------------------
@@ -257,7 +306,7 @@ export class CharacterView {
     if (!this.companion) {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
     }
-    this.root.append(voiceCard, chatterCard, agentsCard, lookCard, behaviourCard, actionsCard, moreCard);
+    this.root.append(voiceCard, micCard, chatterCard, agentsCard, lookCard, behaviourCard, actionsCard, moreCard);
   }
 
   _renderClipChips(animations) {
@@ -430,6 +479,154 @@ export class CharacterView {
     );
   }
 
+  /** "Clona una voce": scegli un audio, dagli un nome e una lingua. Solo coi motori che sanno clonare. */
+  _buildClone() {
+    const file = el('input', { type: 'file', accept: 'audio/*,.wav,.mp3,.flac,.ogg', class: 'hidden' });
+    const name = el('input', { class: 'field-input', type: 'text', maxlength: 40, placeholder: 'Nome della voce' });
+    const language = el(
+      'select',
+      { class: 'field-input' },
+      CLONE_LANGUAGES.map((code) => el('option', { value: code }, languageLabel(code))),
+    );
+    const status = el('p', { class: 'hint' }, 'Un audio pulito di 5-20 secondi, con una sola persona che parla e senza musica sotto.');
+    const submit = el('button', { class: 'btn primary', type: 'button' }, icon('check', 16), el('span', {}, 'Clona'));
+    const cancel = el('button', { class: 'btn', type: 'button' }, el('span', {}, 'Annulla'));
+    const form = el('div', { class: 'clone-form hidden' }, this._row('Nome', name), this._row('Parla in', language), status, el('div', { class: 'clone-actions' }, submit, cancel));
+    const open = el('button', { class: 'btn', type: 'button', onClick: () => file.click() }, icon('mic', 16), el('span', {}, 'Clona una voce…'));
+
+    const reset = () => {
+      file.value = '';
+      form.classList.add('hidden');
+      open.classList.remove('hidden');
+      status.classList.remove('error');
+      status.textContent = 'Un audio pulito di 5-20 secondi, con una sola persona che parla e senza musica sotto.';
+    };
+    file.addEventListener('change', () => {
+      const picked = file.files?.[0];
+      if (!picked) return;
+      name.value = picked.name.replace(/\.[^.]+$/, '').slice(0, 40);
+      const system = (navigator.language || 'it').slice(0, 2);
+      language.value = CLONE_LANGUAGES.includes(system) ? system : 'it';
+      form.classList.remove('hidden');
+      open.classList.add('hidden');
+      name.focus();
+    });
+    cancel.addEventListener('click', reset);
+    submit.addEventListener('click', async () => {
+      const picked = file.files?.[0];
+      if (!picked) return;
+      submit.disabled = true;
+      status.classList.remove('error');
+      status.textContent = 'Ascolto la voce e la imparo…';
+      try {
+        const query = new URLSearchParams({ name: name.value.trim() || 'Voce', language: language.value });
+        const response = await fetch(apiUrl(`/api/voices/clone?${query}`), { method: 'POST', body: picked });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || result.detail || `Errore ${response.status}`);
+        const engine = this.app.settings.ttsEngine;
+        if (engine) writeSetting(`dc:voice:${engine}`, result.voice);
+        reset();
+        this.app.toast('Voce clonata: ora parla così', 'ok');
+        this._preview({ id: result.voice, language: language.value });
+      } catch (error) {
+        status.classList.add('error');
+        status.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    return el('div', { class: 'clone-box hidden' }, file, open, form);
+  }
+
+  // ----------------------------------------------------------- microfono
+  async _loadMicrophones() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    let mics = [];
+    try {
+      mics = await listMicrophones();
+    } catch (error) {
+      this.micStatus.textContent = `Non riesco a vedere i microfoni: ${error.message}`;
+    }
+    const saved = readSetting(MIC_SETTING, '');
+    const options = [el('option', { value: '' }, 'Predefinito di Windows'), ...mics.map((mic) => el('option', { value: mic.id }, mic.label))];
+    if (saved && !mics.some((mic) => mic.id === saved)) {
+      options.push(el('option', { value: saved }, 'Microfono scollegato (uso il predefinito)'));
+    }
+    this.micSelect.replaceChildren(...options);
+    this.micSelect.value = saved;
+  }
+
+  async _testMicrophone() {
+    if (this.micTesting) return;
+    this.micTesting = true;
+    this.micTest.disabled = true;
+    this.micStatus.classList.remove('warn', 'error');
+    // Il personaggio non deve prendere la frase di prova per una domanda.
+    this.companion?.sendToPet({ type: 'mic-test', value: true });
+
+    let peak = 0;
+    let recorded = null;
+    const input = new VoiceInput({
+      onLevel: (level) => {
+        peak = Math.max(peak, level);
+        this.micMeter.style.width = `${Math.min(1, Math.sqrt(level) * 1.8) * 100}%`;
+      },
+      onUtterance: (pcm16) => {
+        recorded = pcm16;
+      },
+      onError: (error) => {
+        this.micStatus.textContent = error.message;
+      },
+    });
+
+    try {
+      if (!(await input.start({ mode: 'push', deviceId: this.micSelect.value }))) throw new Error(this.micStatus.textContent);
+      input.beginPush();
+      for (let left = MIC_TEST_SECONDS; left > 0; left -= 1) {
+        this.micStatus.textContent = `Parla adesso… ${left}`;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      input.endPush();
+      input.stop();
+      this.micMeter.style.width = '0%';
+
+      if (!recorded || peak < 0.004) {
+        this.micStatus.classList.add('error');
+        this.micStatus.textContent = 'Non sento niente: controlla che il microfono sia collegato e non silenziato in Windows.';
+        return;
+      }
+      this.micStatus.textContent = 'Ti faccio riascoltare…';
+      await playPcm16(recorded);
+      this.micStatus.textContent = 'Cerco di capire cosa hai detto…';
+      const heard = await this._transcribe(recorded);
+      const quiet = peak < VAD_THRESHOLD ? ' Però ti sento piano: se mi lasci sempre in ascolto potrei non accorgermi che parli.' : '';
+      this.micStatus.classList.toggle('warn', Boolean(quiet));
+      this.micStatus.textContent = `${heard}${quiet}`;
+    } catch (error) {
+      this.micStatus.classList.add('error');
+      this.micStatus.textContent = error.message || 'Microfono non disponibile';
+    } finally {
+      input.stop();
+      this.micMeter.style.width = '0%';
+      this.companion?.sendToPet({ type: 'mic-test', value: false });
+      this.micTest.disabled = false;
+      this.micTesting = false;
+    }
+  }
+
+  async _transcribe(pcm16) {
+    const response = await fetch(apiUrl('/api/transcribe'), { method: 'POST', body: pcm16 });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return `L'audio arriva bene. ${result.error || result.detail || ''}`.trim();
+    return result.text?.trim() ? `Ho capito: «${result.text.trim()}»` : 'L’audio arriva, ma non ho riconosciuto parole.';
+  }
+
+  async _removeVoice(voice) {
+    if (!window.confirm(`Eliminare la voce "${voice.name || voice.id}"?`)) return;
+    const response = await fetch(apiUrl(`/api/voices/${encodeURIComponent(voice.id)}`), { method: 'DELETE' });
+    if (!response.ok) this.app.toast('Non sono riuscita a eliminarla', 'warn');
+  }
+
   _row(label, control, hint) {
     return el('label', { class: 'row' }, el('span', { class: 'row-label' }, label), control, hint ? el('span', { class: 'row-hint' }, hint) : null);
   }
@@ -536,6 +733,7 @@ export class CharacterView {
   _renderVoices() {
     const voices = this.app.voices ?? [];
     const current = this.app.settings.voice;
+    this.cloneBox.classList.toggle('hidden', !this.app.settings.canClone);
     const counts = new Map();
     for (const voice of voices) counts.set(voice.language || '', (counts.get(voice.language || '') ?? 0) + 1);
 
@@ -606,6 +804,14 @@ export class CharacterView {
       el('span', { class: 'voice-text' }, el('strong', {}, voice.name || voice.id), meta ? el('small', {}, meta) : null),
       preview,
     );
+    if (voice.removable) {
+      const remove = iconButton('trash', { title: 'Elimina', className: 'icon-btn small', size: 14 });
+      remove.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this._removeVoice(voice);
+      });
+      row.append(remove);
+    }
     return row;
   }
 

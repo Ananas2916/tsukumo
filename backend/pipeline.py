@@ -557,6 +557,7 @@ class Companion:
             "replyLanguage": self.reply_language,
             "replyLanguageResolved": self._reply_language(),
             "voiceLanguage": self.tts.language_of(self.voice),
+            "canClone": self.tts.can_clone,
             "muted": self.muted,
         }
 

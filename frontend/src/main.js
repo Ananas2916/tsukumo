@@ -837,6 +837,12 @@ if (pet) {
       case 'mic':
         pushToggle();
         break;
+      case 'mic-device':
+        voice.setDevice(command.value).then(reportVoice);
+        break;
+      case 'mic-test':
+        voice.setPaused(command.value);
+        break;
       case 'hud':
         hud.show();
         break;

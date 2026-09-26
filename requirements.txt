@@ -31,6 +31,12 @@ onnxruntime>=1.18
 #   edge-tts>=6.1          # TTS: voci neurali di Microsoft Edge, senza chiave
 #   soundfile>=0.12        # TTS: serve a Edge TTS per leggere l'MP3
 #   piper-tts>=1.2         # TTS: sintesi locale leggera
+#   chatterbox-tts>=0.1.7  # TTS: qualita' alta con GPU NVIDIA (porta con se' PyTorch)
+#       Prima PyTorch con CUDA, o pip installa quello solo CPU:
+#         pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+#       Poi chatterbox-tts, e subito dopo riporta numpy >= 2: chatterbox chiede
+#       numpy<2 ma funziona col 2.x, mentre kokoro-onnx col 1.x no.
+#         pip install chatterbox-tts && pip install "numpy>=2.0.2,<3.0"
 #   pyttsx3>=2.90          # TTS: voci gia' installate nel sistema operativo
 #   faster-whisper>=1.0    # STT: riconoscimento vocale locale (push-to-talk)
 #   sounddevice>=0.4       # STT: cattura dal microfono

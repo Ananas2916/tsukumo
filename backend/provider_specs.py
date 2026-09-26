@@ -641,6 +641,63 @@ TTS_REGISTRY.register(
 
 TTS_REGISTRY.register(
     ProviderSpec(
+        id="chatterbox",
+        label="Chatterbox",
+        kind="tts",
+        category="local",
+        pricing="free",
+        tagline="Qualita' da record tra i modelli aperti, ma serve una GPU NVIDIA.",
+        description=(
+            "Il modello open source di Resemble AI: in ascolti alla cieca batte "
+            "spesso anche ElevenLabs. Clona una voce da pochi secondi di audio: "
+            "dalla scheda Personaggio, \"Clona una voce\". Multilingua, italiano "
+            "incluso. Su CPU è troppo lento per l'uso in tempo reale."
+        ),
+        local=True,
+        has_voices=True,
+        fields=(
+            ProviderField(
+                env="CHATTERBOX_DEVICE",
+                label="Dispositivo",
+                type="select",
+                default="auto",
+                options=(
+                    {"value": "auto", "label": "automatico"},
+                    {"value": "cuda", "label": "GPU NVIDIA"},
+                    {"value": "cpu", "label": "CPU (molto lento)"},
+                ),
+            ),
+            ProviderField(
+                env="CHATTERBOX_LANGUAGE",
+                label="Lingua della voce predefinita",
+                default="it",
+                placeholder="it",
+                help="Le voci clonate hanno ognuna la sua lingua, scelta quando le cloni.",
+            ),
+            ProviderField(
+                env="CHATTERBOX_EXAGGERATION",
+                label="Espressivita'",
+                type="number",
+                default=0.5,
+                help="0 = piatta, 1 = molto marcata.",
+                advanced=True,
+            ),
+            ProviderField(
+                env="CHATTERBOX_CFG_WEIGHT",
+                label="Aderenza al riferimento",
+                type="number",
+                default=0.5,
+                help="Piu' alta = piu' fedele alla voce di riferimento, ma piu' rigida.",
+                advanced=True,
+            ),
+        ),
+        requires=("pip install chatterbox-tts", "GPU NVIDIA consigliata (~3GB di VRAM)"),
+        docs="https://github.com/resemble-ai/chatterbox",
+    )
+)
+
+TTS_REGISTRY.register(
+    ProviderSpec(
         id="system",
         label="Voce di sistema",
         kind="tts",

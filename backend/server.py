@@ -647,6 +647,51 @@ async def voices() -> dict[str, Any]:
     return {"voices": catalog, "engine": instance.tts.name, **instance.current_settings()}
 
 
+@app.post("/api/voices/clone")
+async def clone_voice(request: Request, name: str = "Voce", language: str = "it") -> dict[str, Any]:
+    """Clona una voce da un file audio (il corpo e' il file, come per gli allegati) e la sceglie."""
+    instance = companion()
+    if not instance.tts.can_clone:
+        raise HTTPException(status_code=400, detail=f"{instance.tts.name} non sa clonare le voci: passa a Chatterbox")
+    if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File troppo grande")
+    data = await request.body()
+    try:
+        voice_id = await asyncio.to_thread(instance.tts.add_voice, name, data, language)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await instance.load_voices()
+    settings = await asyncio.to_thread(instance.update_settings, voice=voice_id)
+    await hub.broadcast({"type": "voices", "voices": instance.voice_list, **settings})
+    return {"ok": True, "voice": voice_id}
+
+
+@app.delete("/api/voices/{voice_id}")
+async def delete_voice(voice_id: str) -> dict[str, Any]:
+    instance = companion()
+    if not instance.tts.can_clone:
+        raise HTTPException(status_code=400, detail="Il motore attivo non ha voci clonate")
+    try:
+        await asyncio.to_thread(instance.tts.remove_voice, voice_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if instance.voice == voice_id:
+        instance.update_settings(voice=instance.tts.default_voice)
+    await _load_voices(instance)
+    return {"ok": True}
+
+
+@app.post("/api/transcribe")
+async def api_transcribe(request: Request) -> dict[str, Any]:
+    """Trascrive PCM 16 bit 16 kHz mono senza avviare un turno: e' la prova del microfono."""
+    if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Audio troppo lungo")
+    transcript = await companion().transcribe(await request.body())
+    if transcript is None:
+        raise HTTPException(status_code=400, detail="Il riconoscimento vocale non è attivo: sceglilo in Motori, sezione Ascolto.")
+    return {"text": transcript.text, "language": transcript.language}
+
+
 @app.post("/api/say")
 async def api_say(request: SayRequest) -> dict[str, Any]:
     """Sintetizza senza cervello e restituisce audio + visemi (comodo con curl)."""

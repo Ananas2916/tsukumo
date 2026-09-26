@@ -49,8 +49,10 @@ class VoiceInfo:
     description: str = ""
     #: URL di un audio d'esempio, se il servizio lo offre (ElevenLabs).
     preview: str = ""
+    #: Aggiunta dall'utente (voce clonata): il pannello offre di eliminarla.
+    removable: bool = False
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["name"] = self.name or self.id
         return data
@@ -83,6 +85,8 @@ class TTSEngine(ABC):
     name: str = "tts"
     #: Voce usata quando non ne viene chiesta una (o quella chiesta non esiste).
     default_voice: str = ""
+    #: Sa clonare una voce da un file audio (``add_voice`` / ``remove_voice``).
+    can_clone: bool = False
 
     @abstractmethod
     def synthesize(

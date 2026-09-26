@@ -12,7 +12,8 @@
  * dire "basta, ascoltami".
  */
 
-import { VoiceInput, matchesWakeWord, toBase64 } from './mic.js';
+import { readSetting } from './dom.js';
+import { MIC_SETTING, VoiceInput, matchesWakeWord, toBase64 } from './mic.js';
 
 /** I modi disponibili, nell'ordine in cui compaiono nel pannello. */
 export const MODES = ['push', 'vad', 'wake'];
@@ -33,6 +34,10 @@ export class VoiceController {
     this.interruptOnSpeech = true;
     /** Il companion sta parlando in questo momento. */
     this.speaking = false;
+    /** Il pannello sta provando il microfono: quello che senti non e' per lei. */
+    this.paused = false;
+    this.deviceId = readSetting(MIC_SETTING, '');
+    this._options = {};
 
     this.mic = new VoiceInput({
       onUtterance: (pcm16, seconds) => this._onUtterance(pcm16, seconds),
@@ -50,12 +55,15 @@ export class VoiceController {
   async enable({ mode = this.mode, wakeWord = this.wakeWord, threshold, silenceSeconds } = {}) {
     this.mode = mode;
     this.wakeWord = wakeWord;
+    this._options = { threshold, silenceSeconds };
     const ok = await this.mic.start({
       mode,
       threshold: threshold ?? 0.02,
       silenceSeconds: silenceSeconds ?? 0.8,
+      deviceId: this.deviceId,
     });
     this.enabled = ok;
+    this._applyMute();
     this.onEvent({ type: 'enabled', enabled: ok, mode });
     return ok;
   }
@@ -85,15 +93,32 @@ export class VoiceController {
     this.wakeWord = word;
   }
 
+  /** Cambia microfono; se sta gia' ascoltando lo riapre sul nuovo. */
+  async setDevice(deviceId) {
+    this.deviceId = deviceId || '';
+    if (!this.listening) return;
+    this.mic.stop();
+    await this.enable({ mode: this.mode, wakeWord: this.wakeWord, ...this._options });
+  }
+
+  /** Sospende l'ascolto mentre il pannello prova il microfono. */
+  setPaused(paused) {
+    this.paused = Boolean(paused);
+    this._applyMute();
+  }
+
   /**
    * Lo stato del companion cambia: qui decidiamo se il microfono deve tacere.
    * @param {'idle'|'thinking'|'speaking'} value
    */
   setCompanionState(value) {
     this.speaking = value === 'speaking';
+    this._applyMute();
+  }
+
+  _applyMute() {
     // In `push` comanda l'utente: non silenziamo mai il suo pulsante.
-    const shouldMute = this.speaking && this.mode !== 'push';
-    this.mic.setMuted(shouldMute);
+    this.mic.setMuted(this.paused || (this.speaking && this.mode !== 'push'));
   }
 
   /** Premuto il tasto del push-to-talk. */

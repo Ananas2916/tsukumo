@@ -25,6 +25,43 @@
 /** Frequenza richiesta al browser: quella nativa dei modelli di riconoscimento. */
 export const SAMPLE_RATE = 16000;
 
+/** Chiave (localStorage condiviso fra personaggio e pannello) del microfono scelto; vuoto = predefinito. */
+export const MIC_SETTING = 'dc:mic-device';
+
+/**
+ * Apre il microfono indicato, o quello predefinito di sistema. Se quello scelto
+ * non c'e' piu' (cuffie scollegate) ripiega sul predefinito invece di restare muto.
+ */
+export async function openMicrophone(deviceId = '') {
+  const audio = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  if (deviceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: { ...audio, deviceId: { exact: deviceId } } });
+    } catch (error) {
+      if (error.name !== 'OverconstrainedError' && error.name !== 'NotFoundError') throw error;
+      console.warn('[mic] microfono scelto non trovato, uso il predefinito');
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio });
+}
+
+/**
+ * I microfoni collegati, `[{id, label}]`. I nomi il browser li rivela solo dopo
+ * il permesso: se mancano, apre e richiude il microfono una volta.
+ */
+export async function listMicrophones() {
+  let inputs = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audioinput');
+  if (inputs.length && !inputs[0].label) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((track) => track.stop());
+    inputs = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audioinput');
+  }
+  // "default" e "communications" sono alias di Windows di un microfono vero: la voce "predefinito" li copre.
+  return inputs
+    .filter((device) => device.deviceId && device.deviceId !== 'default' && device.deviceId !== 'communications')
+    .map((device, index) => ({ id: device.deviceId, label: device.label || `Microfono ${index + 1}` }));
+}
+
 /** Dimensione del buffer di analisi: ~64 ms a 16 kHz, abbastanza reattivo. */
 const FRAME = 1024;
 
@@ -74,21 +111,14 @@ export class VoiceInput {
   }
 
   /** Apre il microfono. Va chiamato da un gesto dell'utente la prima volta. */
-  async start({ mode = 'push', threshold = 0.02, silenceSeconds = 0.8 } = {}) {
+  async start({ mode = 'push', threshold = 0.02, silenceSeconds = 0.8, deviceId = '' } = {}) {
     this.mode = mode;
     this.threshold = threshold;
     this.silenceSeconds = silenceSeconds;
     if (this.running) return true;
 
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      this.stream = await openMicrophone(deviceId);
     } catch (error) {
       this.onError(new Error(`Microfono non disponibile: ${error.message}`));
       return false;
