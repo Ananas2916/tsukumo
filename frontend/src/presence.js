@@ -10,7 +10,7 @@
 
 import { readSetting, writeSetting } from './dom.js';
 
-/** Dopo quanti secondi senza input si fa assonnata, e quando si addormenta. */
+/** Dopo quanti secondi senza input si fa assonnata, e quando si addormenta (default). */
 export const DROWSY_AFTER = 120;
 export const ASLEEP_AFTER = 300;
 /** Sotto questa soglia l'utente e' "qui" (il polling arriva ogni 5 s). */
@@ -29,8 +29,16 @@ export class Presence {
   constructor({ onChange }) {
     this.onChange = onChange;
     this.enabled = readSetting('dc:sleep', true);
+    this.drowsyAfter = readSetting('dc:sleep-drowsy', DROWSY_AFTER / 60) * 60;
+    this.asleepAfter = readSetting('dc:sleep-asleep', ASLEEP_AFTER / 60) * 60;
     this.state = 'awake';
     this.lastWelcome = -Infinity;
+  }
+
+  /** Tempi scelti dal pannello, in minuti. */
+  setTimes(drowsyMinutes, asleepMinutes) {
+    this.drowsyAfter = Math.max(1, Number(drowsyMinutes) || 2) * 60;
+    this.asleepAfter = Math.max(this.drowsyAfter / 60 + 1, Number(asleepMinutes) || 5) * 60;
   }
 
   setEnabled(value) {
@@ -57,8 +65,8 @@ export class Presence {
       this.wake(this.state === 'asleep');
       return;
     }
-    if (idle >= ASLEEP_AFTER) this._set('asleep', false);
-    else if (idle >= DROWSY_AFTER && this.state === 'awake') this._set('drowsy', false);
+    if (idle >= this.asleepAfter) this._set('asleep', false);
+    else if (idle >= this.drowsyAfter && this.state === 'awake') this._set('drowsy', false);
   }
 
   /** Qualcuno l'ha toccata o le ha scritto: sveglia subito, senza aspettare il polling. */

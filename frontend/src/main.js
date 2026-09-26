@@ -383,6 +383,11 @@ socket.on('hello', (message) => {
   }
 });
 
+// Il gesto che accompagna un commento spontaneo (sbadiglio, brividi, aria con la mano...).
+socket.on('gesture', (message) => {
+  if (!player.playing || message.name === 'yawn') stage.body?.play(message.name);
+});
+
 // Un promemoria o un timer e' scattato: campanello, bussa sul vetro, notifica.
 socket.on('reminder', (message) => {
   if (message.event !== 'fired') return;
@@ -706,6 +711,9 @@ if (pet) {
         break;
       case 'sleep':
         presence.setEnabled(command.value);
+        break;
+      case 'sleep-times':
+        presence.setTimes(command.drowsy, command.asleep);
         break;
       case 'play':
         stage.body?.play(command.name, { sign: command.sign });

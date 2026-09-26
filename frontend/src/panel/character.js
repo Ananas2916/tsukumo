@@ -6,6 +6,7 @@
  * filtrano per lingua e si ascoltano prima di sceglierle.
  */
 
+import { apiUrl } from '../config.js';
 import { el, iconButton, languageLabel, readSetting, writeSetting } from '../dom.js';
 import { icon } from '../icons.js';
 
@@ -25,6 +26,15 @@ const REPLY_LANGUAGES = [
   { value: 'Italian', label: 'Sempre in italiano' },
   { value: 'English', label: 'Sempre in inglese' },
 ];
+
+const WEATHER_WORDS = {
+  clear: 'sereno',
+  cloudy: 'nuvoloso',
+  fog: 'nebbia',
+  rain: 'pioggia',
+  snow: 'neve',
+  storm: 'temporale',
+};
 
 const ACTIONS = [
   { play: 'wave', label: 'Saluta', icon: 'hand' },
@@ -65,7 +75,9 @@ export class CharacterView {
     this._listen();
   }
 
-  shown() {}
+  shown() {
+    this._showWeather?.();
+  }
 
   // ----------------------------------------------------------------- DOM
   _build() {
@@ -140,13 +152,33 @@ export class CharacterView {
     this.spontaneous = this._switch('Gesti e pose spontanee');
     this.dance = this._switch('Balla con Spotify', "Quando Spotify suona ascolta l'audio del PC e si muove a tempo.");
     this.vocals = this._switch('Versetti con la sua voce', 'Un “Ciao!” quando saluta, una risatina alle carezze: con la voce scelta.');
-    this.sleep = this._switch('Si addormenta se non usi il PC', 'Dopo 2 minuti è assonnata, dopo 5 dorme; quando torni si sveglia e ti saluta.');
+    this.sleep = this._switch('Si addormenta se non usi il PC', 'Prima è assonnata, poi dorme; quando torni si sveglia e ti saluta.');
+    this.sfx = this._switch('Effetti sonori', 'Un «pop» quando compare, un tonfo quando atterra, un campanello per i promemoria.');
+    this.drowsyAfter = this._slider(1, 30, 1, (value) => `${value} min`);
+    this.asleepAfter = this._slider(2, 60, 1, (value) => `${value} min`);
+    this.drowsyAfter.set(readSetting('dc:sleep-drowsy', 2));
+    this.asleepAfter.set(readSetting('dc:sleep-asleep', 5));
+    const sendSleepTimes = () => {
+      const drowsy = this.drowsyAfter.value();
+      const asleep = Math.max(drowsy + 1, this.asleepAfter.value());
+      if (asleep !== this.asleepAfter.value()) this.asleepAfter.set(asleep);
+      writeSetting('dc:sleep-drowsy', drowsy);
+      writeSetting('dc:sleep-asleep', asleep);
+      this.companion?.sendToPet({ type: 'sleep-times', drowsy, asleep });
+    };
+    this.drowsyAfter.input.addEventListener('change', sendSleepTimes);
+    this.asleepAfter.input.addEventListener('change', sendSleepTimes);
     this.ghost = this._switch('Modalità fantasma', 'I click la attraversano; per uscirne usa l’icona nell’area di notifica.');
 
     this.spontaneous.input.checked = readSetting('dc:spontaneous', true);
     this.dance.input.checked = readSetting('dc:dance', true);
     this.vocals.input.checked = readSetting('dc:vocals', true);
     this.sleep.input.checked = readSetting('dc:sleep', true);
+    this.sfx.input.checked = readSetting('dc:sfx', true);
+    this.sfx.input.addEventListener('change', () => {
+      writeSetting('dc:sfx', this.sfx.input.checked);
+      this.companion?.sendToPet({ type: 'sfx', value: this.sfx.input.checked });
+    });
     this.onTop.input.addEventListener('change', () => this.companion?.toggleAlwaysOnTop());
     this.windows.input.addEventListener('change', () => this.companion?.setWindows(this.windows.input.checked));
     this.ghost.input.addEventListener('change', () => this.companion?.toggleGhost());
@@ -174,10 +206,14 @@ export class CharacterView {
       this.windows.node,
       this.spontaneous.node,
       this.vocals.node,
+      this.sfx.node,
       this.sleep.node,
+      this._row('Assonnata dopo', this.drowsyAfter.node),
+      this._row('Dorme dopo', this.asleepAfter.node),
       this.dance.node,
       this.ghost.node,
     );
+    const chatterCard = this._chatterCard();
 
     // Azioni ---------------------------------------------------------------
     const chips = ACTIONS.map((action) =>
@@ -211,7 +247,88 @@ export class CharacterView {
     if (!this.companion) {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
     }
-    this.root.append(voiceCard, lookCard, behaviourCard, actionsCard, moreCard);
+    this.root.append(voiceCard, chatterCard, lookCard, behaviourCard, actionsCard, moreCard);
+  }
+
+  /**
+   * Quanto chiacchiera di sua iniziativa e di cosa (vedi backend/proactive.py).
+   * Le preferenze stanno nel backend (`/api/preferences`), non qui.
+   */
+  _chatterCard() {
+    const level = el(
+      'select',
+      { class: 'field-input' },
+      ...[
+        ['off', 'Mai (solo batteria)'],
+        ['rare', 'Poco'],
+        ['normal', 'Normale'],
+        ['chatty', 'Tanto'],
+      ].map(([value, label]) => el('option', { value }, label)),
+    );
+    const topics = {
+      night: this._switch('Ora tarda', 'All’una sei ancora lì? Te lo fa notare (e sbadiglia).'),
+      breaks: this._switch('Pause', 'Dopo due ore di fila al PC ti propone una pausa.'),
+      weather: this._switch('Meteo', 'Il buongiorno col tempo che fa, il caldo, il freddo, la pioggia.'),
+      battery: this._switch('Batteria', 'Al 20, 10 e 5% ti ricorda il caricabatterie.'),
+      youtube: this._switch('Video di YouTube', 'Un commento sul video che stai guardando o sul suo creator.'),
+      news: this._switch('Notizie', 'Un titolo di oggi, commentato.'),
+      facts: this._switch('Curiosità', 'Un fatto sorprendente, ogni tanto.'),
+      films: this._switch('Film', 'Un film da vedere, con il perché.'),
+    };
+    const city = el('input', { class: 'field-input', type: 'text', placeholder: 'Vuoto = dall’indirizzo IP', 'aria-label': 'Città per il meteo' });
+    const weatherLine = el('p', { class: 'card-sub' });
+
+    const save = async (changes) => {
+      try {
+        const response = await fetch(apiUrl('/api/preferences'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(changes),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch (error) {
+        this.app.toast(`Preferenza non salvata: ${error.message}`, 'error');
+      }
+    };
+    const apply = (prefs) => {
+      level.value = prefs.chatter ?? 'normal';
+      city.value = prefs.city ?? '';
+      for (const [name, control] of Object.entries(topics)) control.input.checked = prefs.topics?.[name] !== false;
+    };
+    const showWeather = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/weather'));
+        const data = await response.json();
+        const weather = data.weather;
+        weatherLine.textContent = weather
+          ? `Adesso${weather.city ? ` a ${weather.city}` : ''}: ${weather.temperature}°, ${WEATHER_WORDS[weather.condition] ?? weather.condition}.`
+          : 'Meteo non disponibile (serve la connessione).';
+      } catch {
+        weatherLine.textContent = '';
+      }
+    };
+
+    level.addEventListener('change', () => save({ chatter: level.value }));
+    city.addEventListener('change', () => save({ city: city.value }).then(showWeather));
+    for (const [name, control] of Object.entries(topics)) {
+      control.input.addEventListener('change', () => save({ topics: { [name]: control.input.checked } }));
+    }
+    this.socket.on('preferences', apply);
+    fetch(apiUrl('/api/preferences'))
+      .then((response) => (response.ok ? response.json() : null))
+      .then((prefs) => prefs && apply(prefs))
+      .catch(() => {});
+    this._showWeather = showWeather;
+
+    return this._card(
+      'chat',
+      'Chiacchiere',
+      el('p', { class: 'card-sub' }, 'Quanto parla di sua iniziativa: mai con lo schermo intero, in riunione o se non sei al PC.'),
+      this._row('Quanto', level),
+      ...Object.values(topics).map((control) => control.node),
+      this._row('Città', city),
+      weatherLine,
+    );
   }
 
   _card(iconName, title, ...children) {

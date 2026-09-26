@@ -30,6 +30,8 @@ os.environ.update(
         "DC_STATUS_INTERVAL": "60",
         # Niente ricerca dei motori installati: sonde vere e .env vero.
         "DC_DETECT_ENGINES": "0",
+        # Niente commenti spontanei: meteo e notizie passano dalla rete.
+        "DC_PROACTIVE": "0",
         "DC_LOG_LEVEL": "warning",
     }
 )

@@ -223,6 +223,9 @@ class Settings:
     # All'avvio cerca i cervelli installati (Claude Code, Codex, OpenClaw,
     # Ollama, LM Studio). Se DC_LLM_BACKEND non e' impostato usa il primo.
     detect_engines: bool = True
+    # Commenti spontanei (ora tarda, meteo, batteria, YouTube, notizie...):
+    # quanto e di cosa si sceglie dal pannello; questo li spegne del tutto.
+    proactive: bool = True
     # Sessioni degli agenti (OpenClaw, Claude Code, Codex): sopravvivono ai
     # riavvii, cosi' la conversazione riprende da dove era rimasta.
     state_dir: Path = ROOT / "state"
@@ -283,6 +286,7 @@ class Settings:
             voice_interrupt=_env_bool("VOICE_INTERRUPT", True),
             status_interval=_env_float("STATUS_INTERVAL", 10.0),
             detect_engines=_env_bool("DETECT_ENGINES", True),
+            proactive=_env_bool("PROACTIVE", True),
             state_dir=_env_path("STATE_DIR", ROOT / "state"),
             viseme_gain=_env_float("VISEME_GAIN", 1.15),
             viseme_silence_threshold=_env_float("VISEME_SILENCE", 0.07),

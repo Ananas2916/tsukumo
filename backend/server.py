@@ -21,6 +21,8 @@ Server -> client::
     {"type": "context", "activity": {...}, "present": true, ...}  # cosa fa l'utente al PC
     {"type": "reminders", "reminders": [...]}  # timer e promemoria in attesa
     {"type": "reminder", "event": "fired", "reminder": {...}}  # uno e' appena scattato
+    {"type": "gesture", "name": "yawn"}      # un gesto che accompagna un commento spontaneo
+    {"type": "preferences", ...}             # quanto chiacchiera e di cosa
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "user",   "text": "..."}
     {"type": "token",  "text": "..."}        # streaming del cervello
@@ -65,6 +67,9 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .config import Settings, save_dotenv
 from .context import PCContext
+from .news import NewsService
+from .preferences import Preferences
+from .proactive import Proactive
 from .reminders import (
     MAX_LATE,
     ReminderStore,
@@ -82,6 +87,7 @@ from .providers import REGISTRIES, ProviderSpec, describe_all
 from .status import EngineMonitor, llm_entry
 from .tts import build_tts_engine
 from .vocals import EVENTS as VOCAL_EVENTS
+from .weather import WeatherService
 
 logger = logging.getLogger("tsukumo")
 
@@ -92,6 +98,11 @@ SELECT_KEYS = {"llm": "DC_LLM_BACKEND", "tts": "DC_TTS_ENGINE", "stt": "DC_STT_E
 
 #: Cosa sta facendo l'utente al PC, aggiornato dalla shell Electron (vedi context.py).
 PC = PCContext()
+
+#: Quanto chiacchiera e di cosa, e la citta' del meteo (state/preferences.json).
+PREFERENCES = Preferences(SETTINGS.state_dir / "preferences.json")
+WEATHER = WeatherService()
+NEWS = NewsService()
 
 #: Timer e promemoria, salvati in state/reminders.json (vedi reminders.py).
 REMINDERS = ReminderStore(SETTINGS.state_dir / "reminders.json")
@@ -159,6 +170,22 @@ def _current() -> Companion | None:
 monitor = EngineMonitor(_current, interval=SETTINGS.status_interval, on_change=hub.broadcast)
 
 
+async def _broadcast(message: dict[str, Any]) -> None:
+    # Indiretto apposta: cosi' chi sostituisce hub.broadcast (i test) vale anche qui.
+    await hub.broadcast(message)
+
+
+#: Commenti spontanei (vedi proactive.py).
+PROACTIVE = Proactive(
+    companion=_current,
+    context=PC,
+    preferences=PREFERENCES,
+    broadcast=_broadcast,
+    weather=WEATHER,
+    news=NEWS,
+)
+
+
 # ---------------------------------------------------------------------------
 # Ciclo di vita dell'applicazione
 # ---------------------------------------------------------------------------
@@ -181,6 +208,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _reminders_wake
     _reminders_wake = asyncio.Event()
     reminder_task = asyncio.create_task(_reminder_loop(), name="reminders")
+    if SETTINGS.proactive:
+        await PROACTIVE.start()
     if SETTINGS.detect_engines:
         _spawn(_detect_engines(), report=False)
 
@@ -199,6 +228,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         reminder_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await reminder_task
+        await PROACTIVE.stop()
         await monitor.stop()
         await app.state.companion.close()
         logger.info("Tsukumo arrestato")
@@ -716,6 +746,31 @@ async def delete_reminder(reminder_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Promemoria non trovato")
     await _reminders_changed()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Preferenze e meteo
+# ---------------------------------------------------------------------------
+@app.get("/api/preferences")
+async def get_preferences() -> dict[str, Any]:
+    return PREFERENCES.as_dict()
+
+
+@app.post("/api/preferences")
+async def set_preferences(changes: dict[str, Any]) -> dict[str, Any]:
+    """Quanto chiacchiera, di cosa, e la citta' del meteo. I campi sconosciuti si ignorano."""
+    current = PREFERENCES.update(changes)
+    await hub.broadcast({"type": "preferences", **current})
+    return current
+
+
+@app.get("/api/weather")
+async def get_weather() -> dict[str, Any]:
+    """Il meteo che vede il companion (passa dalla rete: per il pannello, non per i controlli)."""
+    instance = _current()
+    language = instance.voice_language if instance else SETTINGS.system_language
+    weather = await WEATHER.get(PREFERENCES.city, language)
+    return {"ok": weather is not None, "weather": weather.as_dict() if weather else None}
 
 
 # ---------------------------------------------------------------------------
