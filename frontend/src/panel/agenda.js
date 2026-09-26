@@ -67,13 +67,10 @@ export class AgendaView {
       ),
     );
     const examples = el(
-      'p',
-      { class: 'card-sub' },
-      'Anche in chat o a voce: ',
-      ...EXAMPLES.flatMap((text, index) => [
-        el('button', { class: 'link-btn', type: 'button', onClick: () => this._fill(text) }, `«${text}»`),
-        index < EXAMPLES.length - 1 ? ', ' : '',
-      ]),
+      'div',
+      { class: 'agenda-examples' },
+      el('span', { class: 'card-sub' }, 'Si può chiedere anche in chat o a voce, per esempio:'),
+      ...EXAMPLES.map((text) => el('button', { class: 'link-btn', type: 'button', onClick: () => this._fill(text) }, `«${text}»`)),
     );
 
     this.list = el('div', { class: 'agenda-list' });

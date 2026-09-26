@@ -49,11 +49,12 @@ subito se funziona prima di attivarlo.
 3. [Installazione passo per passo](#installazione-passo-per-passo)
 4. [L'avatar VRM](#lavatar-vrm)
 5. [Avvio](#avvio)
-6. [Configurazione](#configurazione)
-7. [Come funziona il lip-sync](#come-funziona-il-lip-sync)
-8. [Protocollo WebSocket e API REST](#protocollo-websocket-e-api-rest)
-9. [Struttura del progetto](#struttura-del-progetto)
-10. [Risoluzione dei problemi](#risoluzione-dei-problemi)
+6. [L'assistente: promemoria, commenti, avvisi](#lassistente-promemoria-commenti-avvisi)
+7. [Configurazione](#configurazione)
+8. [Come funziona il lip-sync](#come-funziona-il-lip-sync)
+9. [Protocollo WebSocket e API REST](#protocollo-websocket-e-api-rest)
+10. [Struttura del progetto](#struttura-del-progetto)
+11. [Risoluzione dei problemi](#risoluzione-dei-problemi)
 
 ---
 
@@ -457,7 +458,10 @@ la pagina, personaggio e motori in una finestra a parte.
 | **Musica** | se Spotify sta suonando si muove a tempo: vedi [Ballare con Spotify](#ballare-con-spotify) |
 | **Bordi dello schermo** | lasciata oltre il bordo sinistro o destro, si aggrappa e sbircia dentro |
 | **Dimensione** | con la rotellina (o dal pannello) si ingrandisce tutta la finestra: resta intera e con i piedi dove stavano |
-| **Tocco** | un click sulla testa è una carezza (si rannicchia contento), sul corpo un colpetto (sobbalza) |
+| **Tocco** | un click sulla testa è una carezza (si rannicchia contento), sul corpo un colpetto (sobbalza); cinque colpetti in pochi secondi e mette il broncio, a braccia conserte |
+| **Cursore** | se resta fermo sopra la sua testa allunga la mano per toccarlo, in punta di piedi; se glielo fai girare intorno alla testa, veloce, le gira la testa |
+| **File** | trascina un file su di lei: lo prende e lo passa al cervello ("dai un'occhiata a questo file") |
+| **Effetti sonori** | un "pop" quando compare, un tonfo quando atterra, un campanello e un toc-toc sul vetro per promemoria e avvisi; sintetizzati, fuori dal canale della voce |
 | **Versetti** | con la voce scelta: "Ciao!" quando compare (o "Buongiorno!", "Buonasera!", "Ancora in piedi?" secondo l'ora), una risatina alle carezze, "Ehi!" a un colpetto o se la sollevi, "Aaah!" se la lanci |
 | **Sonno** | se non tocchi mouse e tastiera per 2 minuti si fa assonnata (palpebre pesanti, colpi di sonno, qualche sbadiglio), dopo 5 si addormenta — sulla barra si stende sul fianco, con le "zeta" che salgono dalla testa. Quando torni, sblocchi lo schermo o il PC si risveglia, si alza e ti saluta |
 | **Sguardo** | segue il cursore ovunque sullo schermo, anche fuori dalla finestra; col mouse fermo guarda te |
@@ -516,13 +520,23 @@ parlato (`actions.js`), le costanti (`constants.js`).
 | **Mentre parla** | annuisce a tempo con la voce, gesticola (palmi aperti, mano che spiega, mano sul cuore), alza le spalle alle domande |
 | **All'avvio** | saluta con la mano e con la voce ("Ciao!", o il saluto adatto all'ora) |
 | **Se non usi il PC** | assonnata: palpebre pesanti, sguardo basso, la testa che cade piano e si rialza di scatto, qualche sbadiglio con la mano davanti alla bocca; addormentata: occhi chiusi, testa reclinata, respiro lento e profondo |
+| **Per un promemoria o un avviso** | bussa sul vetro dello schermo verso di te |
+| **Col caldo e col freddo** | si fa aria con la mano; si stringe le braccia e trema |
+
+Oltre al movimento procedurale può usare **clip `.vrma`** (VRM Animation):
+mettile in `frontend/public/animations/` e il nome dice quando usarle
+(`greet*` al posto del saluto, `idle*` fra i gesti spontanei, `dance*` in loop
+con Spotify, le altre dai pulsanti del pannello). Si mescolano alla posa
+procedurale in dissolvenza, solo nelle rotazioni delle ossa. Vedi il README
+della cartella e `frontend/src/clips.js`.
 
 Le emoji nelle risposte non vengono lette: diventano l'espressione del viso
 mentre pronuncia quella frase (😊 sorride, 😢 si rattrista, 😮 si stupisce...).
 
 Dalla console del browser si può far partire un'azione a mano, per esempio
 `deskCompanion.stage.body.play('stretch')` (le altre: `lookAround`,
-`hairTuck`, `handsBehind`, `hum`, `headTilt`, `yawn`, `wave`, `pat`, `flinch`).
+`hairTuck`, `handsBehind`, `hum`, `headTilt`, `yawn`, `knock`, `fanSelf`,
+`shiver`, `dizzy`, `pout`, `wave`, `pat`, `flinch`).
 Il sonno si prova con `deskCompanion.stage.setSleep(0.5)` (assonnata) o `1`
 (addormentata), un versetto con `deskCompanion.vocals.say('greet')`.
 
@@ -550,6 +564,110 @@ l'ascolto dell'audio si accende solo quando Spotify suona davvero.
 
 ---
 
+## L'assistente: promemoria, commenti, avvisi
+
+Tsukumo non aspetta solo che le scrivi: tiene i tuoi promemoria, si accorge di
+cosa stai facendo al PC e ogni tanto dice qualcosa di suo. Tutto si regola dal
+pannello (schede **Agenda** e **Personaggio**).
+
+### La lingua del sistema
+
+Se nessuno ha scelto una voce (`DC_VOICE` assente e nessuna voce scelta dal
+pannello), si parte con una voce nella lingua dell'interfaccia di Windows:
+Windows in italiano → `if_sara` con Kokoro, e di conseguenza risposte,
+versetti e commenti in italiano. Una voce scelta a mano vince sempre.
+`DC_SYSTEM_LANGUAGE=en` forza un'altra lingua.
+
+### Timer, promemoria, sveglie, azioni programmate
+
+Si chiedono come a un assistente vocale, in chat o a voce:
+
+| Chiedi | Succede |
+|--------|---------|
+| "metti un timer di 5 minuti", "timer 25 min per la pasta" | timer |
+| "ricordami di chiamare Marco tra mezz'ora", "tra 30 min devo fare quello" | promemoria relativo |
+| "alle 12:00 del 29/12/2027 ricordami del dentista", "domani alle 9 ricordami la riunione" | promemoria a data e ora |
+| "ogni giorno alle 13 ricordami di pranzare" | promemoria quotidiano |
+| "svegliami alle 7 e mezza", "wake me up at 6:30 am" | sveglia |
+| "quanto manca?", "annulla il timer", "quali promemoria ho?" | comandi |
+
+Le richieste in italiano e in inglese si capiscono senza il cervello
+(`backend/reminders.py`): la conferma è immediata e funziona anche col
+risponditore offline. Il resto lo capisce il cervello, che risponde con
+un'etichetta nascosta `[[remind {...}]]` (mai letta ad alta voce); con
+`"do"` è un'**azione**: all'ora giusta il testo va al cervello come un compito
+("tra un'ora controlla se la build è passata"). Quando scatta: campanello,
+bussa sul vetro, lo dice, e arriva una notifica di Windows. I promemoria stanno
+in `state/reminders.json`; quelli persi a PC spento li dice al ritorno (fino a
+12 ore dopo). La scheda **Agenda** li mostra con il conto alla rovescia.
+
+### Cosa stai facendo al PC
+
+Ogni 5 secondi la shell Electron manda al backend da quanto non tocchi mouse e
+tastiera, se lo schermo è bloccato e la finestra in primo piano (titolo,
+programma, schermo intero). Diventa un'attività: programmi in VS Code, guardi
+un video su YouTube (col titolo), giochi, sei in riunione... Serve a
+commentare al momento giusto, a non disturbare (schermo intero, giochi,
+riunioni) e a non addormentarsi mentre guardi un video. Questi dati restano
+sul PC. `GET /api/context` mostra cosa vede.
+
+### Commenti spontanei
+
+| Quando | Cosa dice |
+|--------|-----------|
+| **Ora tarda** | all'una sei ancora lì: "È l'una e 12! Vai a dormire, hai programmato abbastanza per oggi" (e sbadiglia) |
+| **Pause** | due ore di fila al PC: una pausa, stiracchiandosi |
+| **Meteo** | il buongiorno col tempo che fa; il caldo (si fa aria), il freddo (trema), la pioggia che comincia |
+| **Batteria** | al 20, 10 e 5%, finché non attacchi il caricabatterie |
+| **YouTube** | un commento sul video che stai guardando o sul suo creator |
+| **Chiacchiere** | una notizia di oggi, una curiosità, un film da vedere |
+
+Le frasi fisse (ora, pause, meteo, batteria) sono pronte in italiano e in
+inglese; i commenti su video, notizie e curiosità li scrive il cervello, con un
+messaggio che non compare in chat come se l'avessi scritto tu (col risponditore
+offline restano le frasi fisse). Mai a schermo intero, in riunione, in un gioco
+o se non sei al PC, mai mentre sta già parlando, e fra due commenti passano
+almeno 8 minuti. Nel pannello (Personaggio → Chiacchiere) si sceglie quanto
+parla (mai, poco, normale, tanto) e di cosa; `DC_PROACTIVE=0` spegne tutto.
+
+Il meteo viene da [Open-Meteo](https://open-meteo.com) (gratis, senza chiave);
+la posizione è la città scritta nel pannello o, se è vuota, quella approssimata
+dall'indirizzo IP (get.geojs.io). Le notizie sono i titoli del feed RSS di
+Google News nella lingua del sistema. Sono le uniche richieste che partono dal
+PC per i commenti, e solo se l'argomento è acceso.
+
+### File e schermo
+
+Trascina un file su di lei o sulla chat (o usa la graffetta): un agente riceve
+il percorso e il permesso di leggerlo (`--add-dir` per Claude Code, `-i` per le
+immagini di Codex), un modello riceve il testo del file e le immagini nel
+messaggio (se il modello le vede). **"Guarda lo schermo"**, scritto o detto, fa
+uno screenshot dello schermo dove sta il cursore e lo passa al cervello; c'è
+anche il pulsante *Schermo* in chat e la voce nel menu della tray. Lo
+screenshot si fa solo quando lo chiedi.
+
+### Avvisi da Claude Code e Codex
+
+Se usi Claude Code o Codex per conto tuo (in un terminale, in VS Code), lei ti
+chiama quando hanno finito o quando ti aspettano per un permesso: se sei
+altrove suona, bussa e lo dice ("Claude Code ha finito: ho aggiunto i test");
+se stai già guardando l'editor basta una bolla; a schermo intero solo la
+notifica di Windows. Si attiva da Personaggio → **Avvisi dagli agenti**, che
+aggiunge (con una copia di sicurezza `.tsukumo-bak`):
+
+- a `~/.claude/settings.json` gli hook `Stop` e `Notification`, che lanciano
+  `scripts/tsukumo_notify.py` (forma `command` + `args`: va sia con bash sia
+  con PowerShell);
+- a `~/.codex/config.toml` la riga `notify = [...]` (se ne hai già una non la
+  tocca).
+
+Lo script esce subito se Tsukumo è spento (non trova `state/running.json`) e
+ignora gli agenti lanciati da Tsukumo stesso (`TSUKUMO_INTERNAL=1`). Anche una
+sua risposta che ci mette più di 25 secondi, se nel frattempo sei passato ad
+altro, arriva col campanello.
+
+---
+
 ## Configurazione
 
 Copia `.env.example` in `.env` e modifica quello che ti serve; in alternativa
@@ -574,10 +692,13 @@ usa direttamente le variabili d'ambiente (hanno la precedenza sul file).
 | `DC_LLM_FALLBACK` | `0` | se il cervello non risponde, rispondi con il mock invece di mostrare l'errore |
 | `DC_STATUS_INTERVAL` | `10` | secondi fra un controllo dei motori e l'altro |
 | `DC_DETECT_ENGINES` | `1` | all'avvio cerca i cervelli installati (badge "Trovato sul PC"; sceglie il primo se `DC_LLM_BACKEND` manca) |
+| `DC_PROACTIVE` | `1` | commenti spontanei (ora tarda, meteo, batteria, YouTube, notizie); quanto e di cosa si sceglie dal pannello |
+| `DC_SYSTEM_LANGUAGE` | lingua di Windows | forza la lingua con cui partire se nessuno ha scelto una voce |
+| `DC_ANIMATIONS_DIR` | `frontend/public/animations` | cartella delle clip `.vrma` |
 | `DC_SYSTEM_PROMPT` | vedi `config.py` | personalità (solo per i modelli: gli agenti hanno la loro) |
 | `DC_HISTORY_TURNS` | `12` | turni di conversazione ricordati (gli agenti ricordano da sé) |
 | `DC_TTS_ENGINE` | `kokoro` | `kokoro`, `kokoro_http`, `piper`, `system`, `elevenlabs`, `openai_tts`, `azure`, `google_tts`, `cartesia`, `edge`, `formant` |
-| `DC_VOICE` | `af_heart` | voce Kokoro (gli altri motori hanno il loro campo, es. `DC_ELEVENLABS_VOICE`) |
+| `DC_VOICE` | nella lingua del sistema | voce Kokoro (gli altri motori hanno il loro campo, es. `DC_ELEVENLABS_VOICE`) |
 | `DC_SPEED` | `1.0` | velocità di lettura |
 | `DC_LANGUAGE` | `en-us` | pronuncia di riserva, se il nome della voce non dice la lingua |
 | `DC_REPLY_LANGUAGE` | `auto` | `auto` (lingua della voce), `same` (lingua in cui scrivi) o una lingua (`English`, `it`...) |
@@ -797,6 +918,15 @@ due finestre, entrambe mostrano lo stesso avatar parlare.
 | `POST` | `/api/say` | sintetizza un testo (l'audio va ai client WS) |
 | `POST` | `/api/vocal` | un versetto (`greet`, `morning`, `evening`, `night`, `welcome`, `pat`, `poke`, `lift`, `fall`) con la voce in uso, restituito solo a chi lo chiede |
 | `POST` | `/api/chat` | turno completo con l'LLM |
+| `POST` | `/api/vocal` | un versetto con la voce in uso (vedi sopra) |
+| `GET` / `POST` / `DELETE` | `/api/reminders` | timer e promemoria; `POST` con `{"phrase": "tra 20 minuti ricordami di bere"}` o con i campi |
+| `POST` / `GET` | `/api/context` | cosa fa l'utente al PC (lo manda la shell ogni 5 s) |
+| `GET` / `POST` | `/api/preferences` | quanto chiacchiera, di cosa, città del meteo |
+| `GET` | `/api/weather` | il meteo che vede (passa dalla rete) |
+| `POST` | `/api/notify` | un agente esterno ha finito: `{"source": "claude", "message": "..."}` |
+| `GET` / `POST` | `/api/integrations` | stato e collegamento degli hook di Claude Code e Codex |
+| `POST` | `/api/attachments?name=file.png` | carica un file (dal browser, che non conosce i percorsi) |
+| `GET` | `/api/animations` | le clip `.vrma` disponibili |
 | `POST` | `/api/cancel` | interrompe |
 | `POST` | `/api/reset` | azzera la conversazione |
 
@@ -830,6 +960,13 @@ desk-companion/
 │   ├── config.py          # impostazioni da env / .env
 │   ├── languages.py       # lingua della voce e lingua delle risposte
 │   ├── vocals.py          # i versetti ("Ciao!", "Ehehe!") per evento e lingua
+│   ├── reminders.py       # timer e promemoria: frasi naturali, etichette, archivio
+│   ├── proactive.py       # commenti spontanei (ora tarda, meteo, batteria, YouTube...)
+│   ├── context.py         # cosa sta facendo l'utente al PC
+│   ├── weather.py / news.py / system.py   # Open-Meteo, Google News RSS, batteria
+│   ├── preferences.py     # quanto chiacchiera e di cosa (state/preferences.json)
+│   ├── attachments.py     # file e screenshot per agenti e modelli
+│   ├── notify.py          # avvisi da Claude Code e Codex (hook)
 │   ├── audio.py           # WAV, base64, inviluppo RMS
 │   ├── phonemes.py        # IPA, G2P e tempi per lettera -> visemi (fcl_mth_*)
 │   ├── visemes.py         # allineamento fonemi <-> energia dell'audio
@@ -851,6 +988,9 @@ desk-companion/
 │       ├── body/          # motion.js, pose.js, actions.js, constants.js
 │       ├── vocals.js      # quando dire un versetto (saluto, carezza, caduta)
 │       ├── presence.js    # sonno e risveglio, da quanto il PC è fermo
+│       ├── sfx.js         # effetti sonori sintetizzati
+│       ├── clips.js       # clip .vrma mescolate al corpo procedurale
+│       ├── panel/agenda.js # scheda Agenda: timer e promemoria
 │       ├── panel.js       # il pannello: schede, testata, connessione
 │       ├── panel/         # chat.js, character.js (voci, aspetto, comportamento)
 │       ├── engines.js     # scheda Motori, disegnata da /api/providers
@@ -866,11 +1006,12 @@ desk-companion/
 │   ├── pet-physics.js     # cadute, barra, bordi, finestre su cui sedersi
 │   ├── desktop.js         # finestre degli altri programmi (Windows, via koffi)
 │   └── preload.js
-├── tests/                 # pytest: testo, lingue, visemi, agenti, pipeline, API
+├── tests/                 # pytest: testo, lingue, visemi, agenti, pipeline, API, promemoria, commenti, allegati
 ├── scripts/
-│   └── download_models.py # pesi Kokoro, con ripresa del download
+│   ├── download_models.py # pesi Kokoro, con ripresa del download
+│   └── tsukumo_notify.py  # hook di Claude Code e Codex: "ho finito"
 ├── models/                # <- i pesi finiscono qui (non versionati)
-├── state/                 # sessioni degli agenti (non versionate)
+├── state/                 # sessioni degli agenti, promemoria, preferenze (non versionate)
 ├── Tsukumo.vbs            # avvio dal desktop senza terminale
 ├── requirements.txt / requirements-dev.txt
 ├── start.ps1 / start.sh   # -Setup, -Dev, -Electron, -Shortcut, -Test
