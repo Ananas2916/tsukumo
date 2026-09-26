@@ -20,6 +20,8 @@ Server -> client::
     {"type": "providers", "kind": "llm", "selected": {...}, "settings": {...}}  # motori cambiati
     {"type": "context", "activity": {...}, "present": true, ...}  # cosa fa l'utente al PC
     {"type": "reminders", "reminders": [...]}  # timer e promemoria in attesa
+    {"type": "memory", "persona": {...}, "facts": [...]}  # personalita' e ricordi
+    {"type": "working", "kind": "read", "label": "legge main.js"}  # un agente usa un tool
     {"type": "reminder", "event": "fired", "reminder": {...}}  # uno e' appena scattato
     {"type": "gesture", "name": "yawn"}      # un gesto che accompagna un commento spontaneo
     {"type": "preferences", ...}             # quanto chiacchiera e di cosa
@@ -84,6 +86,7 @@ from .reminders import (
     task_prompt,
 )
 from .reminders import Reminder as ReminderItem
+from .memory import MemoryStore
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
 from .phonemes import VISEME_BLENDSHAPES
@@ -111,6 +114,7 @@ NEWS = NewsService()
 
 #: Timer e promemoria, salvati in state/reminders.json (vedi reminders.py).
 REMINDERS = ReminderStore(SETTINGS.state_dir / "reminders.json")
+MEMORY = MemoryStore(SETTINGS.state_dir / "memory.json")
 #: Sveglia il pianificatore quando cambia qualcosa (creato nel loop giusto, all'avvio).
 _reminders_wake: asyncio.Event | None = None
 
@@ -299,6 +303,15 @@ class ReminderRequest(BaseModel):
     at: str | None = Field(None, description="Quando, in ISO locale: 2026-12-29T12:00")
     seconds: float | None = Field(None, gt=0, description="Oppure tra quanti secondi")
     repeat: str = Field("", description="'' oppure 'daily'")
+
+
+class PersonaRequest(BaseModel):
+    name: str | None = Field(None, max_length=40, description="Come si chiama")
+    traits: str | None = Field(None, max_length=400, description="Il carattere, in poche parole")
+
+
+class FactRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=200, description="Un ricordo: 'ha un gatto che si chiama Miso'")
 
 
 class ContextRequest(BaseModel):
@@ -715,6 +728,8 @@ def _attach(instance: Companion) -> None:
     """Collega al companion i promemoria, lo screenshot e gli avvisi."""
     instance.reminders = REMINDERS
     instance.on_reminders_changed = _reminders_changed
+    instance.memory = MEMORY
+    instance.on_memory_changed = _memory_changed
     instance.screen_capture = _request_screen
 
 
@@ -793,6 +808,49 @@ async def upload_attachment(request: Request, name: str = "file") -> dict[str, A
     except ValueError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     return {"ok": True, "path": str(path), "name": path.name}
+
+
+# ---------------------------------------------------------------------------
+# Personalita' e ricordi (backend/memory.py)
+# ---------------------------------------------------------------------------
+async def _memory_changed() -> None:
+    await hub.broadcast({"type": "memory", **MEMORY.as_dict()})
+
+
+@app.get("/api/memory")
+async def get_memory() -> dict[str, Any]:
+    return MEMORY.as_dict()
+
+
+@app.put("/api/memory/persona")
+async def set_persona(request: PersonaRequest) -> dict[str, Any]:
+    MEMORY.set_persona(name=request.name, traits=request.traits)
+    await _memory_changed()
+    return MEMORY.as_dict()
+
+
+@app.post("/api/memory/facts")
+async def add_fact(request: FactRequest) -> dict[str, Any]:
+    fact = MEMORY.add(request.text)
+    if fact is None:
+        raise HTTPException(status_code=400, detail="Ricordo vuoto o già presente")
+    await _memory_changed()
+    return {"ok": True, "fact": fact.as_dict()}
+
+
+@app.delete("/api/memory/facts/{fact_id}")
+async def delete_fact(fact_id: str) -> dict[str, Any]:
+    if MEMORY.remove(fact_id) is None:
+        raise HTTPException(status_code=404, detail="Ricordo non trovato")
+    await _memory_changed()
+    return {"ok": True}
+
+
+@app.delete("/api/memory/facts")
+async def clear_facts() -> dict[str, Any]:
+    MEMORY.clear()
+    await _memory_changed()
+    return {"ok": True}
 
 
 @app.get("/api/reminders")
@@ -1045,6 +1103,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "avatar": _avatar_info(),
                 "context": PC.as_dict(),
                 "reminders": [item.as_dict() for item in REMINDERS.all()],
+                "memory": MEMORY.as_dict(),
                 "animations": _animations_info(),
             }
         )

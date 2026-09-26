@@ -35,6 +35,14 @@ const FULL_FRAME = 1.24;
 /** Larghezza tipica delle spalle di un avatar VRM, in metri. */
 const SHOULDER_SPAN = 0.55;
 
+/**
+ * Frame al secondo secondo quello che fa. Il personaggio e' sempre sullo
+ * schermo: disegnarlo a 144 Hz mentre respira e basta scalda il portatile e
+ * consuma batteria per niente. Il respiro a 30 fps e' identico; parlare,
+ * essere presa in mano o seguire il mouse invece vogliono 60.
+ */
+const FPS = { active: 60, calm: 30, asleep: 20 };
+
 export class VrmStage {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -120,8 +128,12 @@ export class VrmStage {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    // Neutral (Khronos PBR Neutral) e non ACES: ACES desatura e sposta le
+    // tinte, e sui materiali MToon spegneva capelli colorati e pelle; senza
+    // tone mapping invece i bianchi bruciano. Neutral tiene i colori del
+    // modello e comprime solo le luci forti.
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1;
   }
 
   _initScene() {
@@ -144,7 +156,56 @@ export class VrmStage {
 
     this.scene.add(new THREE.HemisphereLight(0xdfe7ff, 0x30364a, 1.25));
 
+    this.shadow = this._createShadow();
+    this.scene.add(this.shadow);
+
     this._resize();
+  }
+
+  /**
+   * Ombra morbida sotto i piedi: la appoggia al desktop invece di farla
+   * galleggiare. Un disco sfumato e non un'ombra vera: costa niente, e la
+   * finestra trasparente non ha un pavimento su cui proiettarla.
+   */
+  _createShadow() {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, 'rgba(8, 10, 20, 0.34)');
+    gradient.addColorStop(0.55, 'rgba(8, 10, 20, 0.16)');
+    gradient.addColorStop(1, 'rgba(8, 10, 20, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+    const texture = new THREE.CanvasTexture(canvas);
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false }),
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.renderOrder = -1;
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    return mesh;
+  }
+
+  /** L'ombra segue i fianchi; si sfuma quando si siede, si stende, la prendi o salta. */
+  _updateShadow() {
+    const body = this.body;
+    const hips = this.vrm?.humanoid?.getRawBoneNode('hips');
+    const weight = body ? body.modeWeight.stand : 0;
+    if (!hips || weight < 0.02 || !this._hipsRestY) {
+      this.shadow.visible = false;
+      return;
+    }
+    const position = hips.getWorldPosition(this._shadowPoint ?? (this._shadowPoint = new THREE.Vector3()));
+    // Piu' i fianchi salgono sopra il riposo (un saltello, un piede alzato), piu' l'ombra si stringe.
+    const lift = Math.max(0, Math.min(1, (position.y - this._hipsRestY) / (0.35 * this._hipsRestY)));
+    const size = this._hipsRestY * (1 - 0.35 * lift);
+    this.shadow.visible = true;
+    this.shadow.position.set(position.x, 0.002, position.z);
+    this.shadow.scale.set(size * 0.62, size * 0.34, 1);
+    this.shadow.material.opacity = weight * (1 - 0.6 * lift);
   }
 
   _bindEvents() {
@@ -285,6 +346,9 @@ export class VrmStage {
 
     this._frameCamera();
     this._anchorsDirty = true;
+    // Altezza dei fianchi a riposo: dimensiona l'ombra su qualunque modello.
+    vrm.scene.updateMatrixWorld(true);
+    this._hipsRestY = vrm.humanoid?.getRawBoneNode('hips')?.getWorldPosition(new THREE.Vector3()).y ?? 0;
     return vrm;
   }
 
@@ -730,11 +794,30 @@ export class VrmStage {
 
   start() {
     if (this._animationId !== null) return;
-    const loop = () => {
+    let last = -Infinity;
+    const loop = (now) => {
       this._animationId = requestAnimationFrame(loop);
+      // Un paio di ms di tolleranza: rAF non cade mai esattamente sul millisecondo.
+      if (now - last < 1000 / this.targetFps() - 2) return;
+      last = now;
       this._tick();
     };
     this._animationId = requestAnimationFrame(loop);
+  }
+
+  /** Quanti frame al secondo servono adesso (vedi FPS). */
+  targetFps() {
+    const body = this.body;
+    if (!body) return FPS.calm;
+    const moving =
+      this._speech.playing ||
+      this.elapsed - this._pointerMovedAt < 1.5 ||
+      body.modeWeight.held + body.modeWeight.fall > 0.01 ||
+      body.actions.length > 0 ||
+      this.clips?.playing ||
+      (body.dancing && body.music.active);
+    if (moving) return FPS.active;
+    return body.sleep > 0.9 ? FPS.asleep : FPS.calm;
   }
 
   stop() {
@@ -799,6 +882,7 @@ export class VrmStage {
     }
     // Il tablet/tastiera olografici seguono le mani appena posate.
     this.holo.update(dt, this.vrm, this.body?.workWeights ?? null);
+    this._updateShadow();
 
     this.renderer.render(this.scene, this.camera);
 

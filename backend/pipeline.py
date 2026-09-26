@@ -22,6 +22,7 @@ from .attachments import Attachment, default_prompt, prepare, with_contents, wit
 from .audio import encode_wav_base64
 from .config import Settings
 from .languages import reply_language, short_language, speech_directive
+from .memory import MemoryStore, fact_from_tag, memory_command
 from .llm import LLMClient, Message, MockLLM, create_llm_client, describe_error
 from .llm.base import Activity
 from .phonemes import phones_for
@@ -297,6 +298,10 @@ class Companion:
         self.reminders: ReminderStore | None = None
         #: Avvisa il server quando i promemoria cambiano (pannello, pianificatore).
         self.on_reminders_changed: Callable[[], Awaitable[None]] | None = None
+        #: Personalita' e ricordi, uguali per ogni cervello (li collega il server).
+        self.memory: MemoryStore | None = None
+        #: Avvisa il server quando un ricordo entra o esce (per il pannello).
+        self.on_memory_changed: Callable[[], Awaitable[None]] | None = None
         #: Chiede lo screenshot alla shell (vero se qualcuno puo' farlo): "guarda lo schermo".
         self.screen_capture: Callable[[str], Awaitable[bool]] | None = None
 
@@ -684,6 +689,8 @@ class Companion:
         # testo semplice): gli agenti, che hanno una personalita' propria,
         # ricevono solo quello e non il nostro system prompt.
         directive = speech_directive(self._reply_language())
+        if self.memory is not None:
+            directive = f"{directive} {self.memory.directive(agent=self.llm.stateful)}"
         if self.reminders is not None:
             directive = f"{directive} {action_directive()}"
         messages = [
@@ -706,9 +713,9 @@ class Companion:
         return messages
 
     async def _local_reply(self, prompt: str) -> str | None:
-        """Timer, promemoria, "quanto manca", "annulla il timer": senza cervello."""
+        """Timer, promemoria, "ricordati che...": senza cervello."""
         if self.reminders is None:
-            return None
+            return await self._memory_reply(prompt)
         now = datetime.now()
         command = command_reply(prompt, self.reminders, now)
         if command is not None:
@@ -718,11 +725,25 @@ class Companion:
             return reply
         request = parse_request(prompt, now)
         if request is None:
-            return None
+            return await self._memory_reply(prompt)
         reminder = self.reminders.add(request.to_reminder())
         logger.info("Promemoria (%s) per %s: %r", reminder.kind, datetime.fromtimestamp(reminder.due), reminder.text)
         await self._reminders_changed()
         return confirmation(reminder, now)
+
+    async def _memory_reply(self, prompt: str) -> str | None:
+        """ "Ricordati che...", "dimentica che...", "cosa ricordi di me?"."""
+        if self.memory is None:
+            return None
+        before = len(self.memory.facts())
+        reply = memory_command(prompt, self.memory, self.voice_language)
+        if reply is not None and len(self.memory.facts()) != before:
+            await self._memory_changed()
+        return reply
+
+    async def _memory_changed(self) -> None:
+        if self.on_memory_changed is not None:
+            await self.on_memory_changed()
 
     async def _finish_local(self, prompt: str, reply: str, emit: Emit, turn: int, started: float) -> str:
         spoken = 0
@@ -748,6 +769,14 @@ class Companion:
 
     async def _schedule_from_tags(self, tags: list[str]) -> None:
         """Le etichette [[remind ...]] del cervello diventano promemoria veri."""
+        if not tags:
+            return
+        # I ricordi annotati dal cervello ([[remember: ...]]).
+        remembered = [fact for fact in map(fact_from_tag, tags) if fact]
+        if remembered and self.memory is not None:
+            if any(self.memory.add(fact, source="brain") for fact in remembered):
+                await self._memory_changed()
+        tags = [tag for tag in tags if fact_from_tag(tag) is None]
         if not tags or self.reminders is None:
             return
         added = 0

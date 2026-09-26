@@ -1808,3 +1808,19 @@ textarea.field-input {
     height: 12px;
   }
 }
+
+/* Chi è e cosa sa di te (panel/memory.js) */
+.memory-traits {
+  resize: vertical;
+  min-height: 44px;
+  font: inherit;
+}
+
+.memory-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.memory-list .agenda-text strong {
+  font-weight: 500;
+}

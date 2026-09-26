@@ -11,6 +11,7 @@ import { el, iconButton, languageLabel, readSetting, writeSetting } from '../dom
 import { icon } from '../icons.js';
 import { MIC_SETTING, SAMPLE_RATE, VoiceInput, listMicrophones } from '../mic.js';
 import { BARGE_IN_SETTING } from '../voice.js';
+import { MemoryCard } from './memory.js';
 
 /** Quanto dura la registrazione di prova. */
 const MIC_TEST_SECONDS = 4;
@@ -108,6 +109,7 @@ export class CharacterView {
 
   shown() {
     this._loadMicrophones();
+    this.memory.load();
     this._showWeather?.();
     this._loadIntegrations?.();
   }
@@ -317,7 +319,8 @@ export class CharacterView {
     if (!this.companion) {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
     }
-    this.root.append(voiceCard, micCard, chatterCard, agentsCard, lookCard, behaviourCard, actionsCard, moreCard);
+    this.memory = new MemoryCard(this.app, (...args) => this._card(...args));
+    this.root.append(voiceCard, this.memory.node, micCard, chatterCard, agentsCard, lookCard, behaviourCard, actionsCard, moreCard);
   }
 
   _renderClipChips(animations) {
