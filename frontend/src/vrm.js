@@ -370,6 +370,12 @@ export class VrmStage {
     return this.clips.play(name);
   }
 
+  /** Una clip per un momento (`bow` a un grazie, `here` quando la chiami), se c'e' e se sta in piedi. */
+  playClipRole(role) {
+    if (!this.clips || this.body?.mode !== 'stand' || this.clips.playing) return false;
+    return this.clips.playRole(role);
+  }
+
   _disposeVrm() {
     if (!this.vrm) return;
     if (this.avatarRoot) {

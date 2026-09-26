@@ -11,7 +11,11 @@
  *   - `greet*.vrma`  al posto del saluto con la mano, quando compare;
  *   - `idle*.vrma`   ogni tanto, fra i gesti spontanei;
  *   - `dance*.vrma`  in loop mentre Spotify suona;
- *   - le altre       solo a richiesta, dal pannello.
+ *   - `bow*`, `inchino*`         quando la ringrazi;
+ *   - `alza*`, `here*`, `raise*` quando la chiami per nome (ascolto a chiamata);
+ *   - le altre       solo a richiesta, dal pannello (anche bow e alza).
+ *
+ * `scripts/import_mocap.mjs` ne installa una selezione da motion capture vero.
  *
  * Si usano solo le rotazioni delle ossa: niente spostamento dei fianchi (la
  * mascotte non deve uscire dalla finestra), niente espressioni ne' sguardo
@@ -33,6 +37,8 @@ export function clipRole(name) {
   if (/^(greet|wave|hello)/.test(base)) return 'greet';
   if (/^idle/.test(base)) return 'idle';
   if (/^dance/.test(base)) return 'dance';
+  if (/^(bow|inchino)/.test(base)) return 'bow';
+  if (/^(alza|here|raise)/.test(base)) return 'here';
   return 'action';
 }
 
@@ -123,10 +129,12 @@ export class ClipPlayer {
       return;
     }
     const time = Math.min(state.time, clip.duration);
+    // Dissolvenza con partenza e arrivo morbidi: lineare si vede lo "scatto" all'inizio.
+    const weight = state.weight * state.weight * (3 - 2 * state.weight);
     for (const { node, interpolant } of clip.tracks) {
       const values = interpolant.evaluate(time);
       this._q.set(values[0], values[1], values[2], values[3]);
-      node.quaternion.slerp(this._q, state.weight);
+      node.quaternion.slerp(this._q, weight);
     }
   }
 }

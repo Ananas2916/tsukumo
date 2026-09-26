@@ -6,6 +6,9 @@ models/*.part
 # Avatar VRM dell'utente e le sue clip .vrma (hanno licenze loro)
 frontend/public/models/*.vrm
 frontend/public/animations/*.vrma
+frontend/public/animations/CREDITS-*.txt
+# Motion capture scaricato da scripts/import_mocap.mjs (CC BY-NC)
+models/mocap/
 
 # Python
 __pycache__/

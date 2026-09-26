@@ -80,6 +80,8 @@ const voice = new VoiceController({
     if (event.type === 'activity') document.body.classList.toggle('listening', event.speaking);
     if (event.type === 'level') state.micLevel = event.level;
     if (event.type === 'enabled') reportVoice();
+    // L'hai chiamata per nome: alza la mano, "eccomi".
+    if (event.type === 'summoned') stage.playClipRole('here');
   },
 });
 
@@ -538,6 +540,12 @@ socket.on('transcript', (message) => {
   voice.handleTranscript(text, Boolean(message.echo));
   // La sua stessa voce tornata dal microfono (vedi pipeline.is_echo): niente bolla.
   if (!message.echo) ui.showBubble(`« ${text} »`, 2500);
+});
+
+// La ringrazi: un piccolo inchino (se c'e' una clip bow/inchino).
+const THANKS = /\b(grazie|thanks|thank you|thx|arigat[oō]|merci|danke|gracias|obrigad[oa])\b/i;
+socket.on('user', (message) => {
+  if (THANKS.test(message.text ?? '')) stage.playClipRole('bow');
 });
 
 // Una frase pronta da pronunciare: WAV + timeline dei visemi.
