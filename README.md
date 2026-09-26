@@ -556,6 +556,21 @@ parlato (`actions.js`), le costanti (`constants.js`).
 | **Se non usi il PC** | assonnata: palpebre pesanti, sguardo basso, la testa che cade piano e si rialza di scatto, qualche sbadiglio con la mano davanti alla bocca; addormentata: occhi chiusi, testa reclinata, respiro lento e profondo |
 | **Per un promemoria o un avviso** | bussa sul vetro dello schermo verso di te |
 | **Col caldo e col freddo** | si fa aria con la mano; si stringe le braccia e trema |
+| **A richiesta, dal pannello** | ciao sbucando dal basso, la V accanto all'occhio, la pistola con le dita ("bang" e soffia il fumo), si mette in mostra girandosi, giravolta con "ta-da", pose da modella, squat |
+
+**Come sta in piedi.** Da Personaggio → Comportamento si sceglie il suo modo di
+stare ferma: normale, innocente (mani dietro la schiena, si dondola), cool
+(mano sul fianco, braccia incrociate), elegante (piedi uniti, mani giunte),
+timida (ginocchia unite, mano ai capelli), energica (gambe larghe, guarda
+lontano), diva (di tre quarti, colpo di capelli), gentiluomo (inchino con la
+mano sul cuore) o potente (mani sui fianchi, pugno al cielo). Ogni modo ha una
+postura sua e qualche frase che si alterna ogni pochi secondi; le mani cedono
+sempre il posto ai gesti mentre parla o pensa.
+
+Gesti e modi di stare in piedi sono rifatti a mano guardando il Photo Booth di
+VRoid Hub fotogramma per fotogramma, di fronte e di lato, e riscritti da zero
+con il corpo procedurale (`frontend/src/body/booth.js`, `stances.js`): nessun
+dato preso dalle loro animazioni, e funzionano con qualunque avatar.
 
 Oltre al movimento procedurale può usare **clip `.vrma`** (VRM Animation):
 mettile in `frontend/public/animations/` e il nome dice quando usarle

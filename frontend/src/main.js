@@ -685,6 +685,7 @@ if (pet) {
   // Il trascinamento sposta la finestra, non ruota la camera.
   stage.dragEnabled = false;
   stage.setSpontaneous(readSetting('dc:spontaneous', true));
+  stage.setStance(readSetting('dc:stance', 'standard'));
   stage.setDancing(state.dancing);
 
   pet.onMusic((status) => {
@@ -876,6 +877,10 @@ if (pet) {
         break;
       case 'barge-in':
         voice.setBargeIn(command.value);
+        break;
+      case 'stance':
+        writeSetting('dc:stance', command.value);
+        stage.setStance(command.value);
         break;
       case 'hud':
         hud.show();

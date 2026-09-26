@@ -35,6 +35,19 @@ const REPLY_LANGUAGES = [
   { value: 'English', label: 'Sempre in inglese' },
 ];
 
+/** I modi di stare in piedi (frontend/src/body/stances.js), con le loro etichette. */
+const STANCES = [
+  { value: 'standard', label: 'Normale' },
+  { value: 'innocent', label: 'Innocente' },
+  { value: 'cool', label: 'Cool' },
+  { value: 'ladylike', label: 'Elegante' },
+  { value: 'shy', label: 'Timida' },
+  { value: 'energetic', label: 'Energica' },
+  { value: 'flamboyant', label: 'Diva' },
+  { value: 'gentleman', label: 'Gentiluomo' },
+  { value: 'powerful', label: 'Potente' },
+];
+
 const WEATHER_WORDS = {
   clear: 'sereno',
   cloudy: 'nuvoloso',
@@ -54,6 +67,13 @@ const ACTIONS = [
   { play: 'fanSelf', label: 'Che caldo', icon: 'wave' },
   { play: 'shiver', label: 'Che freddo', icon: 'ghost' },
   { play: 'pout', label: 'Broncio', icon: 'smile' },
+  { play: 'greetPop', label: 'Ciao dal basso', icon: 'hand' },
+  { play: 'peace', label: 'Fai la V', icon: 'smile' },
+  { play: 'shoot', label: 'Bang!', icon: 'hand' },
+  { play: 'showOff', label: 'Fatti vedere', icon: 'character' },
+  { play: 'spin', label: 'Giravolta', icon: 'refresh' },
+  { play: 'model', label: 'Posa da modella', icon: 'star' },
+  { play: 'squat', label: 'Squat', icon: 'sit' },
   { posture: 'sit', label: 'Siediti', icon: 'sit' },
   { posture: 'lie', label: 'Sdraiati', icon: 'window' },
   { posture: 'side', label: 'Sul fianco', icon: 'window' },
@@ -217,6 +237,12 @@ export class CharacterView {
     this.onTop = this._switch('Sempre davanti alle finestre');
     this.windows = this._switch('Si siede sulle finestre', 'Se la lasci cadere su una finestra ci resta sopra e viaggia con lei.');
     this.spontaneous = this._switch('Gesti e pose spontanee');
+    this.stance = el('select', { class: 'field-input' }, ...STANCES.map((item) => el('option', { value: item.value }, item.label)));
+    this.stance.value = readSetting('dc:stance', 'standard');
+    this.stance.addEventListener('change', () => {
+      writeSetting('dc:stance', this.stance.value);
+      this.companion?.sendToPet({ type: 'stance', value: this.stance.value });
+    });
     this.dance = this._switch('Balla con Spotify', "Quando Spotify suona ascolta l'audio del PC e si muove a tempo.");
     this.vocals = this._switch('Versetti con la sua voce', 'Un “Ciao!” quando saluta, una risatina alle carezze: con la voce scelta.');
     this.sleep = this._switch('Si addormenta se non usi il PC', 'Prima è assonnata, poi dorme; quando torni si sveglia e ti saluta.');
@@ -271,6 +297,7 @@ export class CharacterView {
       'Comportamento',
       this.onTop.node,
       this.windows.node,
+      this._row('Come sta in piedi', this.stance, 'Il suo modo di stare ferma: timida, cool, elegante, energica...'),
       this.spontaneous.node,
       this.vocals.node,
       this.sfx.node,

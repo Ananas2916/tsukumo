@@ -329,6 +329,7 @@ export class VrmStage {
 
     this.body = new BodyAnimator(vrm, this.avatarRoot, this.lookTarget);
     this.body.setThinking(this._thinking);
+    if (this._stance) this.body.setStance(this._stance);
     this.body.spontaneous = this._spontaneous;
     this.body.dancing = this._dancing;
     this.body.setSleep(this._sleep);
@@ -355,6 +356,8 @@ export class VrmStage {
   /** Saluta con la mano (lo fa quando compare). */
   greet() {
     if (this.body?.mode === 'stand' && this.clips?.playRole('greet')) return;
+    // Ogni tanto sbuca dal basso salutando con due mani (body/booth.js).
+    if (this.body?.mode === 'stand' && Math.random() < 0.35 && this.body.play('greetPop', { sign: -1 })) return;
     this.body?.play('wave', { sign: -1 });
   }
 
@@ -433,6 +436,12 @@ export class VrmStage {
   setThinking(value) {
     this._thinking = Boolean(value);
     this.body?.setThinking(this._thinking);
+  }
+
+  /** Come sta in piedi (body/stances.js): resta scelto anche cambiando modello. */
+  setStance(name) {
+    this._stance = name;
+    this.body?.setStance(name);
   }
 
   /** L'agente usa un tool (`read`, `write`, `run`...): posa da lavoro invece che pensierosa. */

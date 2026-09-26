@@ -63,6 +63,7 @@ import {
 } from './body/constants.js';
 import { basisQuat, clamp, curve, damp, makeNoise, randomBetween, smoothstep, Spring, TAU, Wobble } from './body/motion.js';
 import { Pose } from './body/pose.js';
+import { StanceMixer } from './body/stances.js';
 
 // Temporanei riutilizzati: niente allocazioni nel loop di rendering.
 const _v1 = new THREE.Vector3();
@@ -83,6 +84,7 @@ const _qMode = new THREE.Quaternion();
 const _m1 = new THREE.Matrix4();
 const _e1 = new THREE.Euler();
 const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 /** Il genere di tool dell'agente (backend/llm/activity.py) -> la posa mentre lavora. */
 const WORK_STYLE = { read: 'read', search: 'read', web: 'read', write: 'type', run: 'type', tool: 'type' };
@@ -149,6 +151,8 @@ export class BodyAnimator {
     };
     this.thinking = false;
     this.think = new Spring(3.2);
+    /** Come sta in piedi: normale, timida, cool, elegante... (body/stances.js). */
+    this.stances = new StanceMixer();
     /** Un agente al lavoro: che genere di passo (vedi WORK_STYLE) e le due pose. */
     this.work = { kind: null, read: new Spring(2.6), type: new Spring(2.6) };
     /** Pesi delle pose da lavoro in questo frame, per il pannello olografico (holo.js). */
@@ -382,6 +386,11 @@ export class BodyAnimator {
       sign: options.sign ?? (Math.random() < 0.5 ? -1 : 1),
     });
     return true;
+  }
+
+  /** Cambia il modo di stare in piedi (`shy`, `cool`, `ladylike`...): sfuma nel nuovo. */
+  setStance(name) {
+    this.stances.set(name);
   }
 
   setThinking(value) {
@@ -835,7 +844,8 @@ export class BodyAnimator {
       this.weightTarget = roll < 0.12 ? 0 : roll < 0.56 ? -1 : 1;
       this.weightTimer = randomBetween(4, 11);
     }
-    const weight = this.weight.update(this.weightTarget, dt);
+    // Un'elegante sta composta, un'energica si sposta di piu' (vedi stances.js).
+    const weight = this.weight.update(this.weightTarget, dt) * clamp(this.stances.sway, 0, 1.3);
     const lean = Math.abs(weight);
     // Bacino sopra la gamba d'appoggio, piu' alto da quel lato; il busto
     // compensa in senso opposto e la testa torna dritta.
@@ -870,6 +880,9 @@ export class BodyAnimator {
     pose.both('Hand', 0, -0.06, -0.1, w);
     pose.add('spine', 0.02 * w, 0, 0);
     pose.add('chest', -0.015 * w, 0, 0);
+
+    // Il modo di stare in piedi, sopra la postura di base.
+    this.stances.apply(pose, dt, t, w);
   }
 
   // ----------------------------------------------------------- seduta
@@ -1466,15 +1479,25 @@ export class BodyAnimator {
   _applyForwardKinematics(pose) {
     const f = this.flip;
 
-    // Dita: piega di riposo, modulata da quanto la mano e' aperta o chiusa.
+    // Dita: piega di riposo, modulata da quanto la mano e' aperta o chiusa;
+    // quelle tese una per una (la V, la pistola) si raddrizzano del loro peso.
     for (const side of SIDES) {
       const curl = clamp(1 + pose.fingers[side], 0, 2.4);
+      const extend = pose.extend[side];
       for (const [finger, bends] of Object.entries(FINGER_REST)) {
-        PHALANGES.forEach((phalanx, i) => pose.side(side, finger + phalanx, 0, 0, -bends[i] * curl));
+        const bend = curl * (1 - clamp(extend[finger] ?? 0, 0, 1));
+        PHALANGES.forEach((phalanx, i) => pose.side(side, finger + phalanx, 0, 0, -bends[i] * bend));
       }
-      pose.side(side, 'ThumbMetacarpal', 0, 0.2 * curl, -0.05 * curl);
-      pose.side(side, 'ThumbProximal', 0, 0.25 * curl, -0.08 * curl);
-      pose.side(side, 'ThumbDistal', 0, 0.2 * curl, -0.05 * curl);
+      // La V: indice e medio si aprono a forbice.
+      const spread = pose.spread[side];
+      if (spread > EPSILON) {
+        pose.side(side, 'IndexProximal', 0, 0.2 * spread, 0);
+        pose.side(side, 'MiddleProximal', 0, -0.12 * spread, 0);
+      }
+      const thumb = curl * (1 - clamp(extend.Thumb ?? 0, 0, 1));
+      pose.side(side, 'ThumbMetacarpal', 0, 0.2 * thumb, -0.05 * thumb);
+      pose.side(side, 'ThumbProximal', 0, 0.25 * thumb, -0.08 * thumb);
+      pose.side(side, 'ThumbDistal', 0, 0.2 * thumb, -0.05 * thumb);
     }
 
     for (const name of this.managed) {
@@ -1511,6 +1534,8 @@ export class BodyAnimator {
       rotation.slerp(_qMode, w / accumulated);
       position.addScaledVector(offset, w);
     }
+    // Giravolte e "mettersi in mostra": tutto il corpo gira intorno ai piedi.
+    if (Math.abs(this.pose.rootYaw) > 1e-4) rotation.multiply(_qMode.setFromAxisAngle(Y_AXIS, this.pose.rootYaw));
     this.root.quaternion.copy(rotation);
     this.root.position.copy(position);
   }

@@ -6,6 +6,9 @@ import * as THREE from 'three';
 
 import { EPSILON, MOODS, SIDES } from './constants.js';
 
+/** Le dita che si possono tendere una per una (vedi `Pose.extend`). */
+export const FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Little'];
+
 /** Restituito da `Pose.get` per un bone che nessuno strato ha toccato. */
 const _zero = new THREE.Vector3();
 
@@ -21,6 +24,13 @@ export class Pose {
     this.feet = { left: new THREE.Vector3(), right: new THREE.Vector3() };
     this.heel = { left: 0, right: 0 };
     this.fingers = { left: 0, right: 0 };
+    /**
+     * Dita tese una per una (0..1), sopra la chiusura di `fingers`: la V
+     * e' la mano chiusa con Index e Middle tesi, la pistola Index e Thumb.
+     */
+    this.extend = { left: {}, right: {} };
+    /** Indice e medio divaricati (la V), 0..1. */
+    this.spread = { left: 0, right: 0 };
     this.hands = { left: [], right: [] };
     this.expr = {};
     this.gaze = { yaw: 0, pitch: 0, weight: 0 };
@@ -35,7 +45,11 @@ export class Pose {
       this.heel[side] = 0;
       this.fingers[side] = 0;
       this.hands[side].length = 0;
+      this.spread[side] = 0;
+      for (const finger of FINGERS) this.extend[side][finger] = 0;
     }
+    /** Rotazione del corpo intero intorno ai piedi (giravolta, mettersi in mostra), radianti. */
+    this.rootYaw = 0;
     for (const mood of MOODS) this.expr[mood] = 0;
     this.gaze.yaw = 0;
     this.gaze.pitch = 0;
@@ -72,6 +86,11 @@ export class Pose {
   both(part, x, y, z, w = 1) {
     this.side('left', part, x, y, z, w);
     this.side('right', part, x, y, z, w);
+  }
+
+  /** Tende le dita elencate (`['Index', 'Middle']`) del peso `w`. */
+  point(side, fingers, w) {
+    for (const finger of fingers) this.extend[side][finger] += w;
   }
 
   mood(name, value) {

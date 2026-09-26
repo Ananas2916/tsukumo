@@ -2,6 +2,7 @@
  * Azioni spontanee e gesti del parlato (vedi body.js per le convenzioni sugli assi).
  */
 
+import { BOOTH_ACTIONS } from './booth.js';
 import { SIDES } from './constants.js';
 import { curve, TAU } from './motion.js';
 
@@ -340,6 +341,9 @@ export const ACTIONS = {
     },
   },
 };
+
+// Ciao sbucando, la V, la pistola, giravolta, pose da modella, squat (booth.js).
+Object.assign(ACTIONS, BOOTH_ACTIONS);
 
 /**
  * Gesti mentre parla, scelti a ogni frase. Le coordinate sono per il lato
