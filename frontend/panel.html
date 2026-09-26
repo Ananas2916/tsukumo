@@ -39,13 +39,17 @@
               <span id="engine-chip-text">…</span>
             </button>
             <span class="spacer"></span>
+            <button id="btn-screen" class="ghost-btn hidden" type="button" title="Falle vedere lo schermo"></button>
             <button id="btn-new-chat" class="ghost-btn" type="button" title="Dimentica la conversazione e ricomincia"></button>
           </div>
           <div id="messages" class="messages" aria-live="polite"></div>
           <div class="composer-wrap">
             <div id="typing" class="typing hidden"><i></i><i></i><i></i><span>sta pensando</span></div>
+            <div id="attachments" class="attachments hidden"></div>
+            <input id="file-input" type="file" multiple hidden />
             <form id="composer" class="composer" autocomplete="off">
               <button id="btn-mic" class="composer-icon" type="button" title="Parla (Ctrl+Spazio)"></button>
+              <button id="btn-attach" class="composer-icon" type="button" title="Allega un file (o trascinalo qui, o su di lei)"></button>
               <textarea id="input" rows="1" placeholder="Scrivile qualcosa…" aria-label="Messaggio"></textarea>
               <button id="btn-read" class="composer-icon" type="button" title="Fai solo leggere il testo, senza passare dal cervello"></button>
               <button id="btn-send" class="send" type="submit" title="Invia (Invio)"></button>

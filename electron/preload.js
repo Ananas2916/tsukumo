@@ -6,7 +6,7 @@
  * finestre; `role` dice quale delle due sta girando ('pet' o 'panel').
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const role = process.argv.find((arg) => arg.startsWith('--dc-role='))?.split('=')[1] ?? 'pet';
 
@@ -20,6 +20,18 @@ function listen(channel, callback) {
 contextBridge.exposeInMainWorld('companion', {
   isElectron: true,
   role,
+
+  // --- file e schermo -----------------------------------------------------
+  /** Percorso vero di un file trascinato (Electron 32 ha tolto `File.path`). */
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
+  /** Screenshot dello schermo dove sta il cursore: restituisce il percorso del PNG. */
+  captureScreen: () => ipcRenderer.invoke('pet:capture-screen'),
 
   // --- personaggio ------------------------------------------------------
   /**

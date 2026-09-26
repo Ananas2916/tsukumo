@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
+from .attachments import Attachment, default_prompt, prepare, with_contents, with_paths
 from .audio import encode_wav_base64
 from .config import Settings
 from .languages import reply_language, short_language, speech_directive
@@ -134,6 +135,18 @@ def detect_mood(text: str) -> str | None:
     return votes.most_common(1)[0][0] if votes else None
 
 
+_SCREEN = re.compile(
+    r"\b(?:guarda|vedi|leggi|controlla|dai un'?\s?occhiata a(?:l|llo)?|cosa c'?\s?è|che c'?\s?è|cosa vedi|look at|see|check|read|what'?s on|what is on)\b"
+    r"[^.?!]{0,40}\b(?:schermo|monitor|display|screen)\b|\bscreenshot\b",
+    re.IGNORECASE,
+)
+
+
+def wants_screen(text: str) -> bool:
+    """"guarda il mio schermo", "cosa vedi sullo schermo?", "look at my screen"."""
+    return bool(_SCREEN.search(text))
+
+
 def split_sentences(text: str, max_chars: int = 220) -> list[str]:
     """Divide il testo in frasi pronunciabili, senza superare ``max_chars``.
 
@@ -237,6 +250,8 @@ class Companion:
         self.reminders: ReminderStore | None = None
         #: Avvisa il server quando i promemoria cambiano (pannello, pianificatore).
         self.on_reminders_changed: Callable[[], Awaitable[None]] | None = None
+        #: Chiede lo screenshot alla shell (vero se qualcuno puo' farlo): "guarda lo schermo".
+        self.screen_capture: Callable[[str], Awaitable[bool]] | None = None
 
     # ------------------------------------------------------------------
     # Motori
@@ -293,15 +308,33 @@ class Companion:
     # ------------------------------------------------------------------
     # API pubblica
     # ------------------------------------------------------------------
-    async def chat(self, text: str, emit: Emit, *, hidden: bool = False) -> str:
+    async def chat(
+        self,
+        text: str,
+        emit: Emit,
+        *,
+        hidden: bool = False,
+        files: list[str] | None = None,
+        screen: bool = False,
+    ) -> str:
         """Ciclo completo: cervello in streaming + sintesi frase per frase.
 
         ``hidden``: il messaggio non viene dall'utente (un'azione programmata, un
         commento spontaneo) e non compare in chat; la risposta si'.
+        ``files``: percorsi di file allegati (trascinati su di lei, screenshot);
+        ``screen`` dice che l'allegato e' lo schermo.
         """
+        attachments = prepare(files)
         prompt = (text or "").strip()
+        if not prompt and attachments:
+            prompt = default_prompt(attachments, self.voice_language, screen)
         if not prompt:
             return ""
+        # "Guarda lo schermo": lo screenshot lo fa la shell, che poi rimanda
+        # qui lo stesso messaggio con l'immagine allegata.
+        if not hidden and not attachments and self.screen_capture is not None and wants_screen(prompt):
+            if await self.screen_capture(prompt):
+                return ""
 
         async with self._turn_lock:
             self._cancel.clear()
@@ -312,13 +345,14 @@ class Companion:
 
             await emit({"type": "state", "value": "thinking", "turn": turn})
             if not hidden:
-                await emit({"type": "user", "text": prompt, "turn": turn})
+                files_info = [{"name": item.name, "kind": item.kind} for item in attachments]
+                await emit({"type": "user", "text": prompt, "turn": turn, "files": files_info, "screen": screen})
                 # Timer e promemoria che si capiscono da soli: risposta immediata.
-                local = await self._local_reply(prompt)
+                local = None if attachments else await self._local_reply(prompt)
                 if local is not None:
                     return await self._finish_local(prompt, local, emit, turn, started)
 
-            messages = self._build_messages(prompt)
+            messages = self._build_messages(prompt, attachments)
             buffer = ""
             full_reply = ""
             spoken = 0
@@ -371,7 +405,8 @@ class Companion:
             finally:
                 reply = clean_for_speech(full_reply)
                 if reply:
-                    self.history.append(Message("user", prompt))
+                    names = ", ".join(item.name for item in attachments)
+                    self.history.append(Message("user", f"{prompt} [allegati: {names}]" if names else prompt))
                     self.history.append(Message("assistant", reply))
                     self._trim_history()
 
@@ -551,7 +586,7 @@ class Companion:
     # ------------------------------------------------------------------
     # Interni
     # ------------------------------------------------------------------
-    def _build_messages(self, prompt: str) -> list[Message]:
+    def _build_messages(self, prompt: str, attachments: list[Attachment] | None = None) -> list[Message]:
         # L'ULTIMO messaggio di sistema sono i vincoli del parlato (lingua,
         # testo semplice): gli agenti, che hanno una personalita' propria,
         # ricevono solo quello e non il nostro system prompt.
@@ -566,7 +601,15 @@ class Companion:
             # Un agente ricorda da se': rimandargli la cronologia sprecherebbe
             # contesto (e soldi, se e' a consumo).
             messages.extend(self.history)
-        messages.append(Message("user", prompt))
+        if not attachments:
+            messages.append(Message("user", prompt))
+            return messages
+        # Un agente apre i file da se' (gli servono i percorsi e il permesso di
+        # leggerli); a un modello si manda il testo e le immagini nel messaggio.
+        content = with_paths(prompt, attachments) if self.llm.stateful else with_contents(prompt, attachments)
+        images = tuple(str(item.path) for item in attachments if item.kind == "image")
+        folders = tuple(sorted({str(item.path.parent) for item in attachments}))
+        messages.append(Message("user", content, images=images, folders=folders))
         return messages
 
     async def _local_reply(self, prompt: str) -> str | None:

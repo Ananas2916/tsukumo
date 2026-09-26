@@ -7,7 +7,8 @@
  * bottone che porta dritto a dove si sistema.
  */
 
-import { el, readSetting, writeSetting } from '../dom.js';
+import { apiUrl } from '../config.js';
+import { el, iconButton, readSetting, writeSetting } from '../dom.js';
 import { icon, iconSvg } from '../icons.js';
 import { renderMarkdown } from '../markdown.js';
 
@@ -37,10 +38,19 @@ export class ChatView {
     this.read = root.querySelector('#btn-read');
     this.chip = root.querySelector('#engine-chip');
     this.newChat = root.querySelector('#btn-new-chat');
+    this.attach = root.querySelector('#btn-attach');
+    this.screenButton = root.querySelector('#btn-screen');
+    this.fileInput = root.querySelector('#file-input');
+    this.attachmentsEl = root.querySelector('#attachments');
+    /** File pronti da mandare col prossimo messaggio: `{name, path, screen}`. */
+    this.attachments = [];
 
     this.mic.innerHTML = iconSvg('mic', 18);
     this.read.innerHTML = iconSvg('volume', 18);
     this.newChat.append(icon('newChat', 16), el('span', {}, 'Nuova'));
+    this.attach.innerHTML = iconSvg('clip', 18);
+    this.screenButton.append(icon('screen', 16), el('span', {}, 'Schermo'));
+    this.screenButton.classList.toggle('hidden', !app.companion?.captureScreen);
 
     /** @type {{role: string, text: string, note?: string, hint?: string, source?: string, node?: HTMLElement}[]} */
     this.history = readSetting(HISTORY_KEY, []);
@@ -111,10 +121,99 @@ export class ChatView {
     });
 
     this.chip.addEventListener('click', () => this.app.showTab('engines', { section: 'llm' }));
+
+    // File: graffetta, trascinamento sulla chat, screenshot.
+    this.attach.addEventListener('click', () => this.fileInput.click());
+    this.fileInput.addEventListener('change', () => {
+      this.addFiles([...this.fileInput.files]);
+      this.fileInput.value = '';
+    });
+    this.root.addEventListener('dragover', (event) => {
+      if (!event.dataTransfer?.types?.includes('Files')) return;
+      event.preventDefault();
+      this.root.classList.add('drop-target');
+    });
+    this.root.addEventListener('dragleave', (event) => {
+      if (!this.root.contains(event.relatedTarget)) this.root.classList.remove('drop-target');
+    });
+    this.root.addEventListener('drop', (event) => {
+      event.preventDefault();
+      this.root.classList.remove('drop-target');
+      this.addFiles([...(event.dataTransfer?.files ?? [])]);
+    });
+    this.screenButton.addEventListener('click', () => this.addScreen());
+  }
+
+  /**
+   * In Electron il file ha un percorso vero: l'agente lo apre dove sta. Nel
+   * browser non c'e', quindi lo si carica sul backend (`/api/attachments`).
+   */
+  async addFiles(files) {
+    for (const file of files) {
+      let path = this.app.companion?.pathForFile?.(file) ?? null;
+      if (!path) {
+        try {
+          const response = await fetch(apiUrl(`/api/attachments?name=${encodeURIComponent(file.name)}`), { method: 'POST', body: file });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+          path = data.path;
+        } catch (error) {
+          this.app.toast(`${file.name}: ${error.message}`, 'error');
+          continue;
+        }
+      }
+      this.attachments.push({ name: file.name, path, screen: false });
+    }
+    this._renderAttachments();
+    this.input.focus();
+  }
+
+  async addScreen() {
+    try {
+      const path = await this.app.companion.captureScreen();
+      this.attachments.push({ name: 'Schermo', path, screen: true });
+      this._renderAttachments();
+      this.input.focus();
+    } catch (error) {
+      this.app.toast(`Non riesco a catturare lo schermo: ${error.message}`, 'error');
+    }
+  }
+
+  _renderAttachments() {
+    this.attachmentsEl.classList.toggle('hidden', !this.attachments.length);
+    this.attachmentsEl.replaceChildren(
+      ...this.attachments.map((item, index) =>
+        el(
+          'span',
+          { class: 'attachment' },
+          icon(item.screen ? 'screen' : 'clip', 13),
+          el('span', {}, item.name),
+          iconButton('close', {
+            title: 'Togli',
+            size: 12,
+            onClick: () => {
+              this.attachments.splice(index, 1);
+              this._renderAttachments();
+            },
+          }),
+        ),
+      ),
+    );
+    this._renderSend();
   }
 
   submit(raw) {
     const text = raw.trim();
+    if (this.attachments.length && !this.readMode) {
+      const files = this.attachments.map((item) => item.path);
+      const screen = this.attachments.some((item) => item.screen);
+      this.attachments = [];
+      this._renderAttachments();
+      this.input.value = '';
+      this._autoGrow();
+      this.socket.send({ type: 'chat', text, files, screen });
+      return;
+    }
     if (!text) return;
     this.input.value = '';
     this._autoGrow();
@@ -134,7 +233,7 @@ export class ChatView {
   }
 
   _renderSend() {
-    const stop = this.busy !== 'idle' && !this.input.value.trim();
+    const stop = this.busy !== 'idle' && !this.input.value.trim() && !this.attachments?.length;
     this.send.innerHTML = iconSvg(stop ? 'stop' : 'send', 17);
     this.send.classList.toggle('stop', stop);
     this.send.title = stop ? 'Interrompi' : 'Invia (Invio)';
@@ -156,7 +255,10 @@ export class ChatView {
       this.mic.classList.toggle('active', Boolean(state.enabled && (state.mode !== 'push' || state.held)));
     });
 
-    socket.on('user', (message) => this.add({ role: 'user', text: message.text }));
+    socket.on('user', (message) => {
+      const files = (message.files ?? []).map((file) => (message.screen ? 'schermo' : file.name));
+      this.add({ role: 'user', text: message.text, note: files.length ? `📎 ${files.join(', ')}` : undefined });
+    });
 
     socket.on('token', (message) => {
       let reply = this.pending.get(message.turn);

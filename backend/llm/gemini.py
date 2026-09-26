@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from ..attachments import gemini_parts
 from .base import LLMClient, Message
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ class GeminiClient(LLMClient):
                 system_parts.append(message.content)
                 continue
             role = "model" if message.role == "assistant" else "user"
-            contents.append({"role": role, "parts": [{"text": message.content}]})
+            contents.append({"role": role, "parts": gemini_parts(message.content, message.images)})
         return "\n\n".join(system_parts), contents
 
     # ------------------------------------------------------------------

@@ -379,7 +379,26 @@ function refreshStatus() {
   else hud.setBusy(state.backendState === 'thinking' ? 'thinking' : 'idle');
 }
 
-socket.on('open', () => refreshStatus());
+socket.on('open', () => {
+  refreshStatus();
+  // Solo la finestra del personaggio in Electron sa fare gli screenshot.
+  if (pet?.captureScreen) socket.send({ type: 'capabilities', screen: true });
+});
+
+/** Screenshot e stesso messaggio, col file allegato ("guarda lo schermo"). */
+async function lookAtScreen(text = '') {
+  if (!pet?.captureScreen) return;
+  try {
+    const file = await pet.captureScreen();
+    stage.body?.play('lookAround');
+    socket.send({ type: 'chat', text, files: [file], screen: true });
+  } catch (error) {
+    ui.toast(`Non riesco a vedere lo schermo: ${error.message}`, true, 4000);
+  }
+}
+
+// Il backend ha capito "guarda lo schermo": lo screenshot lo facciamo qui.
+socket.on('capture', (message) => lookAtScreen(message.text ?? ''));
 
 socket.on('close', () => {
   state.backendState = 'idle';
@@ -761,6 +780,9 @@ if (pet) {
       case 'sfx':
         sfx.setEnabled(command.value);
         break;
+      case 'look-screen':
+        lookAtScreen();
+        break;
       case 'sleep':
         presence.setEnabled(command.value);
         break;
@@ -796,6 +818,27 @@ if (pet) {
   document.body.classList.add('opaque-bg');
   stage.setBackgroundVisible(true);
   stage.setDancing(state.dancing);
+}
+
+// Un file trascinato su di lei: lo prende e lo passa al cervello.
+if (pet) {
+  window.addEventListener('dragover', (event) => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    document.body.classList.add('drop-target');
+  });
+  window.addEventListener('dragleave', () => document.body.classList.remove('drop-target'));
+  window.addEventListener('drop', (event) => {
+    event.preventDefault();
+    document.body.classList.remove('drop-target');
+    const files = [...(event.dataTransfer?.files ?? [])].map((file) => pet.pathForFile?.(file)).filter(Boolean);
+    if (!files.length) return;
+    presence.touch();
+    stage.body?.play('pat');
+    vocals.say('pat');
+    socket.send({ type: 'chat', text: '', files });
+  });
 }
 
 // L'audio richiede un gesto utente: il primo click/tasto sblocca il contesto.

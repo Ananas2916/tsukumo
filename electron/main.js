@@ -23,6 +23,7 @@ const {
   Menu,
   Notification,
   Tray,
+  desktopCapturer,
   dialog,
   globalShortcut,
   ipcMain,
@@ -930,6 +931,7 @@ function updateTrayMenu() {
       { label: 'Personaggio', click: () => showPanel({ tab: 'character' }) },
       { label: 'Motori', click: () => showPanel({ tab: 'engines' }) },
       { label: 'Mostra i comandi accanto a lei', click: () => sendToPet('pet:command', { type: 'hud' }) },
+      { label: 'Guarda lo schermo', click: () => sendToPet('pet:command', { type: 'look-screen' }) },
       { type: 'separator' },
       {
         label: 'Modalita fantasma',
@@ -957,6 +959,28 @@ function updateTrayMenu() {
 // ---------------------------------------------------------------------------
 /** Il renderer dice se il cursore e' sopra un pixel opaco del personaggio. */
 ipcMain.on('pet:set-interactive', (_event, value) => applyInteractive(Boolean(value)));
+/**
+ * "Guarda lo schermo": uno screenshot dello schermo col cursore, salvato nei
+ * file temporanei. Solo su richiesta esplicita (chat, voce, menu), mai da solo.
+ */
+async function captureScreen() {
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const size = {
+    width: Math.round(display.size.width * display.scaleFactor),
+    height: Math.round(display.size.height * display.scaleFactor),
+  };
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
+  const source = sources.find((item) => item.display_id === String(display.id)) ?? sources[0];
+  if (!source || source.thumbnail.isEmpty()) throw new Error('Nessuno schermo da catturare');
+  const folder = path.join(app.getPath('temp'), 'tsukumo');
+  fs.mkdirSync(folder, { recursive: true });
+  const file = path.join(folder, `schermo-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
+  fs.writeFileSync(file, source.thumbnail.toPNG());
+  return file;
+}
+
+ipcMain.handle('pet:capture-screen', () => captureScreen());
+
 // Promemoria e notifiche: anche con il personaggio coperto o a schermo intero.
 ipcMain.on('pet:notify', (_event, { title, body } = {}) => {
   if (!Notification.isSupported()) return;

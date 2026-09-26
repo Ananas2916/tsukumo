@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from ..attachments import ollama_images
 from .base import LLMClient, Message
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,9 @@ class OllamaClient(LLMClient):
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
         payload = {
             "model": self.model,
-            "messages": [m.as_dict() for m in messages],
+            "messages": [
+                {**m.as_dict(), "images": ollama_images(m.images)} if m.images else m.as_dict() for m in messages
+            ],
             "stream": True,
             "options": {"temperature": self.temperature},
         }

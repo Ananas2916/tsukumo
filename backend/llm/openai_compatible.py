@@ -25,6 +25,7 @@ from typing import Any
 
 import httpx
 
+from ..attachments import openai_content
 from .base import LLMClient, Message, describe_error
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ class OpenAICompatibleClient(LLMClient):
         model = await self._resolve_model()
         payload = {
             "model": model,
-            "messages": [m.as_dict() for m in messages],
+            "messages": [{"role": m.role, "content": openai_content(m.content, m.images)} for m in messages],
             "stream": True,
             "temperature": self.temperature,
         }

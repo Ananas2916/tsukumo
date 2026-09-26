@@ -58,13 +58,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .attachments import MAX_UPLOAD_BYTES, store_upload
 from .config import Settings, save_dotenv
 from .context import PCContext
 from .news import NewsService
@@ -108,6 +109,9 @@ NEWS = NewsService()
 REMINDERS = ReminderStore(SETTINGS.state_dir / "reminders.json")
 #: Sveglia il pianificatore quando cambia qualcosa (creato nel loop giusto, all'avvio).
 _reminders_wake: asyncio.Event | None = None
+
+#: Client che sanno fare uno screenshot (la finestra del personaggio in Electron).
+SCREEN_CLIENTS: set[WebSocket] = set()
 
 #: Cervelli trovati sul PC (vedi ``llm/detect.py``): ``{id: {"found", "detail"}}``.
 #: Si riempie in background poco dopo l'avvio; prima e' vuoto.
@@ -646,9 +650,23 @@ async def api_chat(request: ChatRequest) -> dict[str, Any]:
 # Timer e promemoria
 # ---------------------------------------------------------------------------
 def _attach(instance: Companion) -> None:
-    """Collega al companion i promemoria (e l'avviso quando cambiano)."""
+    """Collega al companion i promemoria, lo screenshot e gli avvisi."""
     instance.reminders = REMINDERS
     instance.on_reminders_changed = _reminders_changed
+    instance.screen_capture = _request_screen
+
+
+async def _request_screen(text: str) -> bool:
+    """Chiede uno screenshot a chi sa farlo; il messaggio tornera' col file allegato."""
+    targets = list(SCREEN_CLIENTS)
+    if not targets:
+        return False
+    try:
+        await targets[0].send_json({"type": "capture", "text": text})
+    except Exception:
+        SCREEN_CLIENTS.discard(targets[0])
+        return False
+    return True
 
 
 async def _reminders_changed() -> None:
@@ -696,6 +714,23 @@ async def _fire_due_reminders(now: float | None = None) -> list[ReminderItem]:
     if fired:
         await hub.broadcast({"type": "reminders", "reminders": [item.as_dict() for item in REMINDERS.all()]})
     return fired
+
+
+@app.post("/api/attachments")
+async def upload_attachment(request: Request, name: str = "file") -> dict[str, Any]:
+    """Un file dal browser (che non conosce i percorsi): lo salva e ne restituisce il percorso.
+
+    Il corpo e' il file cosi' com'e' (niente multipart): ``POST /api/attachments?name=foto.png``.
+    """
+    length = int(request.headers.get("content-length") or 0)
+    if length > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File troppo grande")
+    data = await request.body()
+    try:
+        path = await asyncio.to_thread(store_upload, SETTINGS.state_dir / "uploads", name, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    return {"ok": True, "path": str(path), "name": path.name}
 
 
 @app.get("/api/reminders")
@@ -881,7 +916,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "pong"})
             elif kind == "chat":
                 # Task separato: il loop resta libero di ricevere "cancel".
-                _spawn(instance.chat(message.get("text", ""), hub.broadcast))
+                files = [str(item) for item in (message.get("files") or []) if isinstance(item, str)]
+                _spawn(instance.chat(message.get("text", ""), hub.broadcast, files=files, screen=bool(message.get("screen"))))
+            elif kind == "capabilities":
+                # La finestra del personaggio in Electron sa fare gli screenshot.
+                if message.get("screen"):
+                    SCREEN_CLIENTS.add(websocket)
             elif kind == "say":
                 _spawn(instance.say(message.get("text", ""), hub.broadcast, message.get("voice")))
             elif kind == "voice":
@@ -917,6 +957,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except Exception as exc:  # pragma: no cover - errori di trasporto
         logger.warning("WebSocket chiuso con errore: %s", describe_error(exc))
     finally:
+        SCREEN_CLIENTS.discard(websocket)
         await hub.remove(websocket)
         logger.info("Client disconnesso (%d rimasti)", hub.count)
 

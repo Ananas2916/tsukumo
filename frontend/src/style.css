@@ -258,6 +258,11 @@ body.pet-mode.dragging #stage {
   transform: rotate(45deg);
 }
 
+/* ------------------------------------------ file trascinato su di lei --- */
+.drop-target #stage {
+  filter: drop-shadow(0 0 10px rgba(165, 139, 255, 0.85));
+}
+
 /* ------------------------------------------------------------- sonno --- */
 .zzz {
   position: fixed;

@@ -21,6 +21,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..attachments import anthropic_content
 from .base import LLMClient, Message
 
 logger = logging.getLogger(__name__)
@@ -61,15 +62,15 @@ class AnthropicClient(LLMClient):
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _split(messages: list[Message]) -> tuple[str, list[dict[str, str]]]:
+    def _split(messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
         """Separa il system prompt dal resto della conversazione."""
         system_parts: list[str] = []
-        turns: list[dict[str, str]] = []
+        turns: list[dict[str, Any]] = []
         for message in messages:
             if message.role == "system":
                 system_parts.append(message.content)
             else:
-                turns.append({"role": message.role, "content": message.content})
+                turns.append({"role": message.role, "content": anthropic_content(message.content, message.images)})
         return "\n\n".join(system_parts), turns
 
     # ------------------------------------------------------------------

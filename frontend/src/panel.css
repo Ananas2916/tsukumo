@@ -662,6 +662,42 @@ body:not(:has(#window-actions:not(:empty))) .app {
   margin-left: 5px;
 }
 
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+
+.attachment span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment .icon-btn {
+  width: 20px;
+  height: 20px;
+}
+
+.chat-view.drop-target {
+  outline: 2px dashed rgba(165, 139, 255, 0.6);
+  outline-offset: -6px;
+}
+
 .composer {
   display: flex;
   align-items: flex-end;

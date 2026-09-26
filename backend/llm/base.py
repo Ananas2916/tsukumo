@@ -19,6 +19,10 @@ PROBE_TIMEOUT = 4.0
 class Message:
     role: Role
     content: str
+    #: Immagini allegate (percorsi): i modelli che vedono le ricevono nel messaggio.
+    images: tuple[str, ...] = ()
+    #: Cartelle dei file allegati: un agente deve poterle leggere (``--add-dir``).
+    folders: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, str]:
         return {"role": self.role, "content": self.content}
@@ -81,6 +85,10 @@ class LLMClient(ABC):
 def last_user_text(messages: list[Message]) -> str:
     """L'ultimo messaggio dell'utente: e' tutto quello che serve a un agente."""
     return next((m.content for m in reversed(messages) if m.role == "user"), "")
+
+
+def last_user_message(messages: list[Message]) -> Message | None:
+    return next((m for m in reversed(messages) if m.role == "user"), None)
 
 
 def speech_directive(messages: list[Message]) -> str:

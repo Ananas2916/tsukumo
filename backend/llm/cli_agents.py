@@ -41,7 +41,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from .base import LLMClient, Message, describe_error, last_user_text, speech_directive
+from .base import LLMClient, Message, describe_error, last_user_message, last_user_text, speech_directive
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +387,7 @@ class ClaudeCodeClient(_CLIAgent):
             scope=f"{cwd}|{self.model}",
         )
 
-    def build_argv(self, directive: str) -> list[str]:
+    def build_argv(self, directive: str, folders: tuple[str, ...] = ()) -> list[str]:
         argv = [
             self._require_executable(),
             "-p",
@@ -406,6 +406,9 @@ class ClaudeCodeClient(_CLIAgent):
             argv += ["--allowedTools", self.allowed_tools]
         if self.permission_mode != "default":
             argv += ["--permission-mode", self.permission_mode]
+        if folders:
+            # I file che gli hai passato possono stare fuori dalla sua cartella.
+            argv += ["--add-dir", *folders]
         return argv
 
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
@@ -413,12 +416,14 @@ class ClaudeCodeClient(_CLIAgent):
         if not text:
             return
         directive = speech_directive(messages)
+        last = last_user_message(messages)
+        folders = last.folders if last else ()
         for attempt in (1, 2):
             parser = ClaudeStreamParser()
             produced = False
             try:
                 async for line in stream_process(
-                    self.build_argv(directive), stdin_text=text, cwd=self.cwd, timeout=self.timeout
+                    self.build_argv(directive, folders), stdin_text=text, cwd=self.cwd, timeout=self.timeout
                 ):
                     for piece in parser.feed(line):
                         produced = True
@@ -518,8 +523,11 @@ class CodexClient(_CLIAgent):
         self.sandbox = sandbox.strip() or "read-only"
         super().__init__(find_codex(command), cwd, timeout, session_path, scope=f"{cwd}|{self.model}")
 
-    def build_argv(self) -> list[str]:
+    def build_argv(self, images: tuple[str, ...] = ()) -> list[str]:
         argv = [self._require_executable(), "exec", "--json", "--skip-git-repo-check", "-s", self.sandbox]
+        for image in images:
+            # -i accetta piu' valori: dopo deve sempre venire un'altra opzione (-C).
+            argv += ["-i", image]
         if self.model:
             argv += ["-m", self.model]
         argv += ["-C", self.cwd]
@@ -540,9 +548,11 @@ class CodexClient(_CLIAgent):
             return
         directive = speech_directive(messages)
         prompt = f"[{SPOKEN_STYLE} {directive}]\n\n{text}"
+        last = last_user_message(messages)
         parser = CodexStreamParser()
         try:
-            async for line in stream_process(self.build_argv(), stdin_text=prompt, cwd=self.cwd, timeout=self.timeout):
+            argv = self.build_argv(last.images if last else ())
+            async for line in stream_process(argv, stdin_text=prompt, cwd=self.cwd, timeout=self.timeout):
                 for piece in parser.feed(line):
                     yield piece
         except AgentError:
