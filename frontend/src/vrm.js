@@ -516,6 +516,23 @@ export class VrmStage {
    * a meta' strada fra il personaggio e la camera. Su quel piano un cursore
    * lontano (anche fuori dalla finestra) produce un angolo ampio ma sensato.
    */
+  /**
+   * Il cursore e' fermo sopra la sua testa da un attimo: prova a toccarlo.
+   * Restituisce il punto (sul piano della testa) o `null`.
+   */
+  _updateReachPoint(dt) {
+    const { x, y } = this.pointerPx;
+    const head = x >= 0 ? this.headScreen() : null;
+    const above = head ? head.y - y : 0;
+    const over = Boolean(head) && above > 20 && above < 190 && Math.abs(x - head.x) < 120;
+    this._overheadFor = over ? (this._overheadFor ?? 0) + dt : 0;
+    if (this._overheadFor < 0.8) return null;
+    const node = this.vrm.humanoid.getNormalizedBoneNode('head');
+    this._reachPlane ??= new THREE.Vector3();
+    this._reachPoint ??= new THREE.Vector3();
+    return this._rayToPlane(x, y, node.getWorldPosition(this._reachPlane), this._reachPoint);
+  }
+
   _updateGazePoint() {
     const head = this.vrm.humanoid.getNormalizedBoneNode('head');
     if (!head) return null;
@@ -726,6 +743,7 @@ export class VrmStage {
         speaking: this._speech.playing,
         level: this._speech.level,
         gazePoint: this._updateGazePoint(),
+        reachPoint: this._updateReachPoint(dt),
         gazeFresh: this.elapsed - this._pointerMovedAt < GAZE_ATTENTION,
         viewer: this.camera.position,
         metersPerPixel: this.metersPerPixel,

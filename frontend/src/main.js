@@ -108,6 +108,48 @@ const presence = new Presence({
   },
 });
 
+/**
+ * Giri del cursore intorno alla testa: tre giri veloci e le gira la testa.
+ * L'angolo accumulato si scarica da solo, quindi conta solo se e' rapido.
+ */
+const spin = { angle: null, total: 0, at: 0 };
+function trackSpin(x, y) {
+  const head = stage.headScreen();
+  if (!head) return;
+  const now = performance.now();
+  spin.total *= Math.exp(-(now - spin.at) / 1500);
+  spin.at = now;
+  const radius = Math.hypot(x - head.x, y - head.y);
+  if (radius < 30 || radius > 260) {
+    spin.angle = null;
+    return;
+  }
+  const angle = Math.atan2(y - head.y, x - head.x);
+  if (spin.angle !== null) {
+    let delta = angle - spin.angle;
+    if (delta > Math.PI) delta -= 2 * Math.PI;
+    if (delta < -Math.PI) delta += 2 * Math.PI;
+    spin.total += delta;
+  }
+  spin.angle = angle;
+  if (Math.abs(spin.total) > 3 * 2 * Math.PI) {
+    spin.total = 0;
+    if (stage.body?.play('dizzy')) {
+      sfx.blip(false);
+      vocals.say('dizzy');
+    }
+  }
+}
+
+/** Troppi colpetti di fila (5 in 6 secondi): si offende. */
+const pokes = [];
+function tooManyPokes() {
+  const now = performance.now();
+  pokes.push(now);
+  while (pokes.length && now - pokes[0] > 6000) pokes.shift();
+  return pokes.length >= 5;
+}
+
 /** Sta facendo qualcosa lei, o l'utente sta guardando un video: niente sonno. */
 function busyForSleep() {
   return (
@@ -393,7 +435,9 @@ socket.on('reminder', (message) => {
   if (message.event !== 'fired') return;
   presence.touch();
   sfx.chime();
-  if (!stage.body?.play('knock')) stage.body?.play('wave');
+  // Il toc-toc arriva quando il pugno tocca il vetro (vedi l'azione knock).
+  if (stage.body?.play('knock')) setTimeout(() => sfx.knock(), 520);
+  else stage.body?.play('wave');
   const label = message.reminder?.label ?? 'Promemoria';
   pet?.notify?.('Tsukumo', label);
 });
@@ -648,6 +692,11 @@ if (pet) {
       state.droppedAt = performance.now();
     } else {
       presence.touch();
+      if (tooManyPokes() && stage.body?.play('pout')) {
+        pokes.length = 0;
+        vocals.say('pout');
+        return;
+      }
       const reaction = stage.poke(event.clientX, event.clientY);
       if (reaction) vocals.say(reaction === 'pat' ? 'pat' : 'poke');
     }
@@ -683,7 +732,10 @@ if (pet) {
   // La posizione del cursore arriva dal processo main, non dagli eventi del
   // DOM: in click-through la pagina non ne riceve (vedi pushCursorPosition).
   // Arriva anche quando e' fuori dalla finestra, e lo sguardo lo segue.
-  pet.onCursor(({ x, y, inside }) => stage.setPointer(x, y, inside));
+  pet.onCursor(({ x, y, inside }) => {
+    stage.setPointer(x, y, inside);
+    trackSpin(x, y);
+  });
 
   // Da quanto il PC e' fermo, blocco e sblocco dello schermo: sonno e risveglio.
   pet.onPresence?.((message) => presence.update(message, busyForSleep()));

@@ -287,7 +287,7 @@ class ContextRequest(BaseModel):
 
 
 class VocalRequest(BaseModel):
-    event: str = Field(..., description="greet, morning, evening, night, welcome, pat, poke, lift, fall")
+    event: str = Field(..., description="greet, morning, evening, night, welcome, pat, poke, lift, fall, pout, dizzy")
 
 
 class ProviderRequest(BaseModel):

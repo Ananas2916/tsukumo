@@ -15,7 +15,7 @@ import { readSetting, writeSetting } from './dom.js';
 const MIN_GAP_MS = 1200;
 const SAME_GAP_MS = 4000;
 /** Le reazioni ai tocchi non parlano sempre: sembrerebbe un giocattolo. */
-const CHANCE = { pat: 0.75, poke: 0.6, lift: 0.7, fall: 0.8 };
+const CHANCE = { pat: 0.75, poke: 0.6, lift: 0.7, fall: 0.8, pout: 1, dizzy: 1 };
 
 /** Saluto adatto all'ora: "Buongiorno!" la mattina, "Buonasera!" la sera. */
 export function greetingForNow(date = new Date()) {
@@ -49,7 +49,7 @@ export class Vocals {
   /**
    * Chiede e suona un versetto. Non solleva mai: un versetto mancato non e'
    * un problema, al massimo resta il gesto senza voce.
-   * @param {string} event greet, morning, evening, night, welcome, pat, poke, lift, fall
+   * @param {string} event greet, morning, evening, night, welcome, pat, poke, lift, fall, pout, dizzy
    */
   async say(event) {
     if (!this.enabled || this.pending || this.isQuiet()) return false;

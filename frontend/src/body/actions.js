@@ -173,6 +173,112 @@ export const ACTIONS = {
     },
   },
 
+  /** Bussa sul vetro dello schermo, verso di te: promemoria e notifiche. */
+  knock: {
+    duration: 1.9,
+    modes: ['stand', 'sit'],
+    run(pose, u, w, t, action) {
+      const side = action.sign > 0 ? 'left' : 'right';
+      const s = action.sign;
+      const up = curve(u, [[0, 0], [0.22, 1], [0.72, 1], [0.95, 0]]) * w;
+      // Due colpi: il pugno va avanti e torna (u 0.30 e 0.40, cioe' ~0.55 s e ~0.75 s).
+      const tap = (curve(u, [[0.26, 0], [0.3, 1], [0.34, 0]]) + curve(u, [[0.36, 0], [0.4, 1], [0.44, 0]])) * w;
+      pose.reach(side, 'head', [0.1, 0.0, 0.34 + 0.05 * tap], [1, -1, -0.1], up, 0.3);
+      pose.fingers[side] += 0.9 * up;
+      pose.side(side, 'Hand', -0.25, 0, 0, up);
+      pose.add('spine', 0.04 * up, 0, 0);
+      pose.add('head', 0.04 * up, 0.04 * s * up, -0.06 * s * up);
+      pose.mood('happy', 0.5 * up);
+    },
+  },
+
+  /** Che caldo: si fa aria con la mano davanti al viso. */
+  fanSelf: {
+    duration: 3.4,
+    modes: ['stand', 'sit'],
+    run(pose, u, w, t, action) {
+      const side = action.sign > 0 ? 'left' : 'right';
+      const s = action.sign;
+      const up = curve(u, [[0, 0], [0.15, 1], [0.85, 1], [1, 0]]) * w;
+      const flap = Math.sin(t * TAU * 3.2) * curve(u, [[0.12, 0], [0.2, 1], [0.8, 1], [0.88, 0]]);
+      pose.reach(side, 'head', [0.13, -0.1, 0.15], [1, -1, -0.2], up, 0.6);
+      pose.side(side, 'Hand', 0.35 * flap, 0, 0, up);
+      pose.fingers[side] -= 0.7 * up;
+      pose.add('head', -0.06 * up, -0.05 * s * up, 0.05 * s * up);
+      pose.add('chest', -0.03 * up, 0, 0);
+      pose.eyesClosed = Math.max(pose.eyesClosed, 0.35 * up);
+      pose.mood('sad', 0.3 * up);
+      pose.mood('relaxed', 0.3 * up);
+    },
+  },
+
+  /** Che freddo: si stringe le braccia e trema. */
+  shiver: {
+    duration: 3.2,
+    modes: ['stand', 'sit'],
+    run(pose, u, w, t) {
+      const hug = curve(u, [[0, 0], [0.15, 1], [0.85, 1], [1, 0]]) * w;
+      const tremble = Math.sin(t * TAU * 9) * hug;
+      // Ogni mano sul braccio opposto (x negativa = verso l'altro lato).
+      pose.reach('left', 'upperChest', [-0.03, -0.04, 0.12], [1, -0.6, -0.3], hug, 1.3);
+      pose.reach('right', 'upperChest', [-0.03, -0.07, 0.15], [1, -0.6, -0.3], hug, 1.3);
+      pose.fingers.left += 0.3 * hug;
+      pose.fingers.right += 0.3 * hug;
+      pose.both('Shoulder', 0, 0, 0.14, hug);
+      pose.add('spine', 0.05 * hug, 0, 0.012 * tremble);
+      pose.add('chest', 0.03 * hug, 0, 0);
+      pose.add('head', 0.08 * hug, 0.02 * tremble, 0.015 * tremble);
+      pose.mood('sad', 0.45 * hug);
+      pose.mood('surprised', 0.2 * hug);
+    },
+  },
+
+  /** Le hai fatto girare il cursore intorno: le gira la testa. */
+  dizzy: {
+    duration: 2.8,
+    reaction: true,
+    modes: ['stand', 'sit'],
+    run(pose, u, w, t, action) {
+      const side = action.sign > 0 ? 'left' : 'right';
+      const on = curve(u, [[0, 0], [0.08, 1], [0.7, 1], [1, 0]]) * w;
+      const spin = curve(u, [[0, 1], [0.7, 0.6], [1, 0.2]]);
+      const phase = t * TAU * 1.3;
+      pose.add('head', 0.12 * Math.cos(phase) * spin * on, 0.18 * Math.sin(phase) * spin * on, 0.14 * Math.cos(phase) * spin * on);
+      pose.add('neck', 0, 0, 0.05 * Math.cos(phase) * spin * on);
+      pose.add('spine', 0, 0, 0.05 * Math.sin(phase + 0.8) * spin * on);
+      pose.hips.x += 0.015 * Math.sin(phase + 0.8) * spin * on;
+      pose.reach(side, 'head', [0.06, 0.07, 0.11], [1, -0.8, 0.2], on, -0.4);
+      pose.fingers[side] -= 0.3 * on;
+      pose.eyesClosed = Math.max(pose.eyesClosed, 0.45 * on);
+      pose.mood('surprised', 0.35 * on);
+      pose.mood('sad', 0.2 * on);
+      pose.gaze.pitch -= 0.1 * on;
+      pose.gaze.yaw += 0.3 * Math.sin(phase) * on;
+      pose.gaze.weight += on;
+    },
+  },
+
+  /** Troppi colpetti: incrocia le braccia, gira la testa e mette il broncio. */
+  pout: {
+    duration: 3.4,
+    reaction: true,
+    modes: ['stand', 'sit'],
+    run(pose, u, w, t, action) {
+      const s = action.sign;
+      const on = curve(u, [[0, 0], [0.12, 1], [0.82, 1], [1, 0]]) * w;
+      pose.reach('left', 'upperChest', [-0.02, -0.13, 0.14], [1, -0.5, -0.4], on, 1.3);
+      pose.reach('right', 'upperChest', [-0.02, -0.1, 0.18], [1, -0.5, -0.4], on, 1.3);
+      pose.fingers.left += 0.4 * on;
+      pose.fingers.right += 0.4 * on;
+      pose.add('spine', 0, 0.08 * s * on, 0);
+      pose.add('head', -0.08 * on, 0.1 * s * on, -0.05 * s * on);
+      pose.gaze.yaw += 0.55 * s * on;
+      pose.gaze.pitch -= 0.05 * on;
+      pose.gaze.weight += on;
+      pose.mood('angry', 0.85 * on);
+    },
+  },
+
   /** Saluta con la mano: parte quando il modello compare. */
   wave: {
     duration: 2.9,

@@ -154,6 +154,10 @@ export class BodyAnimator {
     this.doze = { drop: 0, falling: false, timer: randomBetween(2, 4), jerk: 0 };
     this.sleepSide = 1;
     this.yawnTimer = randomBetween(3, 8);
+    // --- cursore sopra la testa: allunga la mano per toccarlo ---------------
+    this.reachUp = new Spring(4);
+    this.reachSide = 'right';
+    this.reachTarget = new THREE.Vector3();
 
     // --- azioni e pose spontanee ------------------------------------------
     this.actions = [];
@@ -607,6 +611,7 @@ export class BodyAnimator {
     this._thinking(pose, dt, upright);
     this._dance(pose, dt, ctx);
     this._runActions(pose);
+    this._reachCursor(pose, dt, ctx, W.stand + W.sit);
     this._sleep(pose, upright, W.lie + W.side + W.edge);
     this._landing(pose, dt, W.stand);
     this._armGravity(pose, dt, upright);
@@ -1164,6 +1169,28 @@ export class BodyAnimator {
         pose.side(hand.side, 'Hand', 0, 0, 0.1, g);
       }
     }
+  }
+
+  /** Il cursore resta sopra la testa: si allunga verso di lui, contenta (Desktop Mate lo fa). */
+  _reachCursor(pose, dt, ctx, w) {
+    const free = !ctx.speaking && !this.thinking && this.sleep < 0.2 && !this.actions.some((action) => action.def.reaction);
+    const k = this.reachUp.update(ctx.reachPoint && free ? 1 : 0, dt) * w;
+    const head = this.bones.head;
+    if (ctx.reachPoint && head) {
+      this.reachTarget.copy(ctx.reachPoint);
+      const local = this._toCharacter(_v6.copy(ctx.reachPoint).sub(head.getWorldPosition(_v7)));
+      // La mano dalla parte del cursore (+x e' la sinistra del personaggio).
+      if (k < 0.05) this.reachSide = local.x >= 0 ? 'left' : 'right';
+    }
+    if (k < EPSILON) return;
+    pose.reachWorld(this.reachSide, this.reachTarget, [0.6, -1, 0.2], 0.9 * k, -0.8);
+    pose.fingers[this.reachSide] -= 0.7 * k;
+    if (this.mode === 'stand') {
+      pose.heel.left += 0.25 * k;
+      pose.heel.right += 0.25 * k;
+    }
+    pose.add('spine', -0.03 * k, 0, 0);
+    pose.mood('happy', 0.6 * k);
   }
 
   _updateSleep(dt) {
