@@ -74,6 +74,19 @@ const MAX_UTTERANCE = 30;
 /** Quanto audio teniamo *prima* dell'attacco, per non tagliare la prima sillaba. */
 const PREROLL = 0.3;
 
+/**
+ * Ascolto sorvegliato (lei sta parlando): la soglia si moltiplica per questo
+ * fattore e la voce forte deve riempire quasi tutta l'ultima mezza secondo
+ * (`BARGE_FRAMES` frame su `BARGE_WINDOW`). La cancellazione dell'eco del
+ * browser toglie quasi tutta la sua voce dal microfono; quello che resta e'
+ * debole e a raffiche, una persona che parla no.
+ */
+const GUARD_FACTOR = 2.5;
+const BARGE_WINDOW = 8;
+const BARGE_FRAMES = 6;
+/** Nell'ascolto sorvegliato il preroll e' piu' lungo: la frase e' gia' iniziata. */
+const GUARD_PREROLL = 0.8;
+
 export class VoiceInput {
   /**
    * @param {object} options
@@ -87,6 +100,8 @@ export class VoiceInput {
     this.onLevel = options.onLevel ?? (() => {});
     this.onActivity = options.onActivity ?? (() => {});
     this.onError = options.onError ?? ((error) => console.error('[mic]', error));
+    /** Qualcuno ha parlato sopra di lei abbastanza a lungo: va interrotta. */
+    this.onBargeIn = options.onBargeIn ?? (() => {});
 
     this.mode = 'push';
     this.threshold = 0.02;
@@ -99,6 +114,9 @@ export class VoiceInput {
 
     this.running = false;
     this.muted = false;
+    /** Lei sta parlando: si ascolta solo chi la interrompe davvero. */
+    this.guarded = false;
+    this.guardWindow = [];
     this.capturing = false; // sta accumulando una frase
     this.buffers = [];
     this.preroll = [];
@@ -179,6 +197,19 @@ export class VoiceInput {
     this.muted = muted;
   }
 
+  /**
+   * Ascolto sorvegliato mentre lei parla (modi `vad` e `wake`): niente frasi
+   * finche' qualcuno non parla forte e a lungo, poi `onBargeIn` e la frase
+   * viene registrata dall'inizio.
+   */
+  setGuarded(guarded) {
+    if (guarded === this.guarded) return;
+    this.guarded = guarded;
+    this.guardWindow = [];
+    // Una frase iniziata mentre lei parlava e non ancora confermata non vale.
+    if (guarded && this.capturing && this.mode !== 'push') this._discard();
+  }
+
   /** Modo `push`: inizio a parlare. */
   beginPush() {
     if (!this.running || this.mode !== 'push') return;
@@ -216,6 +247,26 @@ export class VoiceInput {
     }
 
     // Modi automatici: l'energia decide inizio e fine della frase.
+    if (this.guarded && !this.capturing) {
+      this.preroll.push(frame);
+      const maxGuard = Math.ceil((GUARD_PREROLL * SAMPLE_RATE) / FRAME);
+      if (this.preroll.length > maxGuard) this.preroll.shift();
+      this.guardWindow.push(level >= this.threshold * GUARD_FACTOR);
+      if (this.guardWindow.length > BARGE_WINDOW) this.guardWindow.shift();
+      if (this.guardWindow.filter(Boolean).length >= BARGE_FRAMES) {
+        // E' qualcuno che parla sopra di lei: la frase parte dal preroll.
+        this.guarded = false;
+        this.guardWindow = [];
+        this.capturing = true;
+        this.buffers = this.preroll.splice(0);
+        this.capturedFrames = this.buffers.length * FRAME;
+        this.silentFrames = 0;
+        this.onBargeIn();
+        this.onActivity(true);
+      }
+      return;
+    }
+
     const loud = level >= this.threshold;
 
     if (!this.capturing) {

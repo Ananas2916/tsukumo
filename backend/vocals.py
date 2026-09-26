@@ -125,6 +125,27 @@ LINES: dict[str, dict[str, tuple[str, ...]]] = {
         "ja": ("わぁー!",),
         "zh": ("啊!",),
     },
+    # Un agente lavora da un po' e non ha ancora detto niente (vedi pipeline).
+    "working": {
+        "en": ("One moment, I'm on it.", "Give me a second, I'm working on it."),
+        "it": ("Un attimo, ci sto lavorando.", "Dammi un secondo, sto controllando."),
+        "es": ("Un momento, estoy en ello.",),
+        "fr": ("Un instant, je m'en occupe.",),
+        "de": ("Einen Moment, ich bin dran.",),
+        "pt": ("Um momento, estou nisso.",),
+        "ja": ("ちょっと待ってね、今やってるよ。",),
+        "zh": ("稍等, 我正在处理。",),
+    },
+    "working_long": {
+        "en": ("Still working on it, almost there.",),
+        "it": ("Ci vuole ancora un pochino, quasi fatto.",),
+        "es": ("Todavía estoy en ello, ya casi.",),
+        "fr": ("J'y suis encore, presque fini.",),
+        "de": ("Dauert noch ein bisschen, fast fertig.",),
+        "pt": ("Ainda estou nisso, quase lá.",),
+        "ja": ("もう少しかかるよ、あとちょっと。",),
+        "zh": ("还需要一会儿, 快好了。",),
+    },
 }
 
 EVENTS = frozenset(LINES)

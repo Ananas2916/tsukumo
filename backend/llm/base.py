@@ -4,11 +4,31 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
 Role = Literal["system", "user", "assistant"]
+
+#: Che genere di lavoro sta facendo un agente: decide la posa del personaggio.
+ActivityKind = Literal["read", "search", "web", "write", "run", "agent", "plan", "tool"]
+
+
+@dataclass(frozen=True)
+class Activity:
+    """Un passo di lavoro di un agente (un tool), detto in parole.
+
+    ``label`` e' gia' leggibile ("legge main.js"), ``detail`` e' il dato grezzo
+    (il percorso, il comando) per chi vuole mostrarlo per intero.
+    """
+
+    kind: ActivityKind
+    label: str
+    detail: str = ""
+    tool: str = ""
+
+    def as_dict(self) -> dict[str, str]:
+        return {"kind": self.kind, "label": self.label, "detail": self.detail, "tool": self.tool}
 
 #: Un controllo di stato non deve mai tenere fermo nessuno: oltre questo
 #: tempo il motore e' considerato "non risponde".
@@ -37,6 +57,15 @@ class LLMClient(ABC):
     #: OpenClaw, Claude Code, Codex...). A lui basta l'ultimo messaggio: il
     #: companion non gli rimanda tutta la cronologia a ogni turno.
     stateful: bool = False
+
+    #: Chi vuole sapere cosa fa l'agente mentre lavora (lo imposta il companion
+    #: per la durata di un turno). I modelli semplici non lo chiamano mai.
+    on_activity: Callable[[Activity], None] | None = None
+
+    def report(self, activity: Activity) -> None:
+        """Segnala un passo di lavoro, se qualcuno ascolta."""
+        if self.on_activity is not None:
+            self.on_activity(activity)
 
     @abstractmethod
     def stream(self, messages: list[Message]) -> AsyncIterator[str]:

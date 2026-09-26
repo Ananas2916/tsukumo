@@ -24,6 +24,16 @@ const SUGGESTIONS = [
 
 const SOURCE_TAB = { llm: 'llm', tts: 'tts', stt: 'stt' };
 
+/** "prima voce dopo 1,4 s · risposta completa in 5,2 s" */
+function describeTimings({ firstText, firstVoice, total }) {
+  const seconds = (ms) => `${(ms / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })} s`;
+  const parts = [];
+  if (firstText != null) parts.push(`primo testo dopo ${seconds(firstText)}`);
+  if (firstVoice != null) parts.push(`prima voce dopo ${seconds(firstVoice)}`);
+  if (total != null) parts.push(`completa in ${seconds(total)}`);
+  return parts.join(' · ');
+}
+
 export class ChatView {
   constructor(app, root) {
     this.app = app;
@@ -244,6 +254,7 @@ export class ChatView {
     const { socket, app } = this;
 
     app.on('busy', (busy) => {
+      if (busy === 'thinking' && this.busy !== 'thinking') this._setTypingLabel('sta pensando');
       this.busy = busy;
       this.typing.classList.toggle('hidden', busy !== 'thinking');
       this._renderSend();
@@ -258,6 +269,11 @@ export class ChatView {
     socket.on('user', (message) => {
       const files = (message.files ?? []).map((file) => (message.screen ? 'schermo' : file.name));
       this.add({ role: 'user', text: message.text, note: files.length ? `📎 ${files.join(', ')}` : undefined });
+    });
+
+    // L'agente usa un tool: la riga "sta pensando" dice cosa sta facendo.
+    socket.on('working', (message) => {
+      if (message.label) this._setTypingLabel(message.label);
     });
 
     socket.on('token', (message) => {
@@ -278,6 +294,8 @@ export class ChatView {
         // Il testo arrivato a pezzi resta quello mostrato (col suo markdown);
         // la versione "pulita" del backend serve solo alla voce.
         reply.text = reply.text.trim() || message.text;
+        if (message.steps?.length) reply.steps = message.steps.map((step) => step.label);
+        if (message.timings) reply.timings = message.timings;
         if (message.cancelled) reply.note = 'interrotta';
         if (!reply.text) this.remove(reply);
         else this._renderNode(reply);
@@ -393,10 +411,29 @@ export class ChatView {
       return;
     }
     const bubble = el('div', { class: 'bubble' });
+    // Quanto ha fatto aspettare: al passaggio del mouse, per chi vuole saperlo.
+    if (message.timings) bubble.title = describeTimings(message.timings);
     if (message.role === 'assistant') bubble.append(renderMarkdown(message.text));
     else bubble.textContent = message.text;
     node.append(bubble);
+    if (message.steps?.length) {
+      // I passi dell'agente, chiusi: chi vuole sapere come ci e' arrivato li apre.
+      const count = message.steps.length;
+      node.append(
+        el(
+          'details',
+          { class: 'steps' },
+          el('summary', {}, count === 1 ? '1 passo' : `${count} passi`),
+          el('ol', {}, ...message.steps.map((step) => el('li', {}, step))),
+        ),
+      );
+    }
     if (message.note) node.append(el('span', { class: 'note' }, message.note));
+  }
+
+  _setTypingLabel(text) {
+    const label = this.typing.querySelector('span');
+    if (label) label.textContent = text;
   }
 
   _renderEmpty() {
@@ -429,7 +466,7 @@ export class ChatView {
       HISTORY_KEY,
       this.history
         .filter((message) => message.role !== 'assistant' || message.text)
-        .map(({ role, text, note, hint, source, action }) => ({ role, text, note, hint, source, action })),
+        .map(({ role, text, note, hint, source, action, steps }) => ({ role, text, note, hint, source, action, steps })),
     );
   }
 }

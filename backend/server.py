@@ -1119,6 +1119,7 @@ async def _handle_voice(instance: Companion, message: dict[str, Any]) -> None:
         await hub.broadcast({"type": "error", "source": "stt", "message": "Audio non valido"})
         return
 
+    started = time.perf_counter()
     transcript = await instance.transcribe(pcm16)
     if transcript is None:
         await hub.broadcast(
@@ -1132,6 +1133,8 @@ async def _handle_voice(instance: Companion, message: dict[str, Any]) -> None:
         )
         return
 
+    # Microfono aperto mentre lei parla: quello che sente puo' essere lei.
+    echo = not transcript.is_empty and instance.is_echo(transcript.text)
     await hub.broadcast(
         {
             "type": "transcript",
@@ -1139,10 +1142,15 @@ async def _handle_voice(instance: Companion, message: dict[str, Any]) -> None:
             "language": transcript.language,
             "confidence": transcript.confidence,
             "duration": transcript.duration,
+            "ms": int((time.perf_counter() - started) * 1000),
+            "echo": echo,
         }
     )
 
     if transcript.is_empty:
+        return
+    if echo:
+        logger.info("Trascrizione ignorata, e' la sua voce: %r", transcript.text[:80])
         return
     if message.get("autoSend", True):
         await instance.chat(transcript.text, hub.broadcast)

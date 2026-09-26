@@ -18,6 +18,7 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { BodyAnimator } from './body.js';
 import { ClipPlayer } from './clips.js';
 import { DEFAULT_BLENDSHAPES, VISEME_KEYS } from './config.js';
+import { HoloPanel } from './holo.js';
 
 /** Espressioni del viso pilotate dal corpo (umore, spavento, sorriso...). */
 const MOOD_EXPRESSIONS = ['happy', 'relaxed', 'surprised', 'sad', 'angry'];
@@ -126,6 +127,7 @@ export class VrmStage {
   _initScene() {
     this.scene = new THREE.Scene();
     this.scene.add(this.lookTarget);
+    this.holo = new HoloPanel(this.scene);
 
     this.camera = new THREE.PerspectiveCamera(28, 1, 0.05, 40);
     this.cameraTarget = new THREE.Vector3(0, 1.35, 0);
@@ -361,6 +363,11 @@ export class VrmStage {
   setThinking(value) {
     this._thinking = Boolean(value);
     this.body?.setThinking(this._thinking);
+  }
+
+  /** L'agente usa un tool (`read`, `write`, `run`...): posa da lavoro invece che pensierosa. */
+  setWorking(kind) {
+    this.body?.setWorking(kind);
   }
 
   /**
@@ -790,6 +797,8 @@ export class VrmStage {
       this.vrm.update(dt);
       if (mouth && this.mouthDriver.kind === 'morph') this._applyMouthMorphs(mouth);
     }
+    // Il tablet/tastiera olografici seguono le mani appena posate.
+    this.holo.update(dt, this.vrm, this.body?.workWeights ?? null);
 
     this.renderer.render(this.scene, this.camera);
 
@@ -875,6 +884,7 @@ export class VrmStage {
   dispose() {
     this.stop();
     this._disposeVrm();
+    this.holo.dispose();
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('pointermove', this._onPointerMove);
     window.removeEventListener('pointerup', this._onPointerUp);

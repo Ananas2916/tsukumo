@@ -41,7 +41,8 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from .base import LLMClient, Message, describe_error, last_user_message, last_user_text, speech_directive
+from .activity import describe_claude_tool, describe_codex_item
+from .base import Activity, LLMClient, Message, describe_error, last_user_message, last_user_text, speech_directive
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +302,14 @@ class ClaudeStreamParser:
         self._last: str | None = None
         self._streamed: set[str] = set()
         self._produced = False
+        #: Tool usati dall'agente, da raccontare mentre lavora (vedi ``take_activities``).
+        self.activities: list[Activity] = []
+        self._tools: set[str] = set()
+
+    def take_activities(self) -> list[Activity]:
+        """I passi di lavoro arrivati dall'ultima chiamata, e svuota la lista."""
+        taken, self.activities = self.activities, []
+        return taken
 
     def feed(self, line: str) -> list[str]:
         line = line.strip()
@@ -333,6 +342,10 @@ class ClaudeStreamParser:
 
         if kind == "assistant":
             message = event.get("message") or {}
+            for block in message.get("content") or []:
+                if block.get("type") == "tool_use" and block.get("id") not in self._tools:
+                    self._tools.add(block.get("id"))
+                    self.activities.append(describe_claude_tool(str(block.get("name") or ""), block.get("input")))
             if message.get("id") in self._streamed:
                 return []  # gia' letto a pezzi: questo e' il riepilogo
             text = "".join(
@@ -430,6 +443,8 @@ class ClaudeCodeClient(_CLIAgent):
                     for piece in parser.feed(line):
                         produced = True
                         yield piece
+                    for activity in parser.take_activities():
+                        self.report(activity)
             except AgentError as exc:
                 if parser.error:
                     raise AgentError(f"Claude Code: {parser.error}") from None
@@ -475,6 +490,25 @@ class CodexStreamParser:
         self.finished = False
         self.error: str | None = None
         self._produced = False
+        #: Comandi, modifiche e ricerche dell'agente (vedi ``take_activities``).
+        self.activities: list[Activity] = []
+        self._items: set[str] = set()
+
+    def take_activities(self) -> list[Activity]:
+        """I passi di lavoro arrivati dall'ultima chiamata, e svuota la lista."""
+        taken, self.activities = self.activities, []
+        return taken
+
+    def _track(self, item: dict[str, Any]) -> None:
+        # Un comando arriva due volte (iniziato, finito): si racconta una volta.
+        item_id = str(item.get("id") or "")
+        if item_id and item_id in self._items:
+            return
+        activity = describe_codex_item(item)
+        if activity is not None:
+            if item_id:
+                self._items.add(item_id)
+            self.activities.append(activity)
 
     def feed(self, line: str) -> list[str]:
         line = line.strip()
@@ -488,8 +522,11 @@ class CodexStreamParser:
         kind = event.get("type")
         if kind == "thread.started":
             self.thread_id = event.get("thread_id") or self.thread_id
+        elif kind == "item.started":
+            self._track(event.get("item") or {})
         elif kind == "item.completed":
             item = event.get("item") or {}
+            self._track(item)
             # "reasoning" e' il ragionamento interno: mai letto ad alta voce.
             if item.get("type") == "agent_message" and item.get("text"):
                 pieces = ["\n"] if self._produced else []
@@ -557,6 +594,8 @@ class CodexClient(_CLIAgent):
             async for line in stream_process(argv, stdin_text=prompt, cwd=self.cwd, timeout=self.timeout):
                 for piece in parser.feed(line):
                     yield piece
+                for activity in parser.take_activities():
+                    self.report(activity)
         except AgentError:
             if parser.error:
                 raise AgentError(f"Codex: {parser.error}") from None

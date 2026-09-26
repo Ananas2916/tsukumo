@@ -38,6 +38,7 @@ import httpx
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from .activity import describe_openclaw_tool
 from .base import LLMClient, Message, describe_error, with_directive
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,9 @@ class OpenClawClient(LLMClient):
                 },
                 "role": "operator",
                 "scopes": ["operator.read", "operator.write"],
-                "caps": [],
+                # "tool-events": il Gateway ci manda anche i tool che l'agente
+                # usa (solo nome e argomenti, mai il ragionamento).
+                "caps": ["tool-events"],
                 "commands": [],
                 "permissions": {},
                 "auth": {"token": self.token},
@@ -162,7 +165,13 @@ class OpenClawClient(LLMClient):
                         future.set_result(message)
                 elif frame_type == "event" and message.get("event") == "chat":
                     self._chat_events.put_nowait(message.get("payload", {}))
-                # Eventi come "agent" (contiene il thinking, da non leggere mai),
+                elif frame_type == "event" and message.get("event") == "agent":
+                    # Del canale "agent" teniamo solo l'inizio di un tool: il
+                    # thinking che passa di qui non si legge mai.
+                    payload = message.get("payload") or {}
+                    data = payload.get("data") or {}
+                    if payload.get("stream") == "tool" and data.get("phase") == "start" and not data.get("parentToolCallId"):
+                        self._chat_events.put_nowait({"runId": payload.get("runId"), "tool": data})
                 # "health", "tick", "connect.challenge": scartati di proposito.
         except websockets.ConnectionClosed:
             pass
@@ -327,6 +336,13 @@ class OpenClawClient(LLMClient):
             # non e' il nostro turno invece di fidarci ciecamente dell'ordine.
             if run_id and payload.get("runId") != run_id:
                 logger.debug("Evento chat di un altro turno ignorato (runId=%s)", payload.get("runId"))
+                continue
+
+            tool = payload.get("tool")
+            if tool is not None:
+                activity = describe_openclaw_tool(str(tool.get("name") or ""), tool.get("args"))
+                if activity is not None:
+                    self.report(activity)
                 continue
 
             state = payload.get("state")

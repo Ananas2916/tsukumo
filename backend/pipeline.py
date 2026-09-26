@@ -13,7 +13,7 @@ import contextlib
 import logging
 import re
 import time
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from typing import Any
@@ -23,6 +23,7 @@ from .audio import encode_wav_base64
 from .config import Settings
 from .languages import reply_language, short_language, speech_directive
 from .llm import LLMClient, Message, MockLLM, create_llm_client, describe_error
+from .llm.base import Activity
 from .phonemes import phones_for
 from .reminders import ReminderStore, TagFilter, action_directive, command_reply, confirmation, from_tag, parse_request
 from .providers import LLM_REGISTRY
@@ -39,6 +40,17 @@ Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
 #: Quanti versetti tenere in memoria (poche decine di KB ciascuno).
 VOCAL_CACHE_SIZE = 64
+
+#: Un agente che lavora in silenzio dice "un attimo" dopo questi secondi,
+#: e "ancora un pochino" se il silenzio continua. Una volta ciascuno per turno.
+WORKING_CUES = ((7.0, "working"), (45.0, "working_long"))
+
+#: Per quanto tempo una frase detta da lei puo' tornare indietro dal
+#: microfono (l'audio parte dopo la sintesi e le frasi si mettono in coda).
+ECHO_WINDOW_S = 45.0
+#: Quota di parole della trascrizione gia' dette da lei oltre la quale e' eco.
+ECHO_OVERLAP = 0.7
+_WORD = re.compile(r"\w+", re.UNICODE)
 
 # Emoji e pittogrammi. Kokoro li pronuncerebbe per nome ("smiling face with
 # smiling eyes"), e gli agenti ne usano parecchie: la loro personalita' non passa
@@ -185,6 +197,32 @@ def split_sentences(text: str, max_chars: int = 220) -> list[str]:
     return merged
 
 
+def first_clause(text: str, min_chars: int = 28, max_chars: int = 140) -> tuple[str, str] | None:
+    """Il primo inciso di una frase ancora a meta', se e' abbastanza lungo.
+
+    La prima frase di una risposta decide quanto aspetti prima di sentirla:
+    se il cervello scrive "Allora, ho guardato il meteo di domani e..." la
+    voce puo' partire dalla prima virgola invece di aspettare il punto.
+    Restituisce ``(inciso, resto)`` oppure ``None``.
+    """
+    for match in _SOFT_BREAK.finditer(text):
+        if match.start() > max_chars:
+            return None
+        if match.start() >= min_chars:
+            head = text[: match.start() + 1].strip()
+            if clean_markup(head):
+                return head, text[match.end() :]
+    return None
+
+
+def _words(text: str) -> list[str]:
+    return _WORD.findall(text.lower())
+
+
+def _ms(moment: float | None, started: float) -> int | None:
+    return None if moment is None else int((moment - started) * 1000)
+
+
 def _split_long(chunk: str, max_chars: int) -> list[str]:
     """Spezza una frase lunga su virgole, altrimenti su spazi."""
     pieces: list[str] = []
@@ -231,6 +269,15 @@ class Companion:
         self._turn_lock = asyncio.Lock()
         self._cancel = asyncio.Event()
         self._tts_failed = False
+        #: Il turno in corso ha gia' detto (o scritto nella bolla) qualcosa.
+        self._turn_voiced = False
+        #: Quando e' uscita la prima voce del turno (per misurare l'attesa).
+        self._first_voice_at: float | None = None
+        #: Le ultime frasi dette, con l'ora: per riconoscere la sua eco nel microfono.
+        self._recent_speech: deque[tuple[float, str]] = deque(maxlen=16)
+        #: Una sintesi alla volta: due frasi insieme sulla stessa GPU si
+        #: rallentano a vicenda, e non tutti i motori reggono due thread.
+        self._tts_lock = asyncio.Lock()
         # Scelte fatte a caldo dal pannello: valgono finche' il backend resta acceso.
         # Le voci sono del motore: DC_VOICE (una voce Kokoro) vale solo per Kokoro.
         self.voice = self.tts.default_voice or settings.voice
@@ -342,6 +389,9 @@ class Companion:
             turn = self._turn_id
             started = time.perf_counter()
             self._tts_failed = False
+            self._turn_voiced = False
+            self._first_voice_at = None
+            first_token_at: float | None = None
 
             await emit({"type": "state", "value": "thinking", "turn": turn})
             if not hidden:
@@ -358,6 +408,14 @@ class Companion:
             spoken = 0
             failed = False
             tags = TagFilter()
+            # Mentre l'agente lavora: i suoi tool diventano eventi "working",
+            # e se tace a lungo dice "un attimo" con la voce in uso.
+            steps: list[dict[str, str]] = []
+            activities: asyncio.Queue[Activity] = asyncio.Queue()
+            self.llm.on_activity = activities.put_nowait
+            helpers = [asyncio.create_task(self._pump_activities(activities, steps, emit, turn))]
+            if self.llm.stateful:
+                helpers.append(asyncio.create_task(self._working_cues(emit, turn)))
 
             try:
                 async for raw_piece in self._cancellable(self._stream_with_fallback(messages, emit)):
@@ -367,11 +425,20 @@ class Companion:
                         continue
                     buffer += piece
                     full_reply += piece
+                    if first_token_at is None:
+                        first_token_at = time.perf_counter()
                     await emit({"type": "token", "text": piece, "turn": turn})
 
                     # Ogni volta che il buffer contiene almeno una frase intera
                     # la stacchiamo e la mandiamo subito in sintesi.
                     sentences = split_sentences(buffer, self.settings.max_sentence_chars)
+                    if spoken == 0 and len(sentences) == 1:
+                        # Prima frase ancora a meta': si parte dal primo inciso.
+                        clause = first_clause(buffer)
+                        if clause is not None:
+                            head, buffer = clause
+                            spoken += await self._speak(head, emit, turn, spoken)
+                            sentences = split_sentences(buffer, self.settings.max_sentence_chars)
                     while len(sentences) > 1:
                         head = sentences.pop(0)
                         buffer = " ".join(sentences)
@@ -403,6 +470,13 @@ class Companion:
                     }
                 )
             finally:
+                self.llm.on_activity = None
+                for helper in helpers:
+                    helper.cancel()
+                await asyncio.gather(*helpers, return_exceptions=True)
+                # Gli ultimi passi arrivati insieme alla fine del turno.
+                while not activities.empty():
+                    await self._emit_activity(activities.get_nowait(), steps, emit, turn)
                 reply = clean_for_speech(full_reply)
                 if reply:
                     names = ", ".join(item.name for item in attachments)
@@ -411,6 +485,18 @@ class Companion:
                     self._trim_history()
 
                 elapsed = round(time.perf_counter() - started, 3)
+                timings = {
+                    "firstText": _ms(first_token_at, started),
+                    "firstVoice": _ms(self._first_voice_at, started),
+                    "total": int(elapsed * 1000),
+                }
+                logger.info(
+                    "Turno %s: primo testo %s ms, prima voce %s ms, totale %s ms",
+                    turn,
+                    timings["firstText"],
+                    timings["firstVoice"],
+                    timings["total"],
+                )
                 await emit(
                     {
                         "type": "reply",
@@ -418,8 +504,10 @@ class Companion:
                         "turn": turn,
                         "sentences": spoken,
                         "elapsed": elapsed,
+                        "timings": timings,
                         "cancelled": self._cancel.is_set(),
                         "failed": failed,
+                        "steps": steps,
                     }
                 )
                 await emit({"type": "state", "value": "idle", "turn": turn})
@@ -492,6 +580,10 @@ class Companion:
         """
         if self.muted or self._turn_lock.locked():
             return None
+        return {**await self._vocal_payload(event), "vocal": event}
+
+    async def _vocal_payload(self, event: str) -> dict[str, Any]:
+        """La sintesi di un versetto, dalla cache se c'e' gia'."""
         voice = self.voice
         text = vocal_line(event, self.voice_language)
         key = (self.tts.name, voice, text)
@@ -501,7 +593,7 @@ class Companion:
             self._vocals[key] = payload
             while len(self._vocals) > VOCAL_CACHE_SIZE:
                 self._vocals.pop(next(iter(self._vocals)))
-        return {**payload, "vocal": event}
+        return payload
 
     # ------------------------------------------------------------------
     async def synthesize_payload(
@@ -757,6 +849,52 @@ class Companion:
         async for piece in self._fallback_llm.stream(messages):
             yield piece
 
+    async def _pump_activities(
+        self, queue: asyncio.Queue[Activity], steps: list[dict[str, str]], emit: Emit, turn: int
+    ) -> None:
+        while True:
+            await self._emit_activity(await queue.get(), steps, emit, turn)
+
+    async def _emit_activity(self, activity: Activity, steps: list[dict[str, str]], emit: Emit, turn: int) -> None:
+        # Tre letture di fila dello stesso file non sono tre passi diversi.
+        if steps and steps[-1]["label"] == activity.label:
+            return
+        steps.append(activity.as_dict())
+        await emit({"type": "working", "turn": turn, "step": len(steps), **activity.as_dict()})
+
+    async def _working_cues(self, emit: Emit, turn: int) -> None:
+        """Dice "un attimo, ci sto lavorando" se il turno e' ancora muto."""
+        started = time.perf_counter()
+        for delay, event in WORKING_CUES:
+            await asyncio.sleep(max(0.0, started + delay - time.perf_counter()))
+            if self._turn_voiced or self.muted or self._tts_failed or self._cancel.is_set():
+                return
+            try:
+                payload = await self._vocal_payload(event)
+            except Exception as exc:  # una voce guasta la segnala gia' il turno
+                logger.info("Versetto '%s' non sintetizzato: %s", event, describe_error(exc))
+                return
+            if self._turn_voiced or self._cancel.is_set():
+                return
+            self._recent_speech.append((time.monotonic(), str(payload.get("text") or "")))
+            await emit({**payload, "turn": turn, "index": -1, "vocal": event})
+
+    def is_echo(self, text: str) -> bool:
+        """La trascrizione e' la sua stessa voce tornata dal microfono?
+
+        Serve a lasciarla ascoltare mentre parla (per farsi interrompere)
+        senza che si risponda da sola: se quasi tutte le parole sentite le
+        ha appena dette lei, non e' una domanda.
+        """
+        words = _words(text)
+        if len(words) < 2:
+            return False
+        now = time.monotonic()
+        said = {word for at, sentence in self._recent_speech if now - at <= ECHO_WINDOW_S for word in _words(sentence)}
+        if not said:
+            return False
+        return sum(word in said for word in words) / len(words) >= ECHO_OVERLAP
+
     async def _speak(
         self,
         sentence: str,
@@ -776,6 +914,8 @@ class Companion:
         if not text or self._cancel.is_set():
             return 0
         caption = {"type": "caption", "text": text, "mood": detect_mood(sentence), "turn": turn, "index": index}
+        self._turn_voiced = True
+        self._recent_speech.append((time.monotonic(), text))
         if (self.muted and not force) or self._tts_failed:
             await emit(caption)
             return 1
@@ -803,6 +943,8 @@ class Companion:
             return 0
         if index == 0:
             await emit({"type": "state", "value": "speaking", "turn": turn})
+        if self._first_voice_at is None:
+            self._first_voice_at = time.perf_counter()
         await emit(payload)
         return 1
 
@@ -820,7 +962,8 @@ class Companion:
         mood = detect_mood(sentence)
         spoken = strip_emoji(sentence)
         # asyncio.to_thread evita di bloccare l'event loop durante l'inferenza.
-        speech = await asyncio.to_thread(self.tts.synthesize, spoken, voice or self.voice, speed)
+        async with self._tts_lock:
+            speech = await asyncio.to_thread(self.tts.synthesize, spoken, voice or self.voice, speed)
 
         # Con i timing esatti il G2P non serve: lo calcoliamo solo come riserva.
         phones = [] if speech.timings else phones_for(speech.text, speech.phonemes)

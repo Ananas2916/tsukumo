@@ -10,6 +10,7 @@ import { apiUrl } from '../config.js';
 import { el, iconButton, languageLabel, readSetting, writeSetting } from '../dom.js';
 import { icon } from '../icons.js';
 import { MIC_SETTING, SAMPLE_RATE, VoiceInput, listMicrophones } from '../mic.js';
+import { BARGE_IN_SETTING } from '../voice.js';
 
 /** Quanto dura la registrazione di prova. */
 const MIC_TEST_SECONDS = 4;
@@ -165,6 +166,15 @@ export class CharacterView {
       this.companion?.sendToPet({ type: 'mic-device', value: this.micSelect.value });
     });
     navigator.mediaDevices?.addEventListener?.('devicechange', () => this._loadMicrophones());
+    this.bargeIn = this._switch(
+      'Puoi interromperla parlando',
+      'In ascolto continuo o a chiamata: se le parli sopra si ferma e ti ascolta. Se con le casse alte si interrompe da sola, spegnilo o usa le cuffie.',
+    );
+    this.bargeIn.input.checked = readSetting(BARGE_IN_SETTING, true);
+    this.bargeIn.input.addEventListener('change', () => {
+      writeSetting(BARGE_IN_SETTING, this.bargeIn.input.checked);
+      this.companion?.sendToPet({ type: 'barge-in', value: this.bargeIn.input.checked });
+    });
     const micCard = this._card(
       'mic',
       'Microfono',
@@ -172,6 +182,7 @@ export class CharacterView {
       el('div', { class: 'mic-meter' }, this.micMeter),
       this.micTest,
       this.micStatus,
+      this.bargeIn.node,
     );
 
     // Aspetto ------------------------------------------------------------

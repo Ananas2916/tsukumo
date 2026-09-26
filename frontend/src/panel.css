@@ -462,6 +462,36 @@ body:not(:has(#window-actions:not(:empty))) .app {
   font-size: 11px;
 }
 
+.msg .steps {
+  margin: 4px 6px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.msg .steps summary {
+  cursor: pointer;
+  list-style: none;
+  width: fit-content;
+}
+
+.msg .steps summary::before {
+  content: '▸ ';
+}
+
+.msg .steps[open] summary::before {
+  content: '▾ ';
+}
+
+.msg .steps ol {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.msg .steps li {
+  margin: 1px 0;
+  overflow-wrap: anywhere;
+}
+
 .bubble p {
   margin: 0 0 6px;
 }
@@ -664,6 +694,10 @@ body:not(:has(#window-actions:not(:empty))) .app {
 
 .typing span {
   margin-left: 5px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attachments {

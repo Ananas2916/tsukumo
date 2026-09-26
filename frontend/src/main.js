@@ -43,10 +43,12 @@ const player = new SpeechPlayer({
     // Una risposta vera la sveglia; un suo versetto no.
     if (!payload.vocal) presence.touch();
     if (payload.text) ui.showBubble(payload.text, Math.max(2500, payload.duration * 1000 + 1200));
+    syncVoiceState();
     refreshStatus();
   },
   onIdle: () => {
     lipSync.clear();
+    syncVoiceState();
     refreshStatus();
   },
 });
@@ -515,23 +517,41 @@ socket.on('settings', (message) => {
 socket.on('state', (message) => {
   state.backendState = message.value;
   stage.setThinking(message.value === 'thinking');
-  // Il microfono deve sapere quando il personaggio parla, o si risente da solo.
-  voice.setCompanionState(message.value);
+  syncVoiceState();
   refreshStatus();
 });
+
+/**
+ * Il microfono deve sapere quando il personaggio parla, o si risente da solo.
+ * Conta l'audio che sta suonando, non solo lo stato del backend: il backend
+ * torna "idle" appena ha sintetizzato l'ultima frase, lei la sta ancora dicendo.
+ */
+function syncVoiceState() {
+  voice.setCompanionState(player.playing || state.backendState === 'speaking' ? 'speaking' : state.backendState);
+}
 
 // Quello che ha capito: mostrarlo sempre, anche quando ha capito male, evita
 // di dover indovinare il perche' di una risposta strana.
 socket.on('transcript', (message) => {
   const text = (message.text ?? '').trim();
   if (!text) return;
-  voice.handleTranscript(text);
-  ui.showBubble(`« ${text} »`, 2500);
+  voice.handleTranscript(text, Boolean(message.echo));
+  // La sua stessa voce tornata dal microfono (vedi pipeline.is_echo): niente bolla.
+  if (!message.echo) ui.showBubble(`« ${text} »`, 2500);
 });
 
 // Una frase pronta da pronunciare: WAV + timeline dei visemi.
 socket.on('speech', (message) => {
+  // "Un attimo, ci sto lavorando" e' un versetto: tace se i versetti sono spenti.
+  if (message.vocal && !vocals.enabled) return;
   if (!state.muted) player.enqueue(message);
+});
+
+// L'agente sta usando un tool: posa da lavoro e, finche' tace, la bolla con il passo.
+socket.on('working', (message) => {
+  stage.setWorking(message.kind);
+  const label = message.label ?? '';
+  if (label && !player.playing) ui.showBubble(`${label.charAt(0).toUpperCase()}${label.slice(1)}…`, 8000);
 });
 
 // Una frase senza audio (muta, o voce guasta): la bolla basta.
@@ -842,6 +862,9 @@ if (pet) {
         break;
       case 'mic-test':
         voice.setPaused(command.value);
+        break;
+      case 'barge-in':
+        voice.setBargeIn(command.value);
         break;
       case 'hud':
         hud.show();

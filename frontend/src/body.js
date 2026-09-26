@@ -84,6 +84,9 @@ const _m1 = new THREE.Matrix4();
 const _e1 = new THREE.Euler();
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 
+/** Il genere di tool dell'agente (backend/llm/activity.py) -> la posa mentre lavora. */
+const WORK_STYLE = { read: 'read', search: 'read', web: 'read', write: 'type', run: 'type', tool: 'type' };
+
 // ----------------------------------------------------------------- animatore
 export class BodyAnimator {
   /**
@@ -146,6 +149,10 @@ export class BodyAnimator {
     };
     this.thinking = false;
     this.think = new Spring(3.2);
+    /** Un agente al lavoro: che genere di passo (vedi WORK_STYLE) e le due pose. */
+    this.work = { kind: null, read: new Spring(2.6), type: new Spring(2.6) };
+    /** Pesi delle pose da lavoro in questo frame, per il pannello olografico (holo.js). */
+    this.workWeights = { reading: 0, typing: 0, taps: [0, 0] };
     // --- sonno: il PC e' fermo da un po' (vedi presence.js) ----------------
     /** 0 = sveglia, 0.5 = assonnata, 1 = addormentata. */
     this.sleepTarget = 0;
@@ -380,6 +387,15 @@ export class BodyAnimator {
   setThinking(value) {
     this.thinking = Boolean(value);
     if (this.thinking) this._cancelIdleActions();
+    else this.work.kind = null;
+  }
+
+  /**
+   * L'agente sta usando un tool (`read`, `write`, `run`...): mentre pensa
+   * legge un tablet invisibile o batte su una tastiera invisibile.
+   */
+  setWorking(kind) {
+    this.work.kind = kind || null;
   }
 
   /**
@@ -1262,9 +1278,17 @@ export class BodyAnimator {
     pose.both('Shoulder', 0, 0, -0.04 * (drowsy + deep), upright);
   }
 
-  /** Posa pensierosa: mano al mento, l'altra a sostenere il gomito, occhi in alto. */
+  /** Pensa (mano al mento), oppure lavora: legge o scrive, secondo il tool dell'agente. */
   _thinking(pose, dt, w) {
-    const k = this.think.update(this.thinking ? 1 : 0, dt) * w;
+    const style = this.thinking ? WORK_STYLE[this.work.kind] ?? null : null;
+    const reading = this.work.read.update(style === 'read' ? 1 : 0, dt) * w;
+    const typing = this.work.type.update(style === 'type' ? 1 : 0, dt) * w;
+    this.workWeights.reading = reading;
+    this.workWeights.typing = typing;
+    if (reading > EPSILON) this._reading(pose, reading);
+    if (typing > EPSILON) this._typing(pose, typing);
+
+    const k = this.think.update(this.thinking && !style ? 1 : 0, dt) * w;
     if (k < EPSILON) return;
     const t = this.time;
     pose.reach('right', 'head', [-0.01, -0.09, 0.075], [0.25, -1, 0.35], k, -0.5);
@@ -1277,6 +1301,45 @@ export class BodyAnimator {
     pose.gaze.yaw += (0.35 + 0.12 * Math.sin(t * 0.7)) * k;
     pose.gaze.pitch += -0.3 * k;
     pose.gaze.weight += 0.8 * k;
+  }
+
+  /** Tiene un tablet invisibile davanti al petto e lo legge riga per riga. */
+  _reading(pose, k) {
+    const t = this.time;
+    pose.reach('left', 'upperChest', [0.095, -0.03, 0.24], [1, -1.2, -0.3], k, 1.3);
+    pose.reach('right', 'upperChest', [0.095, -0.03, 0.24], [1, -1.2, -0.3], k, 1.3);
+    pose.fingers.left += 0.35 * k;
+    pose.fingers.right += 0.35 * k;
+    pose.add('head', 0.2 * k, 0, 0.04 * Math.sin(t * 0.4) * k);
+    pose.add('neck', 0.08 * k, 0, 0);
+    pose.add('spine', 0.03 * k, 0, 0);
+    // Gli occhi scorrono la riga e tornano a capo di scatto.
+    const line = (t * 0.55) % 1;
+    const sweep = line < 0.85 ? line / 0.85 : 1 - (line - 0.85) / 0.15;
+    pose.gaze.yaw += (sweep - 0.5) * 0.3 * k;
+    pose.gaze.pitch += 0.42 * k;
+    pose.gaze.weight += 0.9 * k;
+  }
+
+  /** Batte su una tastiera invisibile all'altezza della vita, a raffiche. */
+  _typing(pose, k) {
+    const t = this.time;
+    // Raffiche di tasti con piccole pause, come chi scrive davvero.
+    const burst = smoothstep(-0.2, 0.4, Math.sin(t * 0.9) + 0.35 * Math.sin(t * 2.3));
+    const tapL = Math.max(0, Math.sin(t * 13)) * burst;
+    const tapR = Math.max(0, Math.sin(t * 13 + 2.1)) * burst;
+    this.workWeights.taps[0] = tapL;
+    this.workWeights.taps[1] = tapR;
+    pose.reach('left', 'hips', [0.12, 0.15 + 0.012 * tapL, 0.3], [1, -1, -0.6], k, -0.2);
+    pose.reach('right', 'hips', [0.12, 0.15 + 0.012 * tapR, 0.3], [1, -1, -0.6], k, -0.2);
+    pose.fingers.left += (0.25 + 0.3 * tapL) * k;
+    pose.fingers.right += (0.25 + 0.3 * tapR) * k;
+    pose.add('head', 0.24 * k, 0, 0);
+    pose.add('neck', 0.1 * k, 0, 0);
+    pose.add('spine', 0.05 * k, 0, 0);
+    pose.gaze.yaw += 0.06 * Math.sin(t * 1.3) * k;
+    pose.gaze.pitch += 0.5 * k;
+    pose.gaze.weight += 0.9 * k;
   }
 
   _runActions(pose) {
