@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -18,14 +19,23 @@ logger = logging.getLogger(__name__)
 CHATTER_LEVELS = ("off", "rare", "normal", "chatty")
 
 #: Argomenti dei commenti spontanei, accendibili uno per uno.
-TOPICS = ("night", "breaks", "weather", "battery", "youtube", "news", "facts", "films")
+TOPICS = ("night", "breaks", "weather", "battery", "usage", "youtube", "news", "facts", "films")
 
 DEFAULTS: dict[str, Any] = {
     "chatter": "normal",
     "topics": {topic: True for topic in TOPICS},
     #: Citta' per il meteo; vuota = posizione approssimativa dall'indirizzo IP.
     "city": "",
+    #: Chi scrive le chiacchiere: un motore LLM cloud o locale (``openrouter``,
+    #: ``ollama``...), vuoto = il cervello principale. Cosi' un agente a consumo
+    #: non spende un turno per ogni notizia commentata.
+    "brain": "",
+    #: I modelli di quel motore, in fila separata da virgole: se il primo non
+    #: risponde (i gratuiti a volte sono saturi) si prova il successivo.
+    "brainModels": "",
 }
+
+_ENGINE_ID = re.compile(r"^[a-z0-9_]{0,40}$")
 
 
 class Preferences:
@@ -46,6 +56,14 @@ class Preferences:
     def city(self) -> str:
         return self.data["city"]
 
+    @property
+    def brain(self) -> str:
+        return self.data["brain"]
+
+    @property
+    def brain_models(self) -> str:
+        return self.data["brainModels"]
+
     def topic(self, name: str) -> bool:
         return bool(self.data["topics"].get(name, True))
 
@@ -55,6 +73,11 @@ class Preferences:
             self.data["chatter"] = changes["chatter"]
         if isinstance(changes.get("city"), str):
             self.data["city"] = changes["city"].strip()[:80]
+        if isinstance(changes.get("brain"), str) and _ENGINE_ID.match(changes["brain"].strip()):
+            self.data["brain"] = changes["brain"].strip()
+        if isinstance(changes.get("brainModels"), str):
+            names = [name.strip() for name in changes["brainModels"].split(",") if name.strip()]
+            self.data["brainModels"] = ", ".join(names)[:400]
         topics = changes.get("topics")
         if isinstance(topics, dict):
             for name, value in topics.items():

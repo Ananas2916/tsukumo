@@ -26,17 +26,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def state_folders() -> list[Path]:
+    """Dove puo' stare lo stato di Tsukumo: dal progetto (sviluppo) o dai dati
+    dell'utente (app installata, vedi electron/main.js)."""
+    folders = [os.environ.get("DC_STATE_DIR"), ROOT / "state"]
+    if os.environ.get("APPDATA"):
+        folders.append(Path(os.environ["APPDATA"]) / "Tsukumo" / "state")
+    return [Path(folder) for folder in folders if folder]
+
+
 def backend_url() -> str | None:
     forced = os.environ.get("TSUKUMO_URL")
     if forced:
         return forced.rstrip("/")
-    # Dal progetto (sviluppo) o dai dati dell'utente (app installata, vedi electron/main.js).
-    folders = [os.environ.get("DC_STATE_DIR"), ROOT / "state"]
-    if os.environ.get("APPDATA"):
-        folders.append(Path(os.environ["APPDATA"]) / "Tsukumo" / "state")
-    for folder in filter(None, folders):
+    for folder in state_folders():
         try:
-            info = json.loads((Path(folder) / "running.json").read_text(encoding="utf-8"))
+            info = json.loads((folder / "running.json").read_text(encoding="utf-8"))
             return f"http://{info.get('host', '127.0.0.1')}:{int(info['port'])}"
         except (OSError, ValueError, KeyError):
             continue

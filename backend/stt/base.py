@@ -54,6 +54,12 @@ class STTEngine(ABC):
         Viene chiamato dentro un thread pool, quindi puo' essere bloccante.
         """
 
+    def prepare(self) -> None:
+        """Carica (e scarica, la prima volta) quello che serve, prima della prima frase.
+
+        Bloccante: va chiamata in un thread. I motori senza modello non fanno niente.
+        """
+
     def close(self) -> None:
         """Rilascia eventuali risorse (modelli caricati, client HTTP, ...)."""
 

@@ -14,6 +14,11 @@
  * In Electron c'e' in piu' il comportamento da mascotte: click-through per
  * pixel, lo prendi in mano e lo sposti (penzola, poi cade e atterra), reagisce
  * quando lo tocchi, e col tasto destro apre i dock ai suoi lati (hud.js).
+ *
+ * Due forme: il VRM oppure la fiammella (flame.js), la sua anima, che ogni
+ * tanto fa uno sprint lungo la barra delle applicazioni. E chi non vuole il
+ * corpo (lo si sceglie al primo avvio) tiene solo la fiammella: il VRM allora
+ * non si carica nemmeno.
  */
 
 import { apiUrl, DEFAULT_BLENDSHAPES, wsUrl } from './config.js';
@@ -32,9 +37,28 @@ import { CompanionSocket } from './ws.js';
 
 const pet = window.companion?.isElectron ? window.companion : null;
 
+/** La forma scelta: 'vrm' o 'flame'. La legge anche il pannello (stessa origine). */
+const FORM_SETTING = 'dc:form';
+/** Con il corpo ('vrm') o senza ('none': solo la fiammella, il VRM non si carica). */
+const BODY_SETTING = 'dc:body';
+
+/** Ogni quanto la fiammella fa uno sprint, se niente la trattiene (ms). */
+const SPRINT_EVERY = [4 * 60_000, 9 * 60_000];
+/** Al momento buono non si puo' (sta parlando, sei in riunione...): riprova tra poco. */
+const SPRINT_RETRY = 45_000;
+/** Solo se sei al PC: nessuno la vede correre se sei via da piu' di tanto (s). */
+const SPRINT_MAX_IDLE = 90;
+
 const ui = new UI();
 const hud = new Hud(ui.elements.hud);
 const stage = new VrmStage(document.getElementById('stage'));
+const bodiless = readSetting(BODY_SETTING, 'vrm') === 'none';
+// Senza corpo la fiammella c'e' subito, anche prima del backend: niente modello da scaricare.
+if (bodiless) stage.useSpirit();
+else stage.setForm(readSetting(FORM_SETTING, 'vrm'), { animate: false });
+hud.setForm(stage.form);
+hud.setBodiless(bodiless);
+document.body.classList.toggle('flame-form', stage.form === 'flame');
 const lipSync = new LipSync({ gain: readSetting('dc:gain', 1.15) });
 const player = new SpeechPlayer({
   onClipStart: (payload) => {
@@ -56,7 +80,16 @@ const socket = new CompanionSocket(wsUrl);
 
 /** Stato locale, tenuto volutamente minimo. */
 const state = {
-  avatarLoaded: false,
+  /** C'e' qualcosa sul palco: il VRM caricato, o la fiammella da sola. */
+  avatarLoaded: bodiless,
+  /** 'vrm' o 'none' (vedi BODY_SETTING). */
+  body: bodiless ? 'none' : 'vrm',
+  /** Il modello di default dal backend: serve per ridarle il corpo. */
+  avatarUrl: null,
+  /** Ha gia' salutato comparendo (senza corpo succede al primo contatto col backend). */
+  greeted: false,
+  /** Consumi degli agenti dal backend (messaggio `usage`), per l'anello del HUD. */
+  usage: null,
   backendState: 'idle',
   /** Ultimo valore inviato a Electron per il click-through. */
   interactive: null,
@@ -71,13 +104,20 @@ const state = {
   droppedAt: -Infinity,
   /** Attivita' dell'utente dal backend: `{kind, label, detail, dnd, watching}`. */
   activity: null,
+  /** Da quanti secondi nessuno tocca mouse e tastiera (da Electron). */
+  idleSeconds: 0,
+  /** Quando potra' fare il prossimo sprint (performance.now()). */
+  nextSprintAt: performance.now() + SPRINT_EVERY[0],
 };
 
 const voice = new VoiceController({
   socket,
   onEvent: (event) => {
     if (event.type === 'error') ui.toast(event.message, true, 4000);
-    if (event.type === 'activity') document.body.classList.toggle('listening', event.speaking);
+    if (event.type === 'activity') {
+      document.body.classList.toggle('listening', event.speaking);
+      stage.setListening(event.speaking);
+    }
     if (event.type === 'level') state.micLevel = event.level;
     if (event.type === 'enabled') reportVoice();
     // L'hai chiamata per nome: alza la mano, "eccomi".
@@ -138,7 +178,7 @@ function trackSpin(x, y) {
   spin.angle = angle;
   if (Math.abs(spin.total) > 3 * 2 * Math.PI) {
     spin.total = 0;
-    if (stage.body?.play('dizzy')) {
+    if (stage.play('dizzy')) {
       sfx.blip(false);
       vocals.say('dizzy');
     }
@@ -168,7 +208,7 @@ function busyForSleep() {
 /** Addormentata sulla barra: si stende sul fianco. Su una finestra resta dov'e'. */
 function lieDownToSleep() {
   const body = stage.body;
-  if (!pet || !body || body.surface !== 'ground' || !['stand', 'sit'].includes(body.mode)) return;
+  if (!pet || !body || stage.form === 'flame' || body.surface !== 'ground' || !['stand', 'sit'].includes(body.mode)) return;
   state.sleptLying = true;
   pet.requestPosture('side');
 }
@@ -183,9 +223,126 @@ function getUpFromSleep() {
 /** Le "zeta" del sonno salgono dalla testa, ovunque sia (anche sdraiata). */
 const zzz = document.getElementById('zzz');
 function updateZzz() {
-  const head = stage.body?.asleep ? stage.headScreen() : null;
+  const head = stage.asleep ? stage.headScreen() : null;
   zzz.classList.toggle('hidden', !head);
   if (head) zzz.style.transform = `translate(${Math.round(head.x + 12)}px, ${Math.round(head.y - 40)}px)`;
+}
+
+/** Il fumetto sta in cima alla finestra; con la fiammella, che e' piccola e bassa, le sta sopra. */
+function placeBubble() {
+  const bubble = ui.elements.bubble;
+  const tip = stage.form === 'flame' && !stage.morphing ? stage.headScreen() : null;
+  if (tip) {
+    bubble.style.top = 'auto';
+    bubble.style.bottom = `${Math.round(window.innerHeight - tip.y + 14)}px`;
+  } else if (bubble.style.bottom) {
+    bubble.style.top = '';
+    bubble.style.bottom = '';
+  }
+}
+
+/** Cambia forma: la fiammella entra nel corpo o ne esce (vedi VrmStage.setForm). */
+function setForm(form) {
+  const next = form === 'flame' ? 'flame' : 'vrm';
+  if (!stage.setForm(next, { animate: state.avatarLoaded })) return false;
+  writeSetting(FORM_SETTING, next);
+  showForm(next);
+  if (state.avatarLoaded) sfx.pop();
+  if (next === 'flame' && pet) {
+    // Seduta o stesa sulla barra non potrebbe fare gli sprint: finito il
+    // passaggio si rimette dritta (su una finestra resta seduta).
+    state.sleptLying = false;
+    setTimeout(() => stage.form === 'flame' && pet.requestPosture('stand'), 1300);
+  }
+  return true;
+}
+
+function showForm(form) {
+  hud.setForm(form);
+  document.body.classList.toggle('flame-form', form === 'flame');
+}
+
+/**
+ * Con o senza corpo. Senza: la fiammella esce dal corpo e il VRM si scarica
+ * (e ai prossimi avvii non si carica proprio). Con: il VRM si carica e la
+ * fiammella ci entra, nella forma chiesta.
+ */
+async function setBody(body, form = 'vrm') {
+  const next = body === 'none' ? 'none' : 'vrm';
+  state.body = next;
+  writeSetting(BODY_SETTING, next);
+  hud.setBodiless(next === 'none');
+  if (next === 'none') {
+    writeSetting(FORM_SETTING, 'flame');
+    if (stage.spiritOnly) return;
+    // Esce dal corpo con la sua animazione; il VRM si scarica alla fine (onMorphEnd).
+    if (stage.vrm && stage.form === 'vrm' && setForm('flame')) return;
+    if (!stage.morphing) {
+      stage.useSpirit();
+      showForm('flame');
+    }
+    return;
+  }
+  if (stage.spiritOnly || !stage.vrm) {
+    if (!state.avatarUrl) {
+      ui.toast('Manca il modello 3D: sceglilo da Personaggio → Aspetto.', true, 5000);
+      return;
+    }
+    if (!(await loadAvatar(state.avatarUrl, state.avatarUrl.split('/').pop(), { greet: false }))) return;
+  }
+  if (form === 'vrm') setForm('vrm');
+  else {
+    writeSetting(FORM_SETTING, 'flame');
+    showForm(stage.form);
+  }
+}
+
+// Uscita dal corpo finita e il corpo non lo vuole piu': si libera la memoria del VRM.
+stage.onMorphEnd = (form) => {
+  if (form === 'flame' && state.body === 'none' && !stage.spiritOnly) stage.useSpirit();
+};
+
+/** Compare: un "pop", poi saluta con la mano (o la fiammella a modo suo) e con la voce. */
+function appear() {
+  state.greeted = true;
+  sfx.pop();
+  setTimeout(() => {
+    stage.greet();
+    vocals.say(greetingForNow());
+  }, 700);
+}
+
+/**
+ * Lo sprint parte solo se nessuno ne ha bisogno: fiammella a riposo, niente
+ * voce ne' pensieri in corso, tu al PC ma non in riunione, a schermo intero,
+ * in un gioco o davanti a un video (le regole dei commenti spontanei).
+ */
+function sprintAllowed() {
+  return (
+    stage.form === 'flame' &&
+    !stage.morphing &&
+    socket.connected &&
+    !player.playing &&
+    state.backendState === 'idle' &&
+    presence.state === 'awake' &&
+    state.idleSeconds < SPRINT_MAX_IDLE &&
+    !state.activity?.dnd &&
+    !state.activity?.watching &&
+    !hud.visible &&
+    !document.body.classList.contains('listening') &&
+    !document.body.classList.contains('dragging')
+  );
+}
+
+function maybeSprint(now) {
+  if (!pet || now < state.nextSprintAt) return;
+  if (!sprintAllowed()) {
+    state.nextSprintAt = now + SPRINT_RETRY;
+    return;
+  }
+  const [min, max] = SPRINT_EVERY;
+  state.nextSprintAt = now + min + Math.random() * (max - min);
+  pet.sprint();
 }
 
 hud.setMuted(state.muted);
@@ -219,7 +376,11 @@ stage.onFrame((dt) => {
   });
 
   updateZzz();
-  if (pet) updateClickThrough();
+  placeBubble();
+  if (pet) {
+    updateClickThrough();
+    maybeSprint(performance.now());
+  }
   return weights;
 });
 stage.start();
@@ -255,18 +416,14 @@ function updateClickThrough() {
 // ---------------------------------------------------------------------------
 // Caricamento dell'avatar
 // ---------------------------------------------------------------------------
-async function loadAvatar(url, label) {
+async function loadAvatar(url, label, { greet = true } = {}) {
   ui.showOverlay(`Carico ${label}…`);
   try {
     await stage.load(url, (progress) => ui.showOverlay(`Carico ${label}… ${Math.round(progress * 100)}%`));
     state.avatarLoaded = true;
     ui.hideOverlay();
     // Appena compare, saluta: con la mano e con la voce, adatto all'ora.
-    sfx.pop();
-    setTimeout(() => {
-      stage.greet();
-      vocals.say(greetingForNow());
-    }, 700);
+    if (greet) appear();
     if (stage.mouthDriver.kind === 'none') {
       ui.toast('Il modello non ha le blendshape della bocca: niente lip-sync.', true, 6000);
     }
@@ -285,6 +442,13 @@ async function loadAvatar(url, label) {
 ui.onModelFile = async (file) => {
   const url = URL.createObjectURL(file);
   const ok = await loadAvatar(url, file.name);
+  // Un modello scelto apposta: vuol dire che il corpo lo vuole.
+  if (ok && state.body === 'none') {
+    state.body = 'vrm';
+    writeSetting(BODY_SETTING, 'vrm');
+    hud.setBodiless(false);
+    setForm('vrm');
+  }
   // Il blob resta referenziato dalle texture finche' il modello e' in scena:
   // lo revochiamo solo se il caricamento e' fallito.
   if (!ok) URL.revokeObjectURL(url);
@@ -345,6 +509,13 @@ hud.onAction = async (id) => {
       setDancing(!state.dancing);
       ui.toast(state.dancing ? 'Ballo con Spotify.' : 'Niente balli.');
       break;
+    case 'form':
+      if (state.body === 'none') setBody('vrm');
+      else setForm(stage.form === 'flame' ? 'vrm' : 'flame');
+      break;
+    case 'usage':
+      openPanel({ tab: 'work' });
+      break;
     case 'chat':
     case 'character':
     case 'engines':
@@ -394,7 +565,7 @@ async function lookAtScreen(text = '') {
   if (!pet?.captureScreen) return;
   try {
     const file = await pet.captureScreen();
-    stage.body?.play('lookAround');
+    stage.play('lookAround');
     socket.send({ type: 'chat', text, files: [file], screen: true });
   } catch (error) {
     ui.toast(`Non riesco a vedere lo schermo: ${error.message}`, true, 4000);
@@ -423,6 +594,8 @@ socket.on('hello', (message) => {
     if (loaded?.length) console.info(`[clips] ${loaded.length} animazioni:`, loaded.map((clip) => clip.name).join(', '));
   });
   hud.setEngines(message.engines);
+  state.usage = message.usage ?? null;
+  hud.setUsage(state.usage, message.engines?.llm?.id);
   voice.setWakeWord(config.wakeWord ?? 'companion');
   voice.interruptOnSpeech = config.voiceInterrupt !== false;
   voice.mode = config.voiceMode ?? 'push';
@@ -438,8 +611,13 @@ socket.on('hello', (message) => {
   if (message.blendshapes) {
     stage.blendshapes = { ...DEFAULT_BLENDSHAPES, ...message.blendshapes };
   }
-  if (!state.avatarLoaded) {
-    const avatar = message.avatar?.default;
+  const avatar = message.avatar?.default;
+  if (avatar) state.avatarUrl = apiUrl(avatar);
+  if (state.body === 'none') {
+    // Senza corpo non c'e' niente da caricare: compare appena il backend risponde.
+    ui.hideOverlay();
+    if (!state.greeted) appear();
+  } else if (!state.avatarLoaded) {
     if (avatar) {
       loadAvatar(apiUrl(avatar), avatar.split('/').pop());
     } else {
@@ -454,15 +632,15 @@ socket.on('hello', (message) => {
 
 // Il gesto che accompagna un commento spontaneo (sbadiglio, brividi, aria con la mano...).
 socket.on('gesture', (message) => {
-  if (!player.playing || message.name === 'yawn') stage.body?.play(message.name);
+  if (!player.playing || message.name === 'yawn') stage.play(message.name);
 });
 
 /** Ti chiama: campanello, bussa sul vetro, notifica di Windows. */
 function callUser(title, body) {
   presence.touch();
   sfx.chime();
-  if (stage.body?.play('knock')) setTimeout(() => sfx.knock(), 520);
-  else stage.body?.play('wave');
+  if (stage.play('knock')) setTimeout(() => sfx.knock(), 520);
+  else stage.play('wave');
   pet?.notify?.(title, body);
 }
 
@@ -510,6 +688,13 @@ socket.on('engines', (message) => {
   hud.setEngines(message);
   state.voiceAvailable = (message.stt?.state ?? 'off') !== 'off';
   reportVoice();
+  hud.setUsage(state.usage, message?.llm?.id);
+});
+
+// Quanto hanno consumato Claude Code e Codex (backend/usage.py): l'anello nel dock di sinistra.
+socket.on('usage', (message) => {
+  state.usage = message;
+  hud.setUsage(message, hud.engines?.llm?.id);
 });
 
 socket.on('settings', (message) => {
@@ -776,7 +961,7 @@ if (pet) {
       state.droppedAt = performance.now();
     } else {
       presence.touch();
-      if (tooManyPokes() && stage.body?.play('pout')) {
+      if (tooManyPokes() && stage.play('pout')) {
         pokes.length = 0;
         vocals.say('pout');
         return;
@@ -808,6 +993,17 @@ if (pet) {
       case 'carried':
         stage.carried(motion.x, motion.y);
         break;
+      // Lo sprint della fiammella: le fasi e, mentre corre, dove e' arrivata la finestra.
+      case 'sprint':
+        stage.setSprint(motion.phase, motion.dir);
+        if (motion.phase === 'ready') {
+          presence.touch();
+          hud.hide();
+        }
+        break;
+      case 'sprint-move':
+        stage.sprintMove(motion.x, motion.speed);
+        break;
       default:
         break;
     }
@@ -822,7 +1018,10 @@ if (pet) {
   });
 
   // Da quanto il PC e' fermo, blocco e sblocco dello schermo: sonno e risveglio.
-  pet.onPresence?.((message) => presence.update(message, busyForSleep()));
+  pet.onPresence?.((message) => {
+    if (typeof message?.idle === 'number') state.idleSeconds = message.idle;
+    presence.update(message, busyForSleep());
+  });
 
   // Comandi dal pannello.
   pet.onCommand((command) => {
@@ -858,7 +1057,19 @@ if (pet) {
         presence.setTimes(command.drowsy, command.asleep);
         break;
       case 'play':
-        stage.body?.play(command.name, { sign: command.sign });
+        stage.play(command.name, { sign: command.sign });
+        break;
+      case 'form':
+        // 'spirit' = senza corpo (dalla presentazione o da Personaggio -> Aspetto).
+        if (command.value === 'spirit') setBody('none');
+        else if (state.body === 'none') setBody('vrm', command.value);
+        // Sta ancora cambiando: resta com'e', e il pannello torna a dire la verita'.
+        else if (!setForm(command.value) && command.value !== stage.form) writeSetting(FORM_SETTING, stage.form);
+        break;
+      case 'sprint':
+        // Dal pannello: subito, se e' la fiammella e sta in piedi sulla barra.
+        if (stage.form !== 'flame') ui.toast('Gli sprint li fa la fiammella: cambia forma dal pannello.');
+        else pet.sprint(command.kind).then((ok) => ok || ui.toast('Può scattare solo quando è a terra sulla barra.'));
         break;
       case 'greet':
         stage.greet();
@@ -919,7 +1130,7 @@ if (pet) {
     const files = [...(event.dataTransfer?.files ?? [])].map((file) => pet.pathForFile?.(file)).filter(Boolean);
     if (!files.length) return;
     presence.touch();
-    stage.body?.play('pat');
+    stage.play('pat');
     vocals.say('pat');
     socket.send({ type: 'chat', text: '', files });
   });
@@ -946,4 +1157,4 @@ setTimeout(() => {
 }, 2500);
 
 // Utile per ispezionare lo stato dalla console.
-window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle, vocals, presence, sfx };
+window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle, vocals, presence, sfx, setForm, setBody };

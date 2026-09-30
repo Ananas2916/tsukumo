@@ -343,6 +343,12 @@ body.pet-mode.dragging #stage {
   animation: pop 0.2s ease;
 }
 
+/* La fiammella vive in fondo alla finestra: gli avvisi vanno in cima, a non coprirla. */
+body.flame-form .toast {
+  top: 12px;
+  bottom: auto;
+}
+
 .toast.error {
   border-color: rgba(255, 107, 129, 0.45);
   color: #ffd5dc;

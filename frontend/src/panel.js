@@ -1,5 +1,6 @@
 /**
- * Il pannello di Tsukumo: chat, personaggio e motori, staccato dal personaggio.
+ * Il pannello di Tsukumo: chat, personaggio, agenda, lavoro (i consumi degli
+ * agenti) e motori, staccato dal personaggio.
  *
  * E' una finestra a parte con una sua connessione WebSocket al backend: il
  * backend manda tutto a tutti, quindi qui arrivano gli stessi messaggi del
@@ -22,6 +23,7 @@ import { AgendaView } from './panel/agenda.js';
 import { CharacterView } from './panel/character.js';
 import { ChatView } from './panel/chat.js';
 import { Welcome } from './panel/welcome.js';
+import { WorkView } from './panel/work.js';
 import { CompanionSocket } from './ws.js';
 
 const companion = window.companion ?? null;
@@ -31,6 +33,7 @@ const TABS = [
   { id: 'chat', label: 'Chat', icon: 'chat' },
   { id: 'character', label: 'Personaggio', icon: 'character' },
   { id: 'agenda', label: 'Agenda', icon: 'clock' },
+  { id: 'work', label: 'Lavoro', icon: 'briefcase' },
   { id: 'engines', label: 'Motori', icon: 'engines' },
 ];
 
@@ -85,6 +88,7 @@ const views = {
   chat: new ChatView(app, $('view-chat')),
   character: new CharacterView(app, $('view-character')),
   agenda: new AgendaView(app, $('view-agenda')),
+  work: new WorkView(app, $('view-work')),
   engines: new EnginesView(app, $('view-engines')),
 };
 

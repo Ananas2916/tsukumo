@@ -738,9 +738,10 @@ function applyPetSize() {
  * Sdraiata sul fianco il corpo e' orizzontale: la finestra si allarga subito
  * (stessa altezza, stesso asse del corpo, quindi lei non si sposta) e torna
  * stretta solo quando si e' gia' rialzata, altrimenti verrebbe tagliata.
+ * Si allarga anche durante lo sprint della fiammella, per la scia.
  */
 function updatePetShape() {
-  if (physics.posture === 'side') {
+  if (physics.posture === 'side' || physics.state === 'sprint') {
     narrowSince = null;
     if (!petWide) {
       petWide = true;
@@ -1064,6 +1065,8 @@ ipcMain.handle('pet:drag-end', () => {
 ipcMain.on('pet:anchors', (_event, anchors) => physics.setAnchors(anchors));
 
 ipcMain.handle('pet:posture', (_event, posture) => physics.requestPosture(posture));
+// Lo sprint della fiammella: quando farlo lo decide il renderer, la corsa la fa la fisica.
+ipcMain.handle('pet:sprint', (_event, kind) => physics.sprint(kind));
 
 ipcMain.handle('pet:scale-by', (_event, factor) => setScale(settings.scale * factor));
 ipcMain.handle('pet:set-scale', (_event, value) => setScale(Number(value)));

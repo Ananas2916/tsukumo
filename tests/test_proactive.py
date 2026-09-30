@@ -127,6 +127,9 @@ def test_break_after_two_hours(client, rig):
 
 
 def test_weather_morning_heat_and_rain(client, rig):
+    # La sessione parte all'ora vera: a seconda di quando giri i test, alle 14
+    # finte sarebbe gia' ora di una pausa. Qui si prova solo il meteo.
+    rig.preferences.update({"topics": {"breaks": False}}, save=False)
     rig.weather = FakeWeather(Weather(temperature=24, apparent=25, code=0, is_day=True))
     assert client.portal.call(rig.tick, at(8)) == "weather:morning-clear"
     assert spoken(rig)[-1] == "Buongiorno! Che bella giornata di sole! Fuori ci sono 24 gradi."

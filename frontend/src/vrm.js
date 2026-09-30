@@ -8,7 +8,9 @@
  *    target `fcl_mth_*`) e applicare i pesi calcolati dal lip-sync;
  *  - passare al corpo (vedi body.js) quello che succede intorno: dov'e' il
  *    cursore, se sta parlando, se lo stai tenendo in mano, se cade;
- *  - battito di ciglia ed espressioni del viso.
+ *  - battito di ciglia ed espressioni del viso;
+ *  - la forma piccola (flame.js): la fiammella al posto del VRM, e il
+ *    passaggio fra le due ("entra nel corpo", "esce dal corpo").
  */
 
 import * as THREE from 'three';
@@ -18,6 +20,7 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { BodyAnimator } from './body.js';
 import { ClipPlayer } from './clips.js';
 import { DEFAULT_BLENDSHAPES, VISEME_KEYS } from './config.js';
+import { Flame, FLAME_HEIGHT } from './flame.js';
 import { HoloPanel } from './holo.js';
 
 /** Espressioni del viso pilotate dal corpo (umore, spavento, sorriso...). */
@@ -35,6 +38,9 @@ const FULL_FRAME = 1.24;
 /** Larghezza tipica delle spalle di un avatar VRM, in metri. */
 const SHOULDER_SPAN = 0.55;
 
+/** Senza corpo la fiammella si inquadra come se ci fosse un modello alto cosi' (m). */
+const SPIRIT_MODEL_HEIGHT = 1.6;
+
 /**
  * Frame al secondo secondo quello che fa. Il personaggio e' sempre sullo
  * schermo: disegnarlo a 144 Hz mentre respira e basta scalda il portatile e
@@ -42,6 +48,22 @@ const SHOULDER_SPAN = 0.55;
  * essere presa in mano o seguire il mouse invece vogliono 60.
  */
 const FPS = { active: 60, calm: 30, asleep: 20 };
+
+/** Cambio di forma, in secondi: quando la fiammella arriva al petto e quando finisce tutto. */
+const INTO_BODY = { arrive: 0.5, end: 1.45 };
+const OUT_OF_BODY = { dissolve: 0.7, end: 1.1 };
+/** Piano di taglio "spento": abbastanza in alto da non tagliare niente. */
+const NO_CLIP = 1e4;
+
+const smooth = (k) => {
+  const x = Math.min(1, Math.max(0, k));
+  return x * x * (3 - 2 * x);
+};
+const easeOutCubic = (k) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
+const easeOutBack = (k) => {
+  const x = Math.min(1, Math.max(0, k)) - 1;
+  return 1 + 2.7 * x * x * x + 1.7 * x * x;
+};
 
 export class VrmStage {
   /**
@@ -74,6 +96,21 @@ export class VrmStage {
     /** Stato che il corpo legge a ogni frame. */
     this._speech = { playing: false, level: 0 };
     this._thinking = false;
+    this._working = null;
+    this._listening = false;
+    this._music = null;
+
+    /** 'vrm' (il personaggio) o 'flame' (la fiammella, flame.js). */
+    this.form = 'vrm';
+    /** Senza corpo: solo la fiammella, il VRM non e' caricato (vedi useSpirit). */
+    this.spiritOnly = false;
+    this.floorY = 0;
+    /** Cambio di forma in corso: `{to, t, fired}`. */
+    this._morph = null;
+    /** Taglia il VRM all'altezza del piano: lo fa comparire dai piedi o sparire dalla testa. */
+    this._clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), NO_CLIP);
+    /** Ultima posizione della finestra durante lo sprint, per far restare indietro la scia. */
+    this._sprintX = null;
     this._spontaneous = true;
     this._dancing = true;
     this._sleep = 0;
@@ -85,6 +122,8 @@ export class VrmStage {
     this.onAnchors = null;
     /** Il corpo vuole sedersi/sdraiarsi/alzarsi sulla barra. */
     this.onPostureRequest = null;
+    /** Finito un cambio di forma animato: riceve la forma nuova. */
+    this.onMorphEnd = null;
     this._anchorsDirty = false;
 
     // Controlli camera "leggeri" (niente OrbitControls: ci bastano questi).
@@ -134,6 +173,8 @@ export class VrmStage {
     // modello e comprime solo le luci forti.
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 1;
+    // Il piano di taglio del cambio di forma vale solo per i materiali del VRM.
+    this.renderer.localClippingEnabled = true;
   }
 
   _initScene() {
@@ -158,6 +199,16 @@ export class VrmStage {
 
     this.shadow = this._createShadow();
     this.scene.add(this.shadow);
+
+    this.flame = new Flame(this.scene);
+    // L'anello che scorre lungo il corpo mentre compare o sparisce.
+    this._scanRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.92, 1, 72),
+      new THREE.MeshBasicMaterial({ color: 0xa58bff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }),
+    );
+    this._scanRing.rotation.x = -Math.PI / 2;
+    this._scanRing.visible = false;
+    this.scene.add(this._scanRing);
 
     this._resize();
   }
@@ -191,6 +242,14 @@ export class VrmStage {
 
   /** L'ombra segue i fianchi; si sfuma quando si siede, si stende, la prendi o salta. */
   _updateShadow() {
+    if (this.form === 'flame' && !this.avatarRoot?.visible) {
+      const { x, z, size, opacity } = this.flame.shadow;
+      this.shadow.visible = opacity > 0.01 && size > 0.001;
+      this.shadow.position.set(x, this.floorY + 0.002, z);
+      this.shadow.scale.set(size, size * 0.55, 1);
+      this.shadow.material.opacity = opacity;
+      return;
+    }
     const body = this.body;
     const hips = this.vrm?.humanoid?.getRawBoneNode('hips');
     const weight = body ? body.modeWeight.stand : 0;
@@ -307,6 +366,8 @@ export class VrmStage {
     if (!vrm) throw new Error('Il file non contiene dati VRM validi.');
 
     this._disposeVrm();
+    // Un corpo di nuovo: la fiammella puo' tornarci dentro.
+    this.spiritOnly = false;
 
     // Ottimizzazioni consigliate da three-vrm.
     VRMUtils.removeUnnecessaryVertices(gltf.scene);
@@ -317,6 +378,12 @@ export class VrmStage {
     vrm.scene.traverse((object) => {
       // Gli avatar sono sempre inquadrati: il culling costa piu' di quanto rende.
       object.frustumCulled = false;
+      // Il piano del cambio di forma, assegnato subito: aggiungerlo dopo
+      // ricompilerebbe gli shader MToon e il passaggio partirebbe a scatti.
+      if (!object.isMesh) return;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        material.clippingPlanes = [this._clipPlane];
+      }
     });
 
     // Il VRM va dentro un gruppo suo: cosi' possiamo farlo penzolare intorno
@@ -350,11 +417,205 @@ export class VrmStage {
     // Altezza dei fianchi a riposo: dimensiona l'ombra su qualunque modello.
     vrm.scene.updateMatrixWorld(true);
     this._hipsRestY = vrm.humanoid?.getRawBoneNode('hips')?.getWorldPosition(new THREE.Vector3()).y ?? 0;
+    // La fiammella si misura sul modello: dove starebbero i piedi, alta un terzo o giu' di li'.
+    this.flame.setHeight(this.modelHeight * FLAME_HEIGHT);
+    this.flame.home.set(this.cameraTarget.x, this.floorY, 0);
+    this._morph = null;
+    this._applyForm();
     return vrm;
+  }
+
+  // ------------------------------------------------------------ forma
+  /**
+   * 'vrm' o 'flame'. Con `animate` la fiammella entra nel corpo (o ne esce);
+   * senza, cambia e basta (all'avvio). Falso se sta gia' cambiando.
+   */
+  setForm(form, { animate = true } = {}) {
+    const next = form === 'flame' ? 'flame' : 'vrm';
+    if (this._morph || next === this.form) return false;
+    // Senza corpo non c'e' dove entrare: prima si carica il VRM (load), poi si entra.
+    if (next === 'vrm' && this.spiritOnly) return false;
+    this.form = next;
+    this._anchorsDirty = true;
+    if (!animate || !this.vrm) this._applyForm();
+    else this._morph = { to: next, t: 0, fired: false };
+    return true;
+  }
+
+  get morphing() {
+    return Boolean(this._morph);
+  }
+
+  /** C'e' qualcosa da mostrare: un VRM, o la fiammella da sola. */
+  get framed() {
+    return Boolean(this.vrm) || this.spiritOnly;
+  }
+
+  /**
+   * Senza corpo: solo la fiammella, e il VRM non si carica nemmeno (meno
+   * memoria e GPU). Si inquadra come se ci fosse un modello di altezza media:
+   * finestra, fisica e click per pixel restano quelli di sempre, perche'
+   * l'inquadratura e' proporzionale all'altezza. Se un VRM c'era, si scarica.
+   */
+  useSpirit() {
+    this._morph = null;
+    this.form = 'flame';
+    this.spiritOnly = true;
+    this.clips?.stop();
+    this._disposeVrm();
+    this.clips = null;
+    this._frameSpirit();
+    this._anchorsDirty = true;
+    this._applyForm();
+  }
+
+  _frameSpirit() {
+    this.modelHeight = SPIRIT_MODEL_HEIGHT;
+    this.floorY = 0;
+    // Sempre a figura intera: la fiammella sta dove starebbero i piedi.
+    const span = this.modelHeight * FULL_FRAME;
+    this.cameraTarget.set(0, span / 2 - this.modelHeight * 0.015, 0);
+    this.baseDistance = this._distanceFor(span);
+    this.orbit.targetDistance = this.baseDistance;
+    this.orbit.distance = this.baseDistance;
+    this.orbit.yaw = 0;
+    this.orbit.targetYaw = 0;
+    this.orbit.height = 0;
+    this.flame.setHeight(this.modelHeight * FLAME_HEIGHT);
+    this.flame.home.set(0, this.floorY, 0);
+  }
+
+  /** Cambio secco: una forma visibile, l'altra no, niente tagli. */
+  _applyForm() {
+    const flame = this.form === 'flame';
+    if (this.avatarRoot) this.avatarRoot.visible = !flame;
+    this.flame.root.visible = flame && this.framed;
+    this.flame.travel = 0;
+    this.flame.presence = 1;
+    this._clipPlane.constant = NO_CLIP;
+    this._scanRing.visible = false;
+    if (flame) this.clips?.stop();
+  }
+
+  /** Il petto del VRM, dove la fiammella entra ed esce. */
+  _chestPoint(target) {
+    const bone = this.vrm?.humanoid?.getNormalizedBoneNode('upperChest') ?? this.vrm?.humanoid?.getNormalizedBoneNode('chest');
+    if (bone) return bone.getWorldPosition(target);
+    return target.set(this.cameraTarget.x, this.floorY + this.modelHeight * 0.68, 0);
+  }
+
+  /**
+   * La coreografia del cambio di forma.
+   * Nel corpo: la fiammella sale al petto e rimpicciolisce, lampo e anelli,
+   * il VRM compare dai piedi alla testa. Fuori dal corpo: lampo al petto, il
+   * VRM sparisce dalla testa ai piedi e la fiammella scende a terra.
+   */
+  _updateMorph(dt) {
+    const morph = this._morph;
+    if (!morph) return;
+    morph.t += dt;
+    const k = morph.t;
+    const flame = this.flame;
+    const bottom = this.floorY - 0.02;
+    const top = this.floorY + this.modelHeight * 1.05;
+    this._morphChest ??= new THREE.Vector3();
+    const chest = this._chestPoint(this._morphChest);
+    flame.chest.copy(chest);
+    const burst = () => {
+      flame.fx.flash(chest, 3 * flame.size);
+      flame.fx.ring(chest, { to: 1.1 * flame.size });
+      flame.fx.ring(chest, { to: 0.7 * flame.size, delay: 0.12 });
+      flame.fx.ring(new THREE.Vector3(chest.x, this.floorY + 0.003, chest.z), { lying: true, to: 0.8 * flame.size, life: 1, delay: 0.1 });
+    };
+
+    let cut;
+    if (morph.to === 'vrm') {
+      const { arrive, end } = INTO_BODY;
+      flame.travel = smooth(k / arrive);
+      flame.presence = k < arrive ? 1 - 0.85 * flame.travel : Math.max(0, 0.15 * (1 - (k - arrive) / 0.1));
+      flame.root.visible = flame.presence > 0.001;
+      if (k >= arrive && !morph.fired) {
+        morph.fired = true;
+        burst();
+        this.avatarRoot.visible = true;
+      }
+      cut = k < arrive ? bottom : bottom + (top - bottom) * easeOutCubic((k - arrive) / (end - arrive - 0.05));
+      if (k >= end) {
+        this._morph = null;
+        this._applyForm();
+        this.onMorphEnd?.(this.form);
+        return;
+      }
+    } else {
+      const { dissolve, end } = OUT_OF_BODY;
+      if (!morph.fired) {
+        morph.fired = true;
+        burst();
+        flame.root.visible = true;
+      }
+      cut = top + (bottom - top) * smooth(k / dissolve);
+      if (k >= dissolve) this.avatarRoot.visible = false;
+      const back = Math.min(1, Math.max(0, (k - 0.15) / 0.8));
+      flame.travel = 1 - easeOutCubic(back);
+      flame.presence = 0.15 + 0.85 * easeOutBack(back);
+      if (k >= end) {
+        this._morph = null;
+        this._applyForm();
+        this.onMorphEnd?.(this.form);
+        return;
+      }
+    }
+    this._clipPlane.constant = cut;
+    // L'anello di luce sul bordo del taglio, finche' il corpo e' a meta'.
+    const visible = this.avatarRoot?.visible && cut > bottom + 0.01 && cut < top - 0.01;
+    this._scanRing.visible = Boolean(visible);
+    if (visible) {
+      const radius = this.modelHeight * 0.17;
+      this._scanRing.position.set(chest.x, cut, chest.z);
+      this._scanRing.scale.setScalar(radius);
+    }
+  }
+
+  // ------------------------------------------------------------ sprint della fiammella
+  /** Fase dello sprint dalla fisica di Electron (ready, go, brake, proud, end). */
+  setSprint(phase, dir) {
+    this.flame.sprint(phase, dir);
+    if (phase !== 'go' && phase !== 'brake') this._sprintX = null;
+  }
+
+  /** La finestra e' avanzata fino a `x` (pixel dello schermo): la scia resta indietro. */
+  sprintMove(x, speed) {
+    this.flame.sprintSpeed(speed);
+    if (this._sprintX !== null) this.flame.drift(-(x - this._sprintX) * this.metersPerPixel);
+    this._sprintX = x;
+  }
+
+  /**
+   * Un gesto per nome. Il VRM lo fa col corpo (body.js); la fiammella a modo
+   * suo, se lo sa fare. Falso se non e' partito.
+   */
+  play(name, options) {
+    if (this.form === 'flame' || this._morph) return this.flame.react(name);
+    return this.body?.play(name, options) ?? false;
+  }
+
+  /** Dorme davvero (per le "zeta"). */
+  get asleep() {
+    if (this.form === 'flame') return this._sleep >= 0.99;
+    return Boolean(this.body?.asleep);
+  }
+
+  /** L'utente le sta parlando (il microfono sente la voce). */
+  setListening(value) {
+    this._listening = Boolean(value);
   }
 
   /** Saluta con la mano (lo fa quando compare). */
   greet() {
+    if (this.form === 'flame') {
+      this.flame.react('greet');
+      return;
+    }
     if (this.body?.mode === 'stand' && this.clips?.playRole('greet')) return;
     // Ogni tanto sbuca dal basso salutando con due mani (body/booth.js).
     if (this.body?.mode === 'stand' && Math.random() < 0.35 && this.body.play('greetPop', { sign: -1 })) return;
@@ -369,12 +630,13 @@ export class VrmStage {
 
   /** Suona una clip a richiesta (dal pannello). */
   playClip(name) {
-    if (!this.clips || !['stand', 'sit'].includes(this.body?.mode)) return false;
+    if (this.form === 'flame' || !this.clips || !['stand', 'sit'].includes(this.body?.mode)) return false;
     return this.clips.play(name);
   }
 
   /** Una clip per un momento (`bow` a un grazie, `here` quando la chiami), se c'e' e se sta in piedi. */
   playClipRole(role) {
+    if (this.form === 'flame') return this.flame.react(role === 'here' ? 'greet' : 'pat');
     if (!this.clips || this.body?.mode !== 'stand' || this.clips.playing) return false;
     return this.clips.playRole(role);
   }
@@ -403,6 +665,7 @@ export class VrmStage {
   setFraming(mode) {
     this.framing = mode === 'full' ? 'full' : 'bust';
     if (this.vrm) this._frameCamera();
+    else if (this.spiritOnly) this._frameSpirit();
   }
 
   /**
@@ -435,6 +698,7 @@ export class VrmStage {
   /** Il backend sta aspettando l'LLM: posa pensierosa. */
   setThinking(value) {
     this._thinking = Boolean(value);
+    if (!this._thinking) this._working = null;
     this.body?.setThinking(this._thinking);
   }
 
@@ -446,15 +710,22 @@ export class VrmStage {
 
   /** L'agente usa un tool (`read`, `write`, `run`...): posa da lavoro invece che pensierosa. */
   setWorking(kind) {
+    this._working = kind || null;
     this.body?.setWorking(kind);
   }
 
   /**
    * Presa col mouse: penzola dalla collottola. Restituisce di quanti pixel
    * spostare la finestra perche' la collottola finisca sotto il cursore
-   * (px, py), qualunque punto del corpo si sia afferrato.
+   * (px, py), qualunque punto del corpo si sia afferrato. La fiammella si
+   * prende per il bulbo.
    */
   beginHold(px, py) {
+    if (this.form === 'flame') {
+      this.flame.setHeld(true);
+      const center = this._toScreen(this.flame.centerWorld());
+      return { x: px - center.x, y: py - center.y };
+    }
     if (!this.body) return { x: 0, y: 0 };
     this.body.beginHold();
     const nape = this._toScreen(this.body.restPoint('nape'));
@@ -463,15 +734,19 @@ export class VrmStage {
 
   /** Dove si trova ora la finestra trascinata, in pixel dello schermo. */
   moveHold(screenX, screenY) {
-    this.body?.moveHold(screenX, screenY);
+    if (this.form === 'flame') this.flame.moveHold(screenX);
+    else this.body?.moveHold(screenX, screenY);
   }
 
   endHold() {
+    this.flame.setHeld(false);
     this.body?.endHold();
   }
 
   setFalling() {
+    // Anche il corpo nascosto tiene il conto: quando torna sa se e' in piedi o seduta.
     this.body?.setFalling();
+    if (this.form === 'flame') this.flame.fall();
   }
 
   /**
@@ -480,6 +755,8 @@ export class VrmStage {
    */
   landed(impact, posture = 'stand') {
     this.body?.landed(impact, posture);
+    if (this.form === 'flame') this.flame.land(impact);
+    else this.flame.falling = false;
   }
 
   /** Seduta, sdraiata (a pancia in giu' o sul fianco) o in piedi sulla barra. */
@@ -492,11 +769,12 @@ export class VrmStage {
 
   /** Ritmo della musica (vedi music.js), a ogni frame. */
   setMusic(state) {
+    this._music = this._dancing ? state : null;
     this.body?.setMusic(state);
     // Con una clip dance*.vrma balla quella, in loop, finche' la musica suona.
     const clips = this.clips;
     if (!clips) return;
-    const dancing = state?.active && this._dancing && this.body?.mode === 'stand';
+    const dancing = state?.active && this._dancing && this.form === 'vrm' && this.body?.mode === 'stand';
     const current = clips.active?.clip;
     if (dancing && !current && clips.has('dance')) clips.playRole('dance', { loop: true });
     else if (!dancing && current?.role === 'dance' && !clips.active.stopping) clips.stop();
@@ -538,6 +816,7 @@ export class VrmStage {
 
   /** Dove sta la testa, in pixel della finestra: da li' salgono le "zeta" del sonno. */
   headScreen() {
+    if (this.form === 'flame' && this.framed) return this._toScreen(this.flame.topWorld());
     const head = this.vrm?.humanoid.getNormalizedBoneNode('head');
     if (!head) return null;
     this._headPoint ??= new THREE.Vector3();
@@ -551,6 +830,11 @@ export class VrmStage {
    * al cambiare della scala.
    */
   _computeAnchors() {
+    if (this.form === 'flame') {
+      // La fiammella poggia col fondo: piedi e seduta coincidono (su una finestra ci sta sopra).
+      const base = this._toScreen(this.flame.home.clone());
+      return { feet: base.y / window.innerHeight, seat: base.y / window.innerHeight, center: base.x / window.innerWidth };
+    }
     const body = this.body;
     const hips = body.restPoint('hips');
     const feet = this._toScreen(new THREE.Vector3(hips.x, this.floorY, hips.z));
@@ -568,6 +852,11 @@ export class VrmStage {
    * aprono ai suoi lati e lo seguono (in piedi, seduta, sdraiata).
    */
   hudFrame() {
+    if (!this.framed) return null;
+    if (this.form === 'flame') {
+      const center = this._toScreen(this.flame.centerWorld());
+      return { cx: center.x, cy: center.y };
+    }
     if (!this.vrm) return null;
     const bone = (name) => this.vrm.humanoid.getNormalizedBoneNode(name);
     const chest = bone('upperChest') ?? bone('chest') ?? bone('spine');
@@ -585,6 +874,10 @@ export class VrmStage {
    * Restituisce la reazione (`pat`, `flinch`) o `null`.
    */
   poke(px, py) {
+    if (this.form === 'flame' && this.framed) {
+      const center = this._toScreen(this.flame.centerWorld());
+      return this.flame.poke(py < center.y ? 'head' : 'body');
+    }
     if (!this.body || !this.vrm) return null;
     const neck = this.vrm.humanoid.getNormalizedBoneNode('neck') ?? this.vrm.humanoid.getNormalizedBoneNode('head');
     const neckY = neck ? this._toScreen(neck.getWorldPosition(new THREE.Vector3())).y : -Infinity;
@@ -823,7 +1116,18 @@ export class VrmStage {
   /** Quanti frame al secondo servono adesso (vedi FPS). */
   targetFps() {
     const body = this.body;
-    if (!body) return FPS.calm;
+    if (!this.framed) return FPS.calm;
+    if (this.form === 'flame' || this._morph) {
+      const lively =
+        this._morph ||
+        this.flame.busy ||
+        this._speech.playing ||
+        this._listening ||
+        this.elapsed - this._pointerMovedAt < 1.5 ||
+        this._music?.active;
+      if (lively) return FPS.active;
+      return this._sleep > 0.9 ? FPS.asleep : FPS.calm;
+    }
     const moving =
       this._speech.playing ||
       this.elapsed - this._pointerMovedAt < 1.5 ||
@@ -860,16 +1164,34 @@ export class VrmStage {
     }
 
     this._updateCamera(dt);
+    this._updateMorph(dt);
 
     // Le ancore si misurano a camera ferma, subito dopo il suo aggiornamento.
-    if (this._anchorsDirty && this.body && this.onAnchors) {
+    if (this._anchorsDirty && (this.body || this.spiritOnly) && this.onAnchors) {
       if (Math.abs(this.orbit.distance - this.orbit.targetDistance) < 1e-3) {
         this._anchorsDirty = false;
         this.onAnchors(this._computeAnchors());
       }
     }
 
-    if (this.vrm) {
+    if (this.framed && this.flame.root.visible) {
+      this.flame.update(dt, {
+        speaking: this._speech.playing,
+        level: this._speech.level,
+        thinking: this._thinking,
+        working: this._working,
+        listening: this._listening,
+        sleep: this._sleep,
+        look: this._flameLook(),
+        music: this._music,
+      });
+    } else if (this.flame.fx.active) {
+      // Lampo e anelli dell'ingresso nel corpo finiscono anche a fiammella sparita.
+      this.flame.fx.update(dt);
+    }
+
+    // Il corpo nascosto dietro la fiammella non si anima: risparmia la CPU.
+    if (this.vrm && this.avatarRoot?.visible) {
       this.body.update(dt, {
         speaking: this._speech.playing,
         level: this._speech.level,
@@ -896,7 +1218,7 @@ export class VrmStage {
       if (mouth && this.mouthDriver.kind === 'morph') this._applyMouthMorphs(mouth);
     }
     // Il tablet/tastiera olografici seguono le mani appena posate.
-    this.holo.update(dt, this.vrm, this.body?.workWeights ?? null);
+    this.holo.update(dt, this.vrm, this.form === 'vrm' && !this._morph ? (this.body?.workWeights ?? null) : null);
     this._updateShadow();
 
     this.renderer.render(this.scene, this.camera);
@@ -905,6 +1227,22 @@ export class VrmStage {
     // se il cursore e' su un pixel del personaggio o sul vuoto trasparente.
     this.lastAlpha = this._sampleAlphaUnderPointer();
     this.pointerOnAvatar = this.lastAlpha > 0.12;
+  }
+
+  /**
+   * Dove guarda la fiammella, da -1 a 1 sui due assi: verso il cursore, anche
+   * fuori dalla finestra. Dopo qualche secondo di cursore fermo si guarda intorno.
+   */
+  _flameLook() {
+    this._flameCenter ??= new THREE.Vector3();
+    const center = this._toScreen(this.flame.centerWorld(this._flameCenter));
+    if (this.elapsed - this._pointerMovedAt < GAZE_ATTENTION) {
+      return {
+        x: THREE.MathUtils.clamp((this.gazePx.x - center.x) / (window.innerWidth * 0.9), -1, 1),
+        y: THREE.MathUtils.clamp(-(this.gazePx.y - center.y) / (window.innerHeight * 0.6), -1, 1),
+      };
+    }
+    return { x: Math.sin(this.elapsed * 0.37) * 0.35, y: Math.sin(this.elapsed * 0.23) * 0.15 };
   }
 
   _updateCamera(dt) {

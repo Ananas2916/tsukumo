@@ -161,6 +161,88 @@ def describe_codex_item(item: dict[str, Any]) -> Activity | None:
 
 
 # ---------------------------------------------------------------------------
+# Antigravity
+# ---------------------------------------------------------------------------
+_ANTIGRAVITY_KIND = {
+    "view_file": "read",
+    "read_resource": "read",
+    "list_resources": "search",
+    "list_dir": "search",
+    "find_by_name": "search",
+    "grep_search": "search",
+    "write_to_file": "write",
+    "replace_file_content": "write",
+    "multi_replace_file_content": "write",
+    "sed_file": "write",
+    "notebook_edit": "write",
+    "run_command": "run",
+    "send_command_input": "run",
+    "notebook_execution": "run",
+    "search_web": "web",
+    "read_url_content": "web",
+    "open_browser_url": "web",
+    "invoke_subagent": "agent",
+    "browser_subagent": "agent",
+    "define_subagent": "agent",
+    "manage_subagents": "agent",
+    "manage_task": "plan",
+    "schedule": "plan",
+}
+
+_ANTIGRAVITY_SILENT = frozenset(
+    {
+        "finish", "wait", "wait_5_seconds", "command_status", "ask_permission", "ask_custom_permission",
+        "list_permissions", "ask_question", "send_message", "manage_inbox",
+    }
+)
+
+
+def describe_antigravity_tool(name: str, params: dict[str, Any] | None) -> Activity | None:
+    """Un passo ``tool`` di ``agy --output-format stream-json`` (nome e ``tool_info.parameters``).
+
+    I parametri hanno nomi in PascalCase (``CommandLine``, ``TargetFile``...): si
+    cercano per parola chiave invece che per nome esatto.
+    """
+    key = name.lower()
+    if key in _ANTIGRAVITY_SILENT:
+        return None
+    lowered = {str(k).lower(): v for k, v in (params or {}).items()}
+
+    def pick(*words: str) -> str:
+        return str(next((v for k, v in lowered.items() if v and any(w in k for w in words)), ""))
+
+    if key == "call_mcp_tool":
+        return _mcp(pick("server"), pick("tool", "name"))
+    kind = _ANTIGRAVITY_KIND.get(key, "web" if "browser" in key else "tool")
+    path = pick("path", "file")
+    if kind == "read":
+        return Activity("read", f"legge {_short(_name(path)) or 'un file'}", path, name)
+    if kind == "write":
+        return Activity("write", f"modifica {_short(_name(path)) or 'un file'}", path, name)
+    if kind == "search":
+        query = pick("query", "pattern")
+        if query:
+            return Activity("search", f"cerca «{_short(query, 28)}»", query, name)
+        return Activity("search", f"guarda la cartella {_short(_name(path))}".rstrip(), path, name)
+    if kind == "run":
+        command = pick("commandline", "command")
+        words = _command_words(command)
+        return Activity("run", f"esegue {_short(words, 28)}" if words else "esegue un comando", command, name)
+    if kind == "web":
+        query = pick("query")
+        if query:
+            return Activity("web", f"cerca in rete «{_short(query, 30)}»", query, name)
+        url = pick("url")
+        host = _host(url)
+        return Activity("web", f"apre {host}" if host else "naviga in rete", url, name)
+    if kind == "agent":
+        return Activity("agent", "passa un compito a un aiutante", "", name)
+    if kind == "plan":
+        return Activity("plan", "organizza il lavoro", "", name)
+    return Activity("tool", f"usa {_short(name.replace('_', ' '), 28)}", "", name)
+
+
+# ---------------------------------------------------------------------------
 # OpenClaw
 # ---------------------------------------------------------------------------
 _OPENCLAW_KIND = {

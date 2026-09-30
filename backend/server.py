@@ -26,6 +26,7 @@ Server -> client::
     {"type": "gesture", "name": "yawn"}      # un gesto che accompagna un commento spontaneo
     {"type": "preferences", ...}             # quanto chiacchiera e di cosa
     {"type": "notify", "source": "claude", "title": "Claude Code", ...}  # un agente esterno ha finito
+    {"type": "usage", "agents": [...]}      # consumi e limiti di Claude Code, Codex, Antigravity
     {"type": "capture", "text": "..."}       # "guarda lo schermo": fai uno screenshot
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "user",   "text": "..."}
@@ -55,10 +56,13 @@ import importlib.util
 import json
 import logging
 import os
+import subprocess
+import sys
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +91,7 @@ from .reminders import (
 )
 from .reminders import Reminder as ReminderItem
 from .memory import MemoryStore
+from .music import MusicService, SpotifyError
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
 from .phonemes import VISEME_BLENDSHAPES
@@ -94,6 +99,9 @@ from .pipeline import Companion
 from .providers import REGISTRIES, ProviderSpec, describe_all
 from .status import EngineMonitor, llm_entry
 from .tts import build_tts_engine
+from .usage import UsageService
+from .usage import describe as describe_usage
+from .usage import wants_usage
 from .vocals import EVENTS as VOCAL_EVENTS
 from .weather import WeatherService
 
@@ -115,6 +123,24 @@ NEWS = NewsService()
 #: Timer e promemoria, salvati in state/reminders.json (vedi reminders.py).
 REMINDERS = ReminderStore(SETTINGS.state_dir / "reminders.json")
 MEMORY = MemoryStore(SETTINGS.state_dir / "memory.json")
+
+#: Consumi e limiti degli agenti usati per conto tuo (usage.py): solo file locali.
+USAGE = UsageService(SETTINGS.state_dir, linked=agent_notify.statusline_installed)
+#: Ogni quanto rileggere i consumi (s): i limiti si muovono a ogni risposta dell'agente.
+USAGE_INTERVAL = 60.0
+
+
+async def _music_changed(status: dict[str, Any]) -> None:
+    await _broadcast({"type": "music", **status})
+
+
+#: Spotify e i gusti musicali (state/spotify.json, state/music_taste.json).
+#: Spotify accetta solo 127.0.0.1 come indirizzo di ritorno locale, non "localhost".
+MUSIC = MusicService(
+    SETTINGS.state_dir,
+    redirect_uri=f"http://127.0.0.1:{SETTINGS.port}/api/music/spotify/callback",
+    on_change=_music_changed,
+)
 #: Sveglia il pianificatore quando cambia qualcosa (creato nel loop giusto, all'avvio).
 _reminders_wake: asyncio.Event | None = None
 
@@ -124,6 +150,10 @@ SCREEN_CLIENTS: set[WebSocket] = set()
 #: Cervelli trovati sul PC (vedi ``llm/detect.py``): ``{id: {"found", "detail"}}``.
 #: Si riempie in background poco dopo l'avvio; prima e' vuoto.
 DETECTED: dict[str, dict[str, Any]] = {}
+#: Il riconoscimento e' finito: la presentazione lo aspetta prima di dire "non ho trovato niente".
+DETECTION_DONE = asyncio.Event()
+#: L'ascolto acceso dalla presentazione (installa, sceglie, prepara il modello): stato per il pannello.
+LISTENING_JOB: dict[str, Any] = {"state": "idle", "detail": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +225,7 @@ PROACTIVE = Proactive(
     broadcast=_broadcast,
     weather=WEATHER,
     news=NEWS,
+    usage=lambda: USAGE.latest,
 )
 
 
@@ -221,10 +252,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _reminders_wake = asyncio.Event()
     _write_running_marker()
     reminder_task = asyncio.create_task(_reminder_loop(), name="reminders")
+    await MUSIC.start()
     if SETTINGS.proactive:
         await PROACTIVE.start()
     if SETTINGS.detect_engines:
         _spawn(_detect_engines(), report=False)
+    else:
+        DETECTION_DONE.set()
+    usage_task = asyncio.create_task(_usage_loop(), name="usage")
 
     companion = app.state.companion
     logger.info(
@@ -238,10 +273,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        reminder_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await reminder_task
+        for task in (reminder_task, usage_task):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         await PROACTIVE.stop()
+        await MUSIC.stop()
         _running_marker().unlink(missing_ok=True)
         await monitor.stop()
         await app.state.companion.close()
@@ -292,7 +329,7 @@ class NotifyRequest(BaseModel):
 
 
 class IntegrationRequest(BaseModel):
-    tool: str = Field(..., description="claude oppure codex")
+    tool: str = Field(..., description="claude, codex oppure claude_usage (la barra di stato)")
     action: str = Field(..., description="install oppure uninstall")
 
 
@@ -544,7 +581,8 @@ async def set_provider(request: ProviderRequest) -> dict[str, Any]:
     save_dotenv(updates)
 
     instance = companion()
-    instance.cancel()  # un turno a meta' userebbe il motore che stiamo per chiudere
+    if kind != "stt":  # l'ascolto non c'entra coi turni: la risposta in corso resta
+        instance.cancel()  # un turno a meta' userebbe il motore che stiamo per chiudere
     try:
         new_settings = Settings.from_env()
         async with instance._turn_lock:
@@ -562,6 +600,29 @@ async def set_provider(request: ProviderRequest) -> dict[str, Any]:
         "provider": spec.id,
         "options": SETTINGS.provider_public(kind),
     }
+
+
+@app.post("/api/providers/options")
+async def save_provider_options(request: ProviderRequest) -> dict[str, Any]:
+    """Salva i campi di un motore (una chiave, un modello) *senza* attivarlo.
+
+    Serve a chi usa un motore di passaggio, come il cervello delle chiacchiere:
+    la chiave di OpenRouter si salva senza che OpenRouter diventi il cervello
+    principale. Il motore attivo non si tocca: per quello c'e' ``/api/providers``.
+    """
+    global SETTINGS
+
+    spec = _spec_or_400(request.kind, request.provider)
+    options = _request_options(spec, request.options)
+    if spec.id == SETTINGS.selected(request.kind):
+        raise HTTPException(status_code=400, detail=f"{spec.label} e' il motore attivo: si cambia da Motori.")
+    if options:
+        save_dotenv({f"DC_{name}": value for name, value in options.items()})
+        SETTINGS = dataclasses.replace(SETTINGS, provider_options=Settings.from_env().provider_options)
+        instance = companion()
+        instance.settings = dataclasses.replace(instance.settings, provider_options=SETTINGS.provider_options)
+        await _announce_providers(request.kind, instance)
+    return {"ok": True, "kind": request.kind, "provider": spec.id, "saved": _saved_options(request.kind)[spec.id]}
 
 
 async def _engine_changed(kind: str, instance: Companion, new_settings: Settings, old: object | None) -> None:
@@ -597,15 +658,45 @@ def _llm_chosen() -> bool:
 
 
 async def _detect_engines() -> None:
-    """Cerca i cervelli sul PC; se nessuno ne ha scelto uno, usa il primo trovato."""
+    """Cerca i cervelli sul PC; se nessuno ne ha scelto uno, usa il primo trovato.
+
+    Lo stesso per l'ascolto: se Faster-Whisper e' installato e nessuno ha
+    scelto, si accende da solo (il modello si carica alla prima frase).
+    """
     global DETECTED
 
-    DETECTED = await detect_all(lambda provider: SETTINGS.provider_config("llm", provider))
-    found = candidates(DETECTED)
-    logger.info("Cervelli trovati sul PC: %s", ", ".join(found) or "nessuno")
-    if await _auto_select_llm(found) is None:
-        # Nessun cambio: il pannello deve comunque vedere i badge.
-        await _announce_providers("llm", _current())
+    try:
+        DETECTED = await detect_all(lambda provider: SETTINGS.provider_config("llm", provider))
+        found = candidates(DETECTED)
+        logger.info("Cervelli trovati sul PC: %s", ", ".join(found) or "nessuno")
+        if await _auto_select_llm(found) is None:
+            # Nessun cambio: il pannello deve comunque vedere i badge.
+            await _announce_providers("llm", _current())
+        await _auto_select_stt()
+    finally:
+        DETECTION_DONE.set()
+
+
+def _stt_chosen() -> bool:
+    return bool(os.environ.get(SELECT_KEYS["stt"], "").strip())
+
+
+def _whisper_installed() -> bool:
+    return importlib.util.find_spec("faster_whisper") is not None
+
+
+async def _auto_select_stt() -> str | None:
+    """Accende Faster-Whisper se c'e' e nessuno ha scelto l'ascolto (nemmeno "spento")."""
+    instance = _current()
+    if instance is None or _stt_chosen() or SETTINGS.selected("stt") != "none":
+        return None
+    if not await asyncio.to_thread(_whisper_installed):
+        return None
+    result = await set_provider(ProviderRequest(kind="stt", provider="faster_whisper", options={}))
+    if result.get("ok"):
+        logger.info("Ascolto acceso in automatico: faster_whisper (salvato nel .env)")
+        return "faster_whisper"
+    return None
 
 
 async def _auto_select_llm(found: list[str]) -> str | None:
@@ -731,6 +822,34 @@ def _attach(instance: Companion) -> None:
     instance.memory = MEMORY
     instance.on_memory_changed = _memory_changed
     instance.screen_capture = _request_screen
+    instance.music = MUSIC
+    instance.usage_reply = _usage_reply
+
+
+async def _usage_reply(prompt: str, lang: str) -> str | None:
+    """ "Quanto mi resta di Claude?": si risponde dai file, senza cervello."""
+    only = wants_usage(prompt)
+    if only is None:
+        return None
+    snapshot = await asyncio.to_thread(USAGE.snapshot, True)
+    return describe_usage(snapshot, lang, only)
+
+
+async def _usage_loop() -> None:
+    """Rilegge i consumi degli agenti ogni minuto; se sono cambiati li manda a tutti."""
+    last = None
+    while True:
+        try:
+            snapshot = await asyncio.to_thread(USAGE.snapshot, True)
+            key = json.dumps(snapshot["agents"], sort_keys=True, default=str)
+            if key != last:
+                last = key
+                await hub.broadcast({"type": "usage", **snapshot})
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # pragma: no cover - non deve mai morire
+            logger.exception("Consumi degli agenti")
+        await asyncio.sleep(USAGE_INTERVAL)
 
 
 async def _request_screen(text: str) -> bool:
@@ -967,8 +1086,103 @@ async def set_integration(request: IntegrationRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Richiesta non valida: {exc}") from exc
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc), "status": await asyncio.to_thread(agent_notify.status)}
-    logger.info("Avvisi da %s: %s", request.tool, result)
+    logger.info("Collegamento %s: %s", request.tool, result)
+    if request.tool == "claude_usage":
+        # La scheda Lavoro mostra subito "collegata, aspetto la prossima risposta".
+        await hub.broadcast({"type": "usage", **await asyncio.to_thread(USAGE.snapshot, True)})
     return {"ok": True, "result": result, "status": await asyncio.to_thread(agent_notify.status)}
+
+
+# ---------------------------------------------------------------------------
+# Consumi degli agenti
+# ---------------------------------------------------------------------------
+@app.get("/api/usage")
+async def get_usage() -> dict[str, Any]:
+    """Limiti del piano e token di oggi di Claude Code, Codex e Antigravity (vedi usage.py)."""
+    return await asyncio.to_thread(USAGE.snapshot, True)
+
+
+# ---------------------------------------------------------------------------
+# Primo avvio: "ti preparo tutto"
+# ---------------------------------------------------------------------------
+@app.get("/api/setup")
+async def setup_status(wait: float = 0) -> dict[str, Any]:
+    """Cosa e' pronto e cosa manca, per la presentazione.
+
+    Con ``wait`` aspetta (al massimo tanti secondi) che finisca il
+    riconoscimento dei cervelli: appena installata, la presentazione
+    arriva prima che il backend abbia guardato cosa c'e' sul PC.
+    """
+    if wait > 0 and not DETECTION_DONE.is_set():
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(DETECTION_DONE.wait(), timeout=min(wait, 20.0))
+    stt = SETTINGS.selected("stt")
+    return {
+        "detecting": not DETECTION_DONE.is_set(),
+        "brain": {
+            "selected": SETTINGS.selected("llm"),
+            "found": [pid for pid, result in DETECTED.items() if (result or {}).get("found")],
+        },
+        "listening": {
+            "selected": stt,
+            "on": stt != "none",
+            "local": await asyncio.to_thread(_whisper_installed),
+            "job": dict(LISTENING_JOB),
+        },
+        "integrations": await asyncio.to_thread(agent_notify.status),
+        "engines": monitor.status,
+    }
+
+
+@app.post("/api/setup/listening")
+async def setup_listening() -> dict[str, Any]:
+    """Accende l'ascolto sul PC: installa Faster-Whisper se manca, lo sceglie e prepara il modello.
+
+    Scarica qualche centinaio di MB (pacchetto e modello), quindi solo quando
+    lo chiedi. Come va si segue da ``GET /api/setup`` (``listening.job``).
+    """
+    if LISTENING_JOB["state"] not in ("installing", "selecting", "loading"):
+        LISTENING_JOB.update(state="selecting", detail="Un attimo…")
+        _spawn(_enable_listening(), report=False)
+    return {"ok": True, "job": dict(LISTENING_JOB)}
+
+
+def _pip_install(package: str) -> tuple[int, str]:
+    """``pip install`` nell'interprete del backend (il venv, o il Python dell'app installata)."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", package],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+        creationflags=flags,
+    )
+    return result.returncode, (result.stdout + result.stderr)[-2000:]
+
+
+async def _enable_listening() -> None:
+    try:
+        if not await asyncio.to_thread(_whisper_installed):
+            LISTENING_JOB.update(state="installing", detail="Installo Faster-Whisper (una volta sola, qualche minuto)…")
+            code, output = await asyncio.to_thread(_pip_install, "faster-whisper")
+            importlib.invalidate_caches()
+            if code != 0 or not _whisper_installed():
+                lines = [line for line in output.splitlines() if line.strip()]
+                raise RuntimeError(lines[-1] if lines else "pip non è riuscito a installarlo")
+        if SETTINGS.selected("stt") != "faster_whisper":
+            LISTENING_JOB.update(state="selecting", detail="La accendo…")
+            result = await set_provider(ProviderRequest(kind="stt", provider="faster_whisper", options={}))
+            if not result.get("ok"):
+                raise RuntimeError(result.get("error") or "non parte")
+        engine = companion().stt
+        if engine is not None:
+            LISTENING_JOB.update(state="loading", detail="Preparo il modello (la prima volta lo scarico)…")
+            await asyncio.to_thread(engine.prepare)
+        LISTENING_JOB.update(state="done", detail="Ti sento: premi Ctrl+Spazio e parlami.")
+        logger.info("Ascolto acceso dalla presentazione")
+    except Exception as exc:
+        LISTENING_JOB.update(state="error", detail=describe_error(exc))
+        logger.warning("Ascolto non acceso: %s", LISTENING_JOB["detail"])
 
 
 # ---------------------------------------------------------------------------
@@ -976,7 +1190,8 @@ async def set_integration(request: IntegrationRequest) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @app.get("/api/preferences")
 async def get_preferences() -> dict[str, Any]:
-    return PREFERENCES.as_dict()
+    # brainError: perche' il cervello delle chiacchiere tace (chiave, modelli saturi).
+    return {**PREFERENCES.as_dict(), "brainError": PROACTIVE.status()["brainError"]}
 
 
 @app.post("/api/preferences")
@@ -994,6 +1209,72 @@ async def get_weather() -> dict[str, Any]:
     language = instance.voice_language if instance else SETTINGS.system_language
     weather = await WEATHER.get(PREFERENCES.city, language)
     return {"ok": weather is not None, "weather": weather.as_dict() if weather else None}
+
+
+# ---------------------------------------------------------------------------
+# Musica (Spotify)
+# ---------------------------------------------------------------------------
+class SpotifySetupRequest(BaseModel):
+    clientId: str = Field(max_length=64)
+
+
+@app.get("/api/music")
+async def get_music() -> dict[str, Any]:
+    """Spotify collegato o no, cosa suona (dall'ultimo controllo) e i gusti imparati."""
+    return MUSIC.status()
+
+
+@app.post("/api/music/spotify/setup")
+async def spotify_setup(request: SpotifySetupRequest) -> dict[str, Any]:
+    """Salva il Client ID e restituisce la pagina di Spotify dove dare il permesso."""
+    try:
+        MUSIC.spotify.set_client_id(request.clientId)
+        return {"authorizeUrl": MUSIC.spotify.authorize_url(MUSIC.redirect_uri)}
+    except (ValueError, SpotifyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/music/spotify/callback", response_class=HTMLResponse)
+async def spotify_callback(code: str = "", state: str = "", error: str = "") -> HTMLResponse:
+    """Spotify rimanda qui il browser dopo il permesso: si prendono i token e si avvisa il pannello."""
+    if error:
+        message = "Hai negato il permesso: Spotify non è collegato." if error == "access_denied" else f"Spotify ha risposto: {error}"
+        return HTMLResponse(_music_page(False, message))
+    try:
+        user = await MUSIC.spotify.finish(code, state, MUSIC.redirect_uri)
+    except (SpotifyError, httpx.HTTPError) as exc:
+        return HTMLResponse(_music_page(False, f"Collegamento non riuscito: {exc}"))
+    _spawn(MUSIC.refresh(), report=False)
+    await _music_changed(MUSIC.status())
+    return HTMLResponse(_music_page(True, f"Spotify è collegato{f' come {user}' if user else ''}. Puoi chiudere questa scheda."))
+
+
+@app.post("/api/music/spotify/disconnect")
+async def spotify_disconnect() -> dict[str, Any]:
+    MUSIC.spotify.disconnect()
+    MUSIC.now = None
+    await _music_changed(MUSIC.status())
+    return MUSIC.status()
+
+
+@app.post("/api/music/taste/forget")
+async def forget_taste() -> dict[str, Any]:
+    MUSIC.taste.forget()
+    await _music_changed(MUSIC.status())
+    return MUSIC.status()
+
+
+def _music_page(ok: bool, message: str) -> str:
+    """La pagina che resta nel browser dopo il collegamento."""
+    color = "#1db954" if ok else "#e5534b"
+    return (
+        "<!doctype html><html lang='it'><head><meta charset='utf-8'><title>Tsukumo e Spotify</title>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+        "<body style='margin:0;min-height:100vh;display:grid;place-items:center;background:#121418;"
+        "color:#e8e8ea;font:16px system-ui,sans-serif'><main style='max-width:420px;padding:24px;text-align:center'>"
+        f"<div style='width:14px;height:14px;border-radius:50%;background:{color};margin:0 auto 16px'></div>"
+        f"<p>{escape(message)}</p></main></body></html>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1105,6 +1386,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "reminders": [item.as_dict() for item in REMINDERS.all()],
                 "memory": MEMORY.as_dict(),
                 "animations": _animations_info(),
+                "usage": USAGE.latest,
             }
         )
 

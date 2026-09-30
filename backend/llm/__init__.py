@@ -7,9 +7,11 @@ import logging
 from pathlib import Path
 
 from ..config import Settings
+from ..provider_specs import CLI_AGENT_PRESETS
 from ..providers import LLM_REGISTRY
 from .base import LLMClient, Message, describe_error
-from .cli_agents import ClaudeCodeClient, CodexClient, CommandAgentClient
+from .cli_agents import AntigravityClient, ClaudeCodeClient, CodexClient, CommandAgentClient
+from .fallback import FallbackLLM
 from .mock import MockLLM
 from .ollama import OllamaClient
 from .openai_compatible import OpenAICompatibleClient
@@ -24,9 +26,12 @@ __all__ = [
     "OllamaClient",
     "OpenAICompatibleClient",
     "OpenClawClient",
+    "AntigravityClient",
     "ClaudeCodeClient",
     "CodexClient",
     "CommandAgentClient",
+    "FallbackLLM",
+    "create_chatter_llm",
     "create_llm_client",
     "describe_error",
 ]
@@ -65,15 +70,20 @@ def _number(value: object, default: float) -> float:
         return default
 
 
-def create_llm_client(settings: Settings, backend: str | None = None) -> LLMClient:
+def create_llm_client(
+    settings: Settings,
+    backend: str | None = None,
+    overrides: dict[str, object] | None = None,
+) -> LLMClient:
     """Istanzia il motore indicato da ``DC_LLM_BACKEND`` (o da ``backend``).
 
     Il nome viene normalizzato dal registro dei provider, quindi gli alias
     storici (``lmstudio``, ``claude``, ``offline``, ...) continuano a valere.
+    ``overrides`` sostituisce alcuni campi salvati (per esempio il modello).
     """
     requested = backend or settings.llm_backend
     backend = LLM_REGISTRY.resolve(requested) or (requested or "ollama").lower()
-    options = settings.provider_config("llm", backend)
+    options = {**settings.provider_config("llm", backend), **(overrides or {})}
     state = settings.state_dir
 
     if backend == "mock":
@@ -216,6 +226,32 @@ def create_llm_client(settings: Settings, backend: str | None = None) -> LLMClie
         logger.info("Backend LLM: Codex (%s)", client.executable or "non trovato")
         return client
 
+    if backend == "antigravity":
+        client = AntigravityClient(
+            command=str(options.get("ANTIGRAVITY_COMMAND") or ""),
+            model=str(options.get("ANTIGRAVITY_MODEL") or ""),
+            cwd=str(options.get("ANTIGRAVITY_CWD") or ""),
+            permission=str(options.get("ANTIGRAVITY_PERMISSION") or "default"),
+            timeout=_number(options.get("ANTIGRAVITY_TIMEOUT"), 300.0),
+            session_path=state / "antigravity_session.json",
+        )
+        logger.info("Backend LLM: Antigravity (%s)", client.executable or "non trovato")
+        return client
+
+    if backend in CLI_AGENT_PRESETS:
+        # Cline, Gemini CLI, Cursor...: un comando gia' pronto, modificabile dal pannello.
+        prefix = backend.upper()
+        command = str(options.get(f"{prefix}_COMMAND") or CLI_AGENT_PRESETS[backend])
+        spec = LLM_REGISTRY.get(backend)
+        logger.info("Backend LLM: %s (%r)", backend, command)
+        return CommandAgentClient(
+            command=command,
+            cwd=str(options.get(f"{prefix}_CWD") or ""),
+            timeout=_number(options.get(f"{prefix}_TIMEOUT"), 300.0),
+            name=backend,
+            label=spec.label if spec else backend,
+        )
+
     if backend == "command":
         command = str(options.get("AGENT_COMMAND") or "")
         if not command.strip():
@@ -228,3 +264,26 @@ def create_llm_client(settings: Settings, backend: str | None = None) -> LLMClie
         )
 
     raise ValueError(f"Backend LLM sconosciuto: {requested!r}")
+
+
+#: Chi puo' scrivere le chiacchiere: i modelli, non gli agenti (che tengono
+#: una sessione loro e costano un turno intero a ogni commento).
+CHATTER_CATEGORIES = ("cloud", "local")
+
+
+def create_chatter_llm(settings: Settings, backend: str, models: str = "") -> LLMClient:
+    """Il cervello delle chiacchiere: un modello cloud o locale, di solito economico.
+
+    ``models`` e' una fila separata da virgole (``a:free, b:free``): se il primo
+    non risponde si prova il secondo. Vuota = il modello salvato per quel motore.
+    La chiave e gli altri campi sono quelli del motore, gli stessi della scheda Motori.
+    """
+    spec = LLM_REGISTRY.get(LLM_REGISTRY.resolve(backend) or backend)
+    if spec is None or spec.category not in CHATTER_CATEGORIES:
+        raise ValueError(f"{backend!r} non puo' scrivere le chiacchiere: serve un modello cloud o locale.")
+    model_env = next((f.env for f in spec.fields if f.env.endswith("_MODEL")), None)
+    names = [name.strip() for name in models.split(",") if name.strip()]
+    if model_env is None or not names:
+        return create_llm_client(settings, spec.id)
+    clients = [create_llm_client(settings, spec.id, overrides={model_env: name}) for name in names]
+    return clients[0] if len(clients) == 1 else FallbackLLM(clients, name=spec.id)

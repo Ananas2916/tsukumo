@@ -64,6 +64,10 @@ class FasterWhisperSTT(STTEngine):
         list(model.transcribe(probe, beam_size=1)[0])
         return model
 
+    def prepare(self) -> None:
+        with self._lock:
+            self._ensure_model()
+
     def _ensure_model(self):
         """Carica il modello alla prima richiesta, una volta sola."""
         if self._model is not None:

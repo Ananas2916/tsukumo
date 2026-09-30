@@ -20,13 +20,16 @@ from typing import Any
 
 import httpx
 
-from .cli_agents import find_codex, resolve_executable
+from ..provider_specs import CLI_AGENT_PRESETS
+from .cli_agents import find_antigravity, find_codex, resolve_executable, split_command
 
 logger = logging.getLogger(__name__)
 
 #: Ordine di preferenza per la scelta automatica: prima gli agenti, che hanno
-#: memoria e strumenti propri, poi i modelli locali.
-AUTO_ORDER = ("claude_code", "codex", "openclaw", "ollama", "openai")
+#: memoria e strumenti propri, poi i modelli locali. Gli agenti "a comando"
+#: (Cline, Gemini CLI...) si riconoscono ma non si scelgono da soli: ripartono
+#: da zero a ogni messaggio.
+AUTO_ORDER = ("claude_code", "codex", "antigravity", "openclaw", "ollama", "openai")
 
 #: Quanto aspettare un servizio locale prima di darlo per spento.
 HTTP_TIMEOUT = 1.0
@@ -51,6 +54,23 @@ async def _claude_code(options: Mapping[str, Any], http: httpx.AsyncClient) -> R
 async def _codex(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
     path = await asyncio.to_thread(find_codex, str(options.get("CODEX_COMMAND") or ""))
     return _result(True, path) if path else _result(False, "codex non e' nel PATH ne' nelle estensioni dell'editor")
+
+
+async def _antigravity(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
+    path = await asyncio.to_thread(find_antigravity, str(options.get("ANTIGRAVITY_COMMAND") or ""))
+    return _result(True, path) if path else _result(False, "agy non e' nel PATH ne' in ~/.gemini/bin")
+
+
+def _preset(provider_id: str, default: str) -> Detector:
+    """Un agente "a comando": basta trovare il programma con cui comincia il comando."""
+
+    async def check(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
+        command = str(options.get(f"{provider_id.upper()}_COMMAND") or default)
+        program = (split_command(command) or [""])[0]
+        path = await asyncio.to_thread(resolve_executable, program)
+        return _result(True, path) if path else _result(False, f"{program} non e' nel PATH")
+
+    return check
 
 
 # ---------------------------------------------------------------------------
@@ -86,9 +106,11 @@ async def _openai(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result
 DETECTORS: dict[str, Detector] = {
     "claude_code": _claude_code,
     "codex": _codex,
+    "antigravity": _antigravity,
     "openclaw": _openclaw,
     "ollama": _ollama,
     "openai": _openai,
+    **{pid: _preset(pid, command) for pid, command in CLI_AGENT_PRESETS.items()},
 }
 
 
@@ -122,10 +144,14 @@ async def detect(
 
 async def detect_all(
     options_for: Callable[[str], Mapping[str, Any]],
-    providers: Iterable[str] = AUTO_ORDER,
+    providers: Iterable[str] | None = None,
 ) -> dict[str, Result]:
-    """Tutti i controlli in parallelo: in tutto circa un secondo, non cinque."""
-    ids = list(providers)
+    """Tutti i controlli in parallelo: in tutto circa un secondo, non cinque.
+
+    Senza ``providers`` controlla tutti i motori riconoscibili, per i badge
+    del pannello; la scelta automatica guarda poi solo ``AUTO_ORDER``.
+    """
+    ids = list(providers if providers is not None else DETECTORS)
     async with await _new_client() as http:
         results = await asyncio.gather(*(detect(pid, options_for(pid), http) for pid in ids))
     return dict(zip(ids, results))

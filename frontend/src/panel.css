@@ -226,7 +226,7 @@ body:not(:has(#window-actions:not(:empty))) .app {
 /* ------------------------------------------------------------- schede --- */
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   margin: 0 12px 10px;
   padding: 4px;
@@ -873,6 +873,10 @@ body:not(:has(#window-actions:not(:empty))) .app {
   gap: 4px 10px;
 }
 
+.row[hidden] {
+  display: none;
+}
+
 .row-label {
   color: var(--text-2);
   font-size: 12.5px;
@@ -1232,6 +1236,171 @@ textarea.field-input {
 .integration-text small {
   color: var(--muted);
   font-size: 11.5px;
+}
+
+/* ------------------------------------------------ lavoro: consumi agenti --- */
+.usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.usage-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.usage-agent .hint {
+  margin: 0;
+}
+
+.usage-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-head .spacer {
+  flex: 1;
+}
+
+.usage-head small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.usage-limit {
+  display: grid;
+  grid-template-columns: 70px 1fr 38px;
+  grid-template-areas: 'window bar value' '. reset reset';
+  align-items: center;
+  column-gap: 8px;
+}
+
+.usage-window {
+  grid-area: window;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.usage-bar {
+  grid-area: bar;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.usage-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.usage-value {
+  grid-area: value;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+}
+
+.usage-reset {
+  grid-area: reset;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.usage-today {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.usage-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* ------------------------------------------ presentazione: forma e setup --- */
+.welcome-forms {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.welcome-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+}
+
+.welcome-form svg {
+  color: var(--accent);
+}
+
+.welcome-form small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.welcome-form.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.setup-list {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.setup-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.setup-item input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.setup-item .integration-text small {
+  line-height: 1.35;
+}
+
+.setup-state {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.setup-state.ok {
+  color: var(--ok);
+}
+
+.setup-state.error {
+  color: var(--danger);
 }
 
 /* --------------------------------------------------------------- agenda --- */
@@ -1825,6 +1994,42 @@ textarea.field-input {
   font-weight: 500;
 }
 
+/* Musica (panel/music.js) */
+.music-setup,
+.music-connected {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.music-setup > .btn {
+  align-self: flex-start;
+}
+
+.music-steps {
+  padding-left: 18px;
+}
+
+.music-steps li + li {
+  margin-top: 4px;
+}
+
+.music-redirect {
+  font-size: 11px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.music-links {
+  display: flex;
+  gap: 14px;
+}
+
+.hidden.music-setup,
+.hidden.music-connected {
+  display: none;
+}
+
 /* Primo avvio (panel/welcome.js) */
 .welcome {
   position: absolute;
@@ -1946,6 +2151,12 @@ textarea.field-input {
   align-items: center;
   gap: 8px;
   margin-top: 16px;
+  /* Sempre in vista: i passi lunghi scorrono sotto i bottoni. */
+  position: sticky;
+  bottom: -14px;
+  margin-bottom: -14px;
+  padding: 10px 0 14px;
+  background: var(--surface);
 }
 
 .welcome-actions .spacer {

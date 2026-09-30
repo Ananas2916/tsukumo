@@ -23,6 +23,7 @@ from .audio import encode_wav_base64
 from .config import Settings
 from .languages import reply_language, short_language, speech_directive
 from .memory import MemoryStore, fact_from_tag, memory_command
+from .music import MusicService, is_music_tag
 from .llm import LLMClient, Message, MockLLM, create_llm_client, describe_error
 from .llm.base import Activity
 from .phonemes import phones_for
@@ -45,6 +46,9 @@ VOCAL_CACHE_SIZE = 64
 #: Un agente che lavora in silenzio dice "un attimo" dopo questi secondi,
 #: e "ancora un pochino" se il silenzio continua. Una volta ciascuno per turno.
 WORKING_CUES = ((7.0, "working"), (45.0, "working_long"))
+#: Quanti messaggi recenti vede il cervello delle chiacchiere: abbastanza per
+#: non ripetersi, pochi per non mandare a un servizio esterno la conversazione intera.
+CHATTER_HISTORY = 6
 
 #: Per quanto tempo una frase detta da lei puo' tornare indietro dal
 #: microfono (l'audio parte dopo la sintesi e le frasi si mettono in coda).
@@ -304,6 +308,17 @@ class Companion:
         self.on_memory_changed: Callable[[], Awaitable[None]] | None = None
         #: Chiede lo screenshot alla shell (vero se qualcuno puo' farlo): "guarda lo schermo".
         self.screen_capture: Callable[[str], Awaitable[bool]] | None = None
+        #: Spotify e i gusti musicali (li collega il server): "che genere e'?", "mettine di simili".
+        self.music: MusicService | None = None
+        #: "Quanto mi resta di Claude?": i consumi degli agenti (usage.py, lo collega il server).
+        #: Riceve (domanda, lingua), None se la domanda non e' questa.
+        self.usage_reply: Callable[[str, str], Awaitable[str | None]] | None = None
+        #: Avvisi da dire a turno finito (per esempio "serve Premium"): referenziati
+        #: finche' non partono, se no il garbage collector se li porta via.
+        self._followups: set[asyncio.Task] = set()
+        #: Cosa ha detto un altro cervello (le chiacchiere) che l'agente non sa:
+        #: glielo si racconta al turno dopo, se no "dimmi di piu'" cade nel vuoto.
+        self._asides: deque[str] = deque(maxlen=3)
 
     # ------------------------------------------------------------------
     # Motori
@@ -368,6 +383,7 @@ class Companion:
         hidden: bool = False,
         files: list[str] | None = None,
         screen: bool = False,
+        brain: LLMClient | None = None,
     ) -> str:
         """Ciclo completo: cervello in streaming + sintesi frase per frase.
 
@@ -375,7 +391,11 @@ class Companion:
         commento spontaneo) e non compare in chat; la risposta si'.
         ``files``: percorsi di file allegati (trascinati su di lei, screenshot);
         ``screen`` dice che l'allegato e' lo schermo.
+        ``brain``: un altro cervello per questo turno soltanto (le chiacchiere,
+        scritte da un modello economico invece che dall'agente). Se non
+        risponde il turno resta muto: niente errori a schermo, niente ripiego.
         """
+        llm = brain or self.llm
         attachments = prepare(files)
         prompt = (text or "").strip()
         if not prompt and attachments:
@@ -407,7 +427,13 @@ class Companion:
                 if local is not None:
                     return await self._finish_local(prompt, local, emit, turn, started)
 
-            messages = self._build_messages(prompt, attachments)
+            music_note = ""
+            if self.music is not None and not hidden and brain is None:
+                try:
+                    music_note = await self.music.directive(prompt)
+                except Exception as exc:  # la musica non deve mai fermare un turno
+                    logger.warning("Contesto musicale non disponibile: %s", exc)
+            messages = self._build_messages(prompt, attachments, llm, music_note)
             buffer = ""
             full_reply = ""
             spoken = 0
@@ -417,13 +443,13 @@ class Companion:
             # e se tace a lungo dice "un attimo" con la voce in uso.
             steps: list[dict[str, str]] = []
             activities: asyncio.Queue[Activity] = asyncio.Queue()
-            self.llm.on_activity = activities.put_nowait
+            llm.on_activity = activities.put_nowait
             helpers = [asyncio.create_task(self._pump_activities(activities, steps, emit, turn))]
-            if self.llm.stateful:
+            if llm.stateful:
                 helpers.append(asyncio.create_task(self._working_cues(emit, turn)))
 
             try:
-                async for raw_piece in self._cancellable(self._stream_with_fallback(messages, emit)):
+                async for raw_piece in self._cancellable(self._stream_with_fallback(messages, emit, llm)):
                     # Le etichette [[remind ...]] non si leggono ne' si mostrano.
                     piece = tags.feed(raw_piece)
                     if not piece:
@@ -457,25 +483,30 @@ class Companion:
                     for sentence in split_sentences(buffer, self.settings.max_sentence_chars):
                         spoken += await self._speak(sentence, emit, turn, spoken)
                 if full_reply.strip():
-                    self.last_errors.pop("llm", None)
-                await self._schedule_from_tags(tags.tags)
+                    self.last_errors.pop("chatter" if brain else "llm", None)
+                await self._schedule_from_tags(tags.tags, emit)
             except Exception as exc:
                 failed = True
                 logger.warning("Turno %s fallito: %s", turn, exc)
                 detail = describe_error(exc)
-                self.last_errors["llm"] = detail
-                await emit(
-                    {
-                        "type": "error",
-                        "source": "llm",
-                        "message": f"{self.llm_label} non ha risposto: {detail}",
-                        "hint": self._llm_hint(),
-                        "action": "engines",
-                        "turn": turn,
-                    }
-                )
+                if brain is not None:
+                    # Un commento spontaneo mancato non e' un guasto del cervello
+                    # principale: niente errore a schermo, solo lo stato.
+                    self.last_errors["chatter"] = detail
+                else:
+                    self.last_errors["llm"] = detail
+                    await emit(
+                        {
+                            "type": "error",
+                            "source": "llm",
+                            "message": f"{self.llm_label} non ha risposto: {detail}",
+                            "hint": self._llm_hint(),
+                            "action": "engines",
+                            "turn": turn,
+                        }
+                    )
             finally:
-                self.llm.on_activity = None
+                llm.on_activity = None
                 for helper in helpers:
                     helper.cancel()
                 await asyncio.gather(*helpers, return_exceptions=True)
@@ -488,6 +519,8 @@ class Companion:
                     self.history.append(Message("user", f"{prompt} [allegati: {names}]" if names else prompt))
                     self.history.append(Message("assistant", reply))
                     self._trim_history()
+                    if brain is not None and self.llm.stateful:
+                        self._asides.append(reply)
 
                 elapsed = round(time.perf_counter() - started, 3)
                 timings = {
@@ -673,6 +706,7 @@ class Companion:
     async def reset(self) -> None:
         """Dimentica la conversazione, qui e nel backend che la tiene."""
         self.history.clear()
+        self._asides.clear()
         await self.llm.reset()
 
     async def close(self) -> None:
@@ -684,36 +718,60 @@ class Companion:
     # ------------------------------------------------------------------
     # Interni
     # ------------------------------------------------------------------
-    def _build_messages(self, prompt: str, attachments: list[Attachment] | None = None) -> list[Message]:
+    def _build_messages(
+        self,
+        prompt: str,
+        attachments: list[Attachment] | None = None,
+        llm: LLMClient | None = None,
+        music_note: str = "",
+    ) -> list[Message]:
         # L'ULTIMO messaggio di sistema sono i vincoli del parlato (lingua,
         # testo semplice): gli agenti, che hanno una personalita' propria,
         # ricevono solo quello e non il nostro system prompt.
+        llm = llm or self.llm
         directive = speech_directive(self._reply_language())
         if self.memory is not None:
-            directive = f"{directive} {self.memory.directive(agent=self.llm.stateful)}"
+            directive = f"{directive} {self.memory.directive(agent=llm.stateful)}"
         if self.reminders is not None:
             directive = f"{directive} {action_directive()}"
+        if music_note:
+            # Cosa suona e cosa ti piace: solo quando si parla di musica.
+            directive = f"{directive} {music_note}"
         messages = [
             Message("system", self.settings.system_prompt),
             Message("system", directive),
         ]
-        if not self.llm.stateful:
+        if not llm.stateful:
             # Un agente ricorda da se': rimandargli la cronologia sprecherebbe
-            # contesto (e soldi, se e' a consumo).
-            messages.extend(self.history)
+            # contesto (e soldi, se e' a consumo). Al cervello delle chiacchiere
+            # bastano gli ultimi scambi: per non ripetersi, non per lavorare.
+            messages.extend(self.history if llm is self.llm else self.history[-CHATTER_HISTORY:])
+        elif llm is self.llm and self._asides:
+            said = " ".join(f"«{text}»" for text in self._asides)
+            self._asides.clear()
+            note = f"(Context, not from the user: meanwhile, on your own initiative, you told them {said})"
+            prompt = f"{note}\n\n{prompt}"
         if not attachments:
             messages.append(Message("user", prompt))
             return messages
         # Un agente apre i file da se' (gli servono i percorsi e il permesso di
         # leggerli); a un modello si manda il testo e le immagini nel messaggio.
-        content = with_paths(prompt, attachments) if self.llm.stateful else with_contents(prompt, attachments)
+        content = with_paths(prompt, attachments) if llm.stateful else with_contents(prompt, attachments)
         images = tuple(str(item.path) for item in attachments if item.kind == "image")
         folders = tuple(sorted({str(item.path.parent) for item in attachments}))
         messages.append(Message("user", content, images=images, folders=folders))
         return messages
 
     async def _local_reply(self, prompt: str) -> str | None:
-        """Timer, promemoria, "ricordati che...": senza cervello."""
+        """Timer, promemoria, "ricordati che...", "pausa la musica", "quanto mi resta di Claude?": senza cervello."""
+        if self.usage_reply is not None:
+            usage = await self.usage_reply(prompt, self.voice_language)
+            if usage is not None:
+                return usage
+        if self.music is not None:
+            played = await self.music.command(prompt, self.voice_language)
+            if played is not None:
+                return played
         if self.reminders is None:
             return await self._memory_reply(prompt)
         now = datetime.now()
@@ -767,10 +825,21 @@ class Companion:
         await emit({"type": "state", "value": "idle", "turn": turn})
         return reply
 
-    async def _schedule_from_tags(self, tags: list[str]) -> None:
+    async def _schedule_from_tags(self, tags: list[str], emit: Emit | None = None) -> None:
         """Le etichette [[remind ...]] del cervello diventano promemoria veri."""
         if not tags:
             return
+        # La musica chiesta dal cervello ([[music: ...]]).
+        music = [tag for tag in tags if is_music_tag(tag)]
+        if music:
+            tags = [tag for tag in tags if not is_music_tag(tag)]
+            problem = await self.music.run_tags(music) if self.music is not None else None
+            if problem and emit is not None:
+                # Il cervello ha gia' detto "ecco qualcosa di simile": se Spotify
+                # dice di no va detto a voce, appena finisce questo turno.
+                task = asyncio.create_task(self.announce(problem, emit))
+                self._followups.add(task)
+                task.add_done_callback(self._followups.discard)
         # I ricordi annotati dal cervello ([[remember: ...]]).
         remembered = [fact for fact in map(fact_from_tag, tags) if fact]
         if remembered and self.memory is not None:
@@ -852,16 +921,23 @@ class Companion:
                 with contextlib.suppress(BaseException):
                     await producer
 
-    async def _stream_with_fallback(self, messages: list[Message], emit: Emit) -> AsyncIterator[str]:
-        """Prova il cervello configurato; se cade subito e il ripiego e' attivo, passa al mock."""
+    async def _stream_with_fallback(
+        self, messages: list[Message], emit: Emit, llm: LLMClient | None = None
+    ) -> AsyncIterator[str]:
+        """Prova il cervello configurato; se cade subito e il ripiego e' attivo, passa al mock.
+
+        Un cervello di passaggio (le chiacchiere) non ripiega: meglio zitta che
+        una frase preconfezionata al posto di un commento.
+        """
+        llm = llm or self.llm
         produced = False
         try:
-            async for piece in self.llm.stream(messages):
+            async for piece in llm.stream(messages):
                 produced = True
                 yield piece
             return
         except Exception as exc:
-            if produced or self._fallback_llm is None:
+            if produced or self._fallback_llm is None or llm is not self.llm:
                 raise
             logger.warning("LLM '%s' non disponibile (%s): uso il mock", self.llm.name, exc)
             await emit(

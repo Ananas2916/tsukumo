@@ -11,13 +11,21 @@ Entrambi lanciano ``scripts/tsukumo_notify.py``, che manda il messaggio a
 ``POST /api/notify``. Collegarli e scollegarli si fa dal pannello
 (``install``/``uninstall`` qui sotto): tocca file di configurazione fuori dal
 progetto, quindi solo su richiesta, con una copia di sicurezza.
+
+Qui c'e' anche la barra di stato di Claude Code (``statusLine``), l'unico
+posto in cui Claude Code dice quanto resta dei limiti del piano: la lancia
+``scripts/tsukumo_statusline.py``, che li passa a Tsukumo (``usage.py``). Se
+c'era gia' una barra, la nostra la lancia e ne stampa l'uscita: scollegando
+torna quella di prima.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -26,6 +34,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "tsukumo_notify.py"
 MARK = "tsukumo_notify.py"
+STATUSLINE_SCRIPT = ROOT / "scripts" / "tsukumo_statusline.py"
+STATUSLINE_MARK = "tsukumo_statusline.py"
 
 NAMES = {"claude": "Claude Code", "codex": "Codex"}
 
@@ -190,6 +200,75 @@ def uninstall_codex(path: Path | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Collegamento: barra di stato di Claude Code (limiti del piano)
+# ---------------------------------------------------------------------------
+def _statusline_ours(entry: Any) -> bool:
+    return isinstance(entry, dict) and STATUSLINE_MARK in str(entry.get("command") or "")
+
+
+def statusline_command(previous: dict[str, Any] | None = None) -> str:
+    """Il comando della barra: stringa unica (``statusLine`` non ha la forma command + args).
+
+    Percorsi fra virgolette doppie e con le barre in avanti: valgono in bash e in cmd.
+    """
+    command = f'"{_python()}" "{STATUSLINE_SCRIPT.as_posix()}"'
+    if previous:
+        encoded = base64.urlsafe_b64encode(json.dumps(previous, ensure_ascii=False).encode("utf-8")).decode("ascii")
+        command += f" --then {encoded}"
+    return command
+
+
+def _statusline_previous(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """La barra che c'era prima, dal nostro comando (``--then <base64>``)."""
+    try:
+        parts = shlex.split(str(entry.get("command") or ""), posix=True)
+        index = parts.index("--then")
+        previous = json.loads(base64.urlsafe_b64decode(parts[index + 1].encode("ascii")).decode("utf-8"))
+    except (ValueError, IndexError):
+        return None
+    return previous if isinstance(previous, dict) else None
+
+
+def install_statusline(path: Path | None = None) -> str:
+    path = path or claude_settings_path()
+    settings = _read_json(path)
+    current = settings.get("statusLine")
+    if _statusline_ours(current):
+        return "già collegato"
+    _backup(path)
+    previous = current if isinstance(current, dict) and current.get("command") else None
+    entry: dict[str, Any] = {"type": "command", "command": statusline_command(previous)}
+    if previous and "padding" in previous:
+        entry["padding"] = previous["padding"]
+    settings["statusLine"] = entry
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return "collegato"
+
+
+def uninstall_statusline(path: Path | None = None) -> str:
+    path = path or claude_settings_path()
+    settings = _read_json(path)
+    current = settings.get("statusLine")
+    if not _statusline_ours(current):
+        return "non era collegato"
+    previous = _statusline_previous(current)
+    if previous:
+        settings["statusLine"] = previous
+    else:
+        settings.pop("statusLine", None)
+    path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return "scollegato"
+
+
+def statusline_installed(path: Path | None = None) -> bool:
+    try:
+        return _statusline_ours(_read_json(path or claude_settings_path()).get("statusLine"))
+    except (OSError, ValueError):
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Stato, per il pannello
 # ---------------------------------------------------------------------------
 def status() -> dict[str, Any]:
@@ -199,10 +278,23 @@ def status() -> dict[str, Any]:
         claude_installed = _claude_has(_read_json(claude_path))
     except (OSError, ValueError):
         claude_installed = False
+    claude_available = claude_path.parent.is_dir() or bool(shutil.which("claude"))
     result["claude"] = {
         "label": NAMES["claude"],
-        "available": claude_path.parent.is_dir() or bool(shutil.which("claude")),
+        "available": claude_available,
         "installed": claude_installed,
+        "file": str(claude_path),
+    }
+    try:
+        statusline = _read_json(claude_path).get("statusLine")
+    except (OSError, ValueError):
+        statusline = None
+    result["claude_usage"] = {
+        "label": "Limiti di Claude Code",
+        "available": claude_available,
+        "installed": _statusline_ours(statusline),
+        # C'era gia' una barra di stato: resta, la nostra la lancia e ne mostra l'uscita.
+        "wraps": bool(isinstance(statusline, dict) and statusline.get("command") and not _statusline_ours(statusline)),
         "file": str(claude_path),
     }
     codex_path = codex_config_path()
@@ -227,6 +319,8 @@ def change(tool: str, action: str) -> str:
         ("claude", "uninstall"): uninstall_claude,
         ("codex", "install"): install_codex,
         ("codex", "uninstall"): uninstall_codex,
+        ("claude_usage", "install"): install_statusline,
+        ("claude_usage", "uninstall"): uninstall_statusline,
     }
     handler = table.get((tool, action))
     if handler is None:

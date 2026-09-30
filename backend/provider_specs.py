@@ -217,6 +217,211 @@ LLM_REGISTRY.register(
 
 LLM_REGISTRY.register(
     ProviderSpec(
+        id="antigravity",
+        label="Antigravity",
+        kind="llm",
+        category="agent",
+        pricing="freemium",
+        tagline="L'agente di Google, con Gemini e Claude inclusi nel tuo account.",
+        description=(
+            "Usa `agy`, la riga di comando di Google Antigravity: l'app o "
+            "l'estensione di VS Code la mettono in ~/.gemini/bin e viene trovata "
+            "da sola. Ricorda la conversazione. Senza la sua finestra non può "
+            "chiederti permessi: i tool che li richiedono vengono rifiutati, a "
+            "meno di cambiare i Permessi."
+        ),
+        local=False,
+        aliases=("agy", "google_antigravity"),
+        fields=(
+            ProviderField(
+                env="ANTIGRAVITY_MODEL",
+                label="Modello",
+                placeholder="vuoto = quello predefinito",
+                help="L'elenco con `agy models`: per esempio gemini-3.1-pro-high o claude-sonnet-4-6.",
+            ),
+            _workdir("ANTIGRAVITY_CWD"),
+            ProviderField(
+                env="ANTIGRAVITY_PERMISSION",
+                label="Permessi",
+                type="select",
+                default="default",
+                options=(
+                    {"value": "default", "label": "Prudente — rifiuta ciò che chiederebbe conferma"},
+                    {"value": "plan", "label": "Solo pianificazione"},
+                    {"value": "accept-edits", "label": "Puo' modificare file nella cartella"},
+                    {"value": "skip", "label": "Approva tutto da solo (anche i comandi)"},
+                ),
+                advanced=True,
+            ),
+            ProviderField(
+                env="ANTIGRAVITY_COMMAND",
+                label="Programma",
+                placeholder="vuoto = cercato da solo",
+                help="Percorso di agy.exe, se non viene trovato automaticamente.",
+                advanced=True,
+            ),
+            _timeout("ANTIGRAVITY_TIMEOUT", 300.0),
+        ),
+        requires=("Antigravity (app o estensione di VS Code) con login fatto",),
+        docs="https://antigravity.google",
+    )
+)
+
+
+#: Agenti da riga di comando senza un client dedicato: id -> comando predefinito.
+#: Il factory li lancia con ``CommandAgentClient``, il riconoscimento cerca il programma.
+CLI_AGENT_PRESETS: dict[str, str] = {}
+
+
+def _cli_agent(provider_id: str, label: str, command: str, tagline: str, pricing: str, install: str, docs: str) -> None:
+    """Un agente che ha una modalita' non interattiva: basta sapere come lanciarlo.
+
+    Il comando e' un campo modificabile: se una versione nuova cambia opzioni,
+    lo si aggiusta dal pannello senza aspettare un aggiornamento.
+    """
+    prefix = provider_id.upper()
+    CLI_AGENT_PRESETS[provider_id] = command
+    LLM_REGISTRY.register(
+        ProviderSpec(
+            id=provider_id,
+            label=label,
+            kind="llm",
+            category="agent",
+            pricing=pricing,  # type: ignore[arg-type]
+            tagline=tagline,
+            description=(
+                f"{tagline} Il companion lancia `{command}` a ogni messaggio e legge "
+                "quello che stampa. A ogni lancio l'agente riparte da zero: gli si "
+                "rimandano gli ultimi scambi."
+            ),
+            local=False,
+            fields=(
+                ProviderField(
+                    env=f"{prefix}_COMMAND",
+                    label="Comando",
+                    default=command,
+                    help="{prompt} = il tuo messaggio; senza, arriva sullo standard input. Cambialo se la tua versione usa altre opzioni.",
+                ),
+                _workdir(f"{prefix}_CWD"),
+                _timeout(f"{prefix}_TIMEOUT", 300.0),
+            ),
+            requires=(install,),
+            docs=docs,
+        )
+    )
+
+
+_cli_agent(
+    "cline",
+    "Cline",
+    "cline {prompt}",
+    "L'agente open source di VS Code, dal terminale, con i modelli che hai scelto in Cline.",
+    "freemium",
+    "npm install -g cline, poi `cline auth`. Con -y approva tutto da solo.",
+    "https://docs.cline.bot/cline-cli/overview",
+)
+_cli_agent(
+    "gemini_cli",
+    "Gemini CLI",
+    "gemini -p {prompt}",
+    "L'agente open source di Google nel terminale, gratis con un account Google.",
+    "freemium",
+    "npm install -g @google/gemini-cli, poi `gemini` una volta per il login",
+    "https://github.com/google-gemini/gemini-cli",
+)
+_cli_agent(
+    "cursor_agent",
+    "Cursor CLI",
+    "cursor-agent -p {prompt} --output-format text",
+    "L'agente di Cursor fuori dall'editor, col tuo abbonamento Cursor.",
+    "subscription",
+    "Cursor CLI installata, poi `cursor-agent login`",
+    "https://cursor.com/cli",
+)
+_cli_agent(
+    "copilot",
+    "GitHub Copilot CLI",
+    "copilot -p {prompt}",
+    "L'agente di GitHub, con il tuo piano Copilot (anche quello gratuito).",
+    "freemium",
+    "npm install -g @github/copilot, poi `copilot` una volta per il login",
+    "https://docs.github.com/copilot/how-tos/use-copilot-agents/use-copilot-cli",
+)
+_cli_agent(
+    "opencode",
+    "OpenCode",
+    "opencode run {prompt}",
+    "Agente open source che funziona con quasi ogni modello, anche gratuiti.",
+    "free",
+    "npm install -g opencode-ai, poi `opencode auth login`",
+    "https://opencode.ai/docs/cli",
+)
+_cli_agent(
+    "qwen_code",
+    "Qwen Code",
+    "qwen -p {prompt}",
+    "L'agente di Alibaba per i modelli Qwen, con una quota gratuita.",
+    "freemium",
+    "npm install -g @qwen-code/qwen-code, poi `qwen` una volta per il login",
+    "https://github.com/QwenLM/qwen-code",
+)
+_cli_agent(
+    "amp",
+    "Amp",
+    "amp -x {prompt}",
+    "L'agente di Sourcegraph, con un piano gratuito.",
+    "freemium",
+    "npm install -g @sourcegraph/amp, poi `amp login`",
+    "https://ampcode.com/manual",
+)
+_cli_agent(
+    "goose",
+    "Goose",
+    "goose run -t {prompt}",
+    "L'agente open source di Block, con il modello che preferisci.",
+    "free",
+    "Goose CLI installato e configurato con `goose configure`",
+    "https://block.github.io/goose",
+)
+_cli_agent(
+    "crush",
+    "Crush",
+    "crush run {prompt}",
+    "L'agente da terminale di Charm, con il modello che preferisci.",
+    "free",
+    "Crush installato e con un modello configurato",
+    "https://github.com/charmbracelet/crush",
+)
+_cli_agent(
+    "droid",
+    "Factory Droid",
+    "droid exec {prompt}",
+    "L'agente di Factory; in modalità exec di default non modifica nulla.",
+    "freemium",
+    "Droid CLI installato e con login fatto",
+    "https://docs.factory.ai/cli/droid-exec/overview",
+)
+_cli_agent(
+    "continue_cli",
+    "Continue CLI",
+    "cn -p {prompt}",
+    "L'agente di Continue fuori dall'editor, con i tuoi modelli.",
+    "free",
+    "npm install -g @continuedev/cli, poi `cn login`",
+    "https://docs.continue.dev/cli/overview",
+)
+_cli_agent(
+    "kiro",
+    "Kiro CLI",
+    "kiro-cli chat --no-interactive {prompt}",
+    "L'agente di AWS, con il tuo account Kiro.",
+    "freemium",
+    "Kiro CLI installato, poi `kiro-cli login`",
+    "https://kiro.dev/docs/cli",
+)
+
+LLM_REGISTRY.register(
+    ProviderSpec(
         id="hermes",
         label="Hermes Agent",
         kind="llm",

@@ -122,9 +122,23 @@ licenze di ogni componente. Con `-IncludeLocalAssets` entrano invece il tuo
 avatar e le tue clip: il file si chiama `... (personale).exe` e non va
 pubblicato.
 
-Al primo avvio il pannello si apre con una presentazione in cinque passi: come
-si usa, come ti chiami, il cervello (fra quelli trovati sul PC), la voce, e un
-saluto. Si rifà da Personaggio → Altro.
+Al primo avvio il pannello si apre con una presentazione in sei passi: come
+si usa; **come la vuoi**, con il corpo (il VRM) o [solo la
+fiammella](#senza-corpo-solo-la-fiammella) (e la vedi cambiare subito); come ti
+chiami; il cervello, fra quelli trovati sul PC (aspetta che la ricerca finisca);
+**"Ti preparo tutto"**; un saluto. "Ti preparo tutto" sistema con un clic
+quello che si può fare da soli, e ogni voce dice cosa tocca e si può togliere:
+
+- **l'ascolto a voce**: installa Faster-Whisper (se manca) nel Python di
+  Tsukumo, lo sceglie e prepara il modello, tutto sul PC, circa 300 MB una
+  volta sola;
+- **gli avvisi** di Claude Code e Codex e **i limiti** di Claude Code (vedi
+  [Consumi degli agenti](#consumi-degli-agenti)), con una copia di sicurezza
+  dei loro file;
+- la **voce**, da ascoltare.
+
+Se Faster-Whisper è già installato e nessuno ha scelto l'ascolto, si accende da
+solo all'avvio, come il cervello. Si rifà tutto da Personaggio → Altro.
 
 ---
 
@@ -462,8 +476,11 @@ seduta o sdraiata, e si richiudono da soli quando il cursore se ne va:
 |----------------------|------------------------|
 | **cervello** — verde se risponde, ambra che gira mentre pensa, rosso se è spento; clic = scheda Motori | **chat** |
 | **voce** — l'anello si riempie col volume mentre parla; clic = voce spenta/accesa | **personaggio** — voce, aspetto, comportamento, azioni |
-| **microfono** — livello mentre ti ascolta; clic = parla | **motori** — cervello, voce, ascolto |
-| **musica** — batte a tempo con Spotify; clic = balla o no | **spegni** — secondo clic per confermare |
+| **microfono** — livello mentre ti ascolta; clic = parla | **forma** — diventa [fiammella](#la-fiammella-la-forma-piccola) o torna nel corpo |
+| **musica** — batte a tempo con Spotify; clic = balla o no | **motori** — cervello, voce, ascolto |
+| **consumi** — il limite più vicino a finire di Claude Code o Codex (verde, ambra dal 70%, rosso dal 90%); clic = scheda Lavoro. C'è solo se si sa qualcosa | **spegni** — secondo clic per confermare |
+
+Senza corpo il bottone della forma non c'è.
 
 Passando sopra un bottone compare una didascalia con il dettaglio ("Claude
 Code: pronto", "OpenClaw: spento — Gateway OpenClaw spento"...). Con la voce
@@ -536,6 +553,47 @@ Personaggio → Comportamento.
 Variabili utili per il debug: `DC_PET_DEBUG=1` scrive nel terminale cosa vede
 il renderer (cursore, alpha, stato della finestra), `DC_PET_WIDTH` /
 `DC_PET_HEIGHT` cambiano la dimensione di base della finestra.
+
+### La fiammella: la forma piccola
+
+Nei tsukumogami un'anima entra in un oggetto e lo fa vivere. Tsukumo ha due
+forme: il **personaggio 3D** (il VRM) e la **fiammella**, la sua anima, una
+goccia lilla con due occhi che sta sulla barra delle applicazioni e occupa
+poco. Si cambia col tasto destro su di lei (il dock di destra, icona a goccia)
+o dal pannello, *Personaggio → Aspetto → Forma*; la scelta resta dopo un
+riavvio.
+
+Cambiare forma vuol dire **entrare nel corpo** o uscirne: la fiammella sale al
+petto, un lampo e due anelli lilla, e il VRM compare dai piedi alla testa;
+al contrario il corpo sparisce dalla testa ai piedi e la fiammella scende a
+terra.
+
+La fiammella fa tutto quello che fa il personaggio, a modo suo: segue il
+cursore con lo sguardo, ascolta sporgendosi, pensa coi puntini sopra la testa,
+lavora con gli occhi bassi, parla (la bocca c'è solo quando serve), dorme con
+gli occhi chiusi e le "zeta", balla con Spotify. Si prende in mano, cade, si
+siede sul bordo delle finestre e reagisce a carezze e colpetti come lei.
+
+Ogni tanto fa uno **sprint** lungo la barra a tutta velocità: si carica, parte
+lasciando una scia, frena di colpo con un rimbalzo e si gode il momento. O
+scatta dall'altra parte dello schermo e torna, o fa il giro di pista (esce da
+un bordo e rientra dall'altro). Succede di rado, ogni 4-9 minuti, e solo se
+nessuno ne ha bisogno: mai mentre parla, pensa o ti ascolta, mai se sei via,
+in riunione, a schermo intero, in un gioco o davanti a un video. Dal pannello
+(*Azioni → Sprint*) parte subito. La corsa la fa la fisica della finestra
+(`electron/pet-physics.js`, che durante lo sprint allarga la finestra per la
+scia), la fiammella e la sua coreografia stanno in `frontend/src/flame.js`.
+
+#### Senza corpo: solo la fiammella
+
+Chi il personaggio 3D non lo vuole proprio lo dice al primo avvio (o da
+*Personaggio → Aspetto → Forma → Solo fiammella, senza corpo*): la fiammella
+esce dal corpo e il VRM si scarica dalla memoria; ai riavvii dopo non si carica
+nemmeno, e la fiammella compare subito, anche prima che il backend risponda.
+Si inquadra come se ci fosse un modello di altezza media, quindi finestra,
+fisica, click per pixel e sprint sono gli stessi. Ridarle il corpo (dal pannello
+o scegliendo un modello) carica il VRM e la fiammella ci rientra. La scelta sta
+in `dc:body` (`vrm` o `none`) accanto a `dc:form`.
 
 ### Le animazioni del corpo
 
@@ -686,11 +744,24 @@ o se non sei al PC, mai mentre sta già parlando, e fra due commenti passano
 almeno 8 minuti. Nel pannello (Personaggio → Chiacchiere) si sceglie quanto
 parla (mai, poco, normale, tanto) e di cosa; `DC_PROACTIVE=0` spegne tutto.
 
+**Chi le scrive.** Di default il cervello principale; ma con un agente a
+consumo (Claude Code, Codex...) ogni notizia commentata è un turno intero.
+Nella stessa scheda si può affidarle a un modello a parte, cloud o locale: per
+esempio OpenRouter con i modelli gratuiti, in fila separata da virgole
+(`nvidia/nemotron-3-super-120b-a12b:free, google/gemma-4-31b-it:free,
+openrouter/free`), perché i gratuiti a volte rispondono 429 per qualche minuto
+e allora si prova il successivo. Quel modello riceve la personalità, i ricordi
+e solo gli ultimi sei messaggi; se non risponde lei resta zitta, senza
+ripiegare sull'agente. Al tuo messaggio successivo l'agente viene informato di
+cosa ha detto nel frattempo, così «dimmi di più» funziona. La chiave si salva
+lì senza cambiare il cervello principale (`POST /api/providers/options`).
+
 Il meteo viene da [Open-Meteo](https://open-meteo.com) (gratis, senza chiave);
 la posizione è la città scritta nel pannello o, se è vuota, quella approssimata
 dall'indirizzo IP (get.geojs.io). Le notizie sono i titoli del feed RSS di
 Google News nella lingua del sistema. Sono le uniche richieste che partono dal
-PC per i commenti, e solo se l'argomento è acceso.
+PC per i commenti (oltre al cervello che li scrive, se è in rete), e solo se
+l'argomento è acceso.
 
 ### File e schermo
 
@@ -740,8 +811,8 @@ Se usi Claude Code o Codex per conto tuo (in un terminale, in VS Code), lei ti
 chiama quando hanno finito o quando ti aspettano per un permesso: se sei
 altrove suona, bussa e lo dice ("Claude Code ha finito: ho aggiunto i test");
 se stai già guardando l'editor basta una bolla; a schermo intero solo la
-notifica di Windows. Si attiva da Personaggio → **Avvisi dagli agenti**, che
-aggiunge (con una copia di sicurezza `.tsukumo-bak`):
+notifica di Windows. Si attiva da Lavoro → **Avvisi dagli agenti** (o dal
+primo avvio), che aggiunge (con una copia di sicurezza `.tsukumo-bak`):
 
 - a `~/.claude/settings.json` gli hook `Stop` e `Notification`, che lanciano
   `scripts/tsukumo_notify.py` (forma `command` + `args`: va sia con bash sia
@@ -753,6 +824,33 @@ Lo script esce subito se Tsukumo è spento (non trova `state/running.json`) e
 ignora gli agenti lanciati da Tsukumo stesso (`TSUKUMO_INTERNAL=1`). Anche una
 sua risposta che ci mette più di 25 secondi, se nel frattempo sei passato ad
 altro, arriva col campanello.
+
+### Consumi degli agenti
+
+Chi lavora con gli agenti vuole sapere quanto resta prima del limite. La
+scheda **Lavoro** lo mostra per agente: le barre dei limiti del piano (quanto è
+usato, quando si azzera), il piano, i token di oggi e quando l'hai usato
+l'ultima volta. Nel dock di sinistra un anello mostra il limite più vicino a
+finire (quello del cervello attivo, se è uno di questi). Si legge solo quello
+che gli agenti scrivono già sul PC: niente rete, niente credenziali
+(`backend/usage.py`, riletto ogni minuto, solo le righe nuove dei log).
+
+| Agente | Limiti del piano | Token di oggi |
+|--------|------------------|---------------|
+| **Codex** | dai suoi log (`~/.codex/sessions/**/rollout-*.jsonl`, eventi `token_count` con `rate_limits`): niente da collegare | dagli stessi log (input non in cache + output) |
+| **Claude Code** | li passa solo al comando della sua **barra di stato**, e solo agli abbonati Pro e Max: *Lavoro → Mostra i limiti di Claude Code* imposta `statusLine` a `scripts/tsukumo_statusline.py`, che li salva in `state/claude_limits.json` e stampa una barra (modello, contesto, 5h, 7d). Se avevi già una barra la nostra la lancia e ne mostra l'uscita; scollegando torna quella di prima | dalle trascrizioni (`~/.claude/projects/**/*.jsonl`: input, cache scritta, output; ogni risposta una volta sola) |
+| **Antigravity** | non li scrive sul PC: le quote si vedono nella sua app | — (si sa solo quando l'hai usato) |
+
+**Avvisi.** All'80 e al 95% di un limite lei te lo dice ("Claude Code ha già
+usato l'82 per cento del limite delle cinque ore. Si azzera alle 18:40"), e
+anche quando il limite si azzera. Come per la batteria vale anche con le
+chiacchiere spente, ma mai in riunione, a schermo intero o se non sei al PC;
+ogni soglia una volta per finestra. Si spegne da Lavoro.
+
+**A voce.** «Quanto mi resta di Claude?», «a che punto sono i limiti degli
+agenti?», «how much Codex usage is left?»: risponde lei dai file, senza
+passare dal cervello. API: `GET /api/usage`; il WebSocket manda `usage` quando
+cambia qualcosa.
 
 ---
 
@@ -1009,7 +1107,8 @@ due finestre, entrambe mostrano lo stesso avatar parlare.
 | `POST` | `/api/vocal` | un versetto con la voce in uso (vedi sopra) |
 | `GET` / `POST` / `DELETE` | `/api/reminders` | timer e promemoria; `POST` con `{"phrase": "tra 20 minuti ricordami di bere"}` o con i campi |
 | `POST` / `GET` | `/api/context` | cosa fa l'utente al PC (lo manda la shell ogni 5 s) |
-| `GET` / `POST` | `/api/preferences` | quanto chiacchiera, di cosa, città del meteo |
+| `GET` / `POST` | `/api/preferences` | quanto chiacchiera, di cosa, chi scrive le chiacchiere, città del meteo |
+| `POST` | `/api/providers/options` | salva i campi di un motore (una chiave) senza attivarlo |
 | `GET` | `/api/weather` | il meteo che vede (passa dalla rete) |
 | `POST` | `/api/notify` | un agente esterno ha finito: `{"source": "claude", "message": "..."}` |
 | `GET` / `POST` | `/api/integrations` | stato e collegamento degli hook di Claude Code e Codex |
@@ -1073,6 +1172,7 @@ desk-companion/
 │       ├── hud.js         # i dock ad arco ai suoi lati
 │       ├── vrm.js         # Three.js + three-vrm, sguardo, blink, blendshape
 │       ├── body.js        # animazione del corpo: postura, IK, gesti, reazioni
+│       ├── flame.js       # la fiammella (forma piccola), la sua scia e gli sprint
 │       ├── body/          # motion.js, pose.js, actions.js, constants.js
 │       ├── vocals.js      # quando dire un versetto (saluto, carezza, caduta)
 │       ├── presence.js    # sonno e risveglio, da quanto il PC è fermo
@@ -1091,7 +1191,7 @@ desk-companion/
 │       └── theme.css, style.css, panel.css
 ├── electron/
 │   ├── main.js            # finestre, avvio del backend con attesa e riprova, icona, IPC
-│   ├── pet-physics.js     # cadute, barra, bordi, finestre su cui sedersi
+│   ├── pet-physics.js     # cadute, barra, bordi, finestre su cui sedersi, sprint
 │   ├── desktop.js         # finestre degli altri programmi (Windows, via koffi)
 │   └── preload.js
 ├── tests/                 # pytest: testo, lingue, visemi, agenti, pipeline, API, promemoria, commenti, allegati

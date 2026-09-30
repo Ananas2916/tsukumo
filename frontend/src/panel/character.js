@@ -12,6 +12,7 @@ import { icon } from '../icons.js';
 import { MIC_SETTING, SAMPLE_RATE, VoiceInput, listMicrophones } from '../mic.js';
 import { BARGE_IN_SETTING } from '../voice.js';
 import { MemoryCard } from './memory.js';
+import { MusicCard } from './music.js';
 
 /** Quanto dura la registrazione di prova. */
 const MIC_TEST_SECONDS = 4;
@@ -74,6 +75,8 @@ const ACTIONS = [
   { play: 'spin', label: 'Giravolta', icon: 'refresh' },
   { play: 'model', label: 'Posa da modella', icon: 'star' },
   { play: 'squat', label: 'Squat', icon: 'sit' },
+  // Solo la fiammella: uno scatto lungo la barra, subito.
+  { sprint: true, label: 'Sprint', icon: 'bolt' },
   { posture: 'sit', label: 'Siediti', icon: 'sit' },
   { posture: 'lie', label: 'Sdraiati', icon: 'window' },
   { posture: 'side', label: 'Sul fianco', icon: 'window' },
@@ -81,6 +84,17 @@ const ACTIONS = [
 ];
 
 const GENDER = { female: 'donna', male: 'uomo' };
+
+/** 'vrm', 'flame' o 'spirit' (senza corpo), da `dc:form` e `dc:body` (li legge anche il personaggio). */
+export function currentForm() {
+  return readSetting('dc:body', 'vrm') === 'none' ? 'spirit' : readSetting('dc:form', 'vrm');
+}
+
+/** Salva la forma scelta; al personaggio la manda chi chiama (`{type: 'form', value}`). */
+export function applyForm(value) {
+  writeSetting('dc:body', value === 'spirit' ? 'none' : 'vrm');
+  writeSetting('dc:form', value === 'vrm' ? 'vrm' : 'flame');
+}
 
 /** Le lingue in cui una voce clonata può parlare (quelle di Chatterbox che il pannello sa nominare). */
 const CLONE_LANGUAGES = ['it', 'en', 'es', 'fr', 'de', 'pt', 'ja', 'zh', 'hi'];
@@ -131,7 +145,8 @@ export class CharacterView {
     this._loadMicrophones();
     this.memory.load();
     this._showWeather?.();
-    this._loadIntegrations?.();
+    // Scelta dalla presentazione, nella stessa finestra: lo "storage" non arriva.
+    this.form.value = currentForm();
   }
 
   // ----------------------------------------------------------------- DOM
@@ -225,9 +240,32 @@ export class CharacterView {
     });
 
     const model = el('button', { class: 'btn', type: 'button', onClick: () => this.companion?.pickModel() }, icon('cube', 16), el('span', {}, 'Cambia modello 3D…'));
+    // La forma: il personaggio o la fiammella, la sua anima (frontend/src/flame.js);
+    // oppure solo la fiammella, senza corpo: il VRM allora non si carica nemmeno.
+    this.form = el(
+      'select',
+      { class: 'field-input' },
+      el('option', { value: 'vrm' }, 'Personaggio 3D'),
+      el('option', { value: 'flame' }, 'Fiammella'),
+      el('option', { value: 'spirit' }, 'Solo fiammella, senza corpo'),
+    );
+    this.form.value = currentForm();
+    this.form.addEventListener('change', () => {
+      applyForm(this.form.value);
+      this.companion?.sendToPet({ type: 'form', value: this.form.value });
+    });
+    // Cambiata dal dock sul personaggio: il pannello si allinea (stesso localStorage).
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'dc:form' || event.key === 'dc:body') this.form.value = currentForm();
+    });
     const lookCard = this._card(
       'character',
       'Aspetto',
+      this._row(
+        'Forma',
+        this.form,
+        'La fiammella è la sua anima: piccola, sta sulla barra e ogni tanto fa uno sprint. Mai mentre ti parla, in riunione, a schermo intero o mentre giochi. Senza corpo il modello 3D non si carica: più leggera per il PC.',
+      ),
       this._row('Dimensione', this.scale.node),
       this._row('Bocca', this.gain.node, 'Quanto apre la bocca mentre parla.'),
       model,
@@ -308,7 +346,6 @@ export class CharacterView {
       this.ghost.node,
     );
     const chatterCard = this._chatterCard();
-    const agentsCard = this._agentsCard();
 
     // Azioni ---------------------------------------------------------------
     const chips = ACTIONS.map((action) =>
@@ -319,7 +356,11 @@ export class CharacterView {
           type: 'button',
           onClick: () =>
             this.companion?.sendToPet(
-              action.play ? { type: 'play', name: action.play } : { type: 'posture', value: action.posture },
+              action.sprint
+                ? { type: 'sprint' }
+                : action.play
+                  ? { type: 'play', name: action.play }
+                  : { type: 'posture', value: action.posture },
             ),
         },
         icon(action.icon, 15),
@@ -353,7 +394,8 @@ export class CharacterView {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
     }
     this.memory = new MemoryCard(this.app, (...args) => this._card(...args));
-    this.root.append(voiceCard, this.memory.node, micCard, chatterCard, agentsCard, lookCard, behaviourCard, actionsCard, moreCard);
+    this.music = new MusicCard(this.app, (...args) => this._card(...args));
+    this.root.append(voiceCard, this.memory.node, this.music.node, micCard, chatterCard, lookCard, behaviourCard, actionsCard, moreCard);
   }
 
   _renderClipChips(animations) {
@@ -368,71 +410,6 @@ export class CharacterView {
           el('span', {}, name),
         );
       }),
-    );
-  }
-
-  /**
-   * Avvisi da Claude Code e Codex usati per conto tuo (vedi backend/notify.py).
-   * Collegarli scrive nelle loro configurazioni: solo quando premi il pulsante.
-   */
-  _agentsCard() {
-    const list = el('div', { class: 'integration-list' });
-    const render = (status) => {
-      list.replaceChildren(
-        ...['claude', 'codex'].map((tool) => {
-          const item = status?.[tool];
-          if (!item) return null;
-          const state = item.installed ? 'Collegato' : item.conflict ? 'Ha già un suo avviso' : item.available ? 'Non collegato' : 'Non installato';
-          const button = el(
-            'button',
-            {
-              class: `btn${item.installed ? '' : ' primary'}`,
-              type: 'button',
-              disabled: !item.available || item.conflict,
-              onClick: () => change(tool, item.installed ? 'uninstall' : 'install'),
-            },
-            el('span', {}, item.installed ? 'Scollega' : 'Collega'),
-          );
-          return el(
-            'div',
-            { class: 'integration' },
-            el('span', { class: 'integration-text' }, el('strong', {}, item.label), el('small', { title: item.file }, state)),
-            button,
-          );
-        }),
-      );
-    };
-    const load = () =>
-      fetch(apiUrl('/api/integrations'))
-        .then((response) => (response.ok ? response.json() : null))
-        .then(render)
-        .catch(() => {});
-    const change = async (tool, action) => {
-      try {
-        const response = await fetch(apiUrl('/api/integrations'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tool, action }),
-        });
-        const data = await response.json();
-        if (!data.ok) throw new Error(data.error ?? data.detail ?? `HTTP ${response.status}`);
-        render(data.status);
-        this.app.toast(action === 'install' ? 'Collegato: ti chiamo quando ha finito.' : 'Scollegato.');
-      } catch (error) {
-        this.app.toast(error.message, 'error');
-      }
-    };
-    load();
-    this._loadIntegrations = load;
-    return this._card(
-      'robot',
-      'Avvisi dagli agenti',
-      el(
-        'p',
-        { class: 'card-sub' },
-        'Quando Claude Code o Codex, usati per conto tuo, finiscono un lavoro (o ti aspettano), lei ti chiama. Se stai già guardando l’editor basta una bolla.',
-      ),
-      list,
     );
   }
 
@@ -464,6 +441,67 @@ export class CharacterView {
     const city = el('input', { class: 'field-input', type: 'text', placeholder: 'Vuoto = dall’indirizzo IP', 'aria-label': 'Città per il meteo' });
     const weatherLine = el('p', { class: 'card-sub' });
 
+    // Chi scrive notizie, curiosità e commenti: un modello a parte (cloud o
+    // locale), così un agente a consumo non spende un turno per ogni chiacchiera.
+    const brain = el('select', { class: 'field-input' }, el('option', { value: '' }, 'Il cervello principale'));
+    const models = el('input', { class: 'field-input', type: 'text', spellcheck: 'false', 'aria-label': 'Modelli per le chiacchiere' });
+    const key = el('input', { class: 'field-input', type: 'password', autocomplete: 'off', placeholder: 'Incolla la chiave', 'aria-label': 'Chiave API per le chiacchiere' });
+    const modelsRow = this._row('Modelli', models, 'Separati da virgole: se il primo è occupato prova il successivo.');
+    const keyRow = this._row('Chiave', key, 'Resta nel file .env di questo PC, come quelle in Motori.');
+    const brainLine = el('p', { class: 'card-sub' });
+    const brains = { specs: {}, saved: {}, error: null };
+    const brainSpec = () => brains.specs[brain.value] ?? null;
+    const secretOf = (spec) => spec?.fields.find((field) => field.secret) ?? null;
+    const refreshBrain = () => {
+      const spec = brainSpec();
+      const secret = secretOf(spec);
+      const model = spec?.fields.find((field) => field.env.endsWith('_MODEL'));
+      modelsRow.hidden = !model;
+      models.placeholder = model?.default ? `Vuoto = ${model.default}` : '';
+      keyRow.hidden = !secret || Boolean(brains.saved[spec.id]?.[secret.env]);
+      if (!spec) brainLine.textContent = 'Notizie, curiosità e commenti li scrive il cervello scelto in Motori.';
+      else if (brains.error) brainLine.textContent = `${spec.label} non ha risposto: ${brains.error}`;
+      else brainLine.textContent = `Li scrive ${spec.label}; il cervello principale resta per quando gli parli tu.`;
+    };
+    const loadBrains = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/providers'));
+        const data = await response.json();
+        const usable = (data.providers?.llm ?? []).filter((spec) => spec.category === 'cloud' || spec.category === 'local');
+        brains.specs = Object.fromEntries(usable.map((spec) => [spec.id, spec]));
+        brains.saved = data.saved?.llm ?? {};
+        const current = brain.value;
+        brain.replaceChildren(
+          el('option', { value: '' }, 'Il cervello principale'),
+          ...usable.map((spec) => el('option', { value: spec.id }, spec.pricing === 'free' ? spec.label : `${spec.label} (${spec.pricing === 'freemium' ? 'anche gratis' : 'a consumo'})`)),
+        );
+        brain.value = current in brains.specs ? current : '';
+        refreshBrain();
+      } catch {
+        // Senza backend resta "il cervello principale".
+      }
+    };
+    const saveKey = async () => {
+      const spec = brainSpec();
+      const secret = secretOf(spec);
+      if (!secret || !key.value.trim()) return;
+      try {
+        const response = await fetch(apiUrl('/api/providers/options'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'llm', provider: spec.id, options: { [secret.env]: key.value.trim() } }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+        brains.saved[spec.id] = data.saved;
+        key.value = '';
+        refreshBrain();
+        this.app.toast(`Chiave di ${spec.label} salvata`, 'ok');
+      } catch (error) {
+        this.app.toast(`Chiave non salvata: ${error.message}`, 'error');
+      }
+    };
+
     const save = async (changes) => {
       try {
         const response = await fetch(apiUrl('/api/preferences'), {
@@ -480,6 +518,10 @@ export class CharacterView {
       level.value = prefs.chatter ?? 'normal';
       city.value = prefs.city ?? '';
       for (const [name, control] of Object.entries(topics)) control.input.checked = prefs.topics?.[name] !== false;
+      brain.value = prefs.brain && prefs.brain in brains.specs ? prefs.brain : '';
+      models.value = prefs.brainModels ?? '';
+      if ('brainError' in prefs) brains.error = prefs.brainError;
+      refreshBrain();
     };
     const showWeather = async () => {
       try {
@@ -495,12 +537,21 @@ export class CharacterView {
     };
 
     level.addEventListener('change', () => save({ chatter: level.value }));
+    brain.addEventListener('change', () => {
+      brains.error = null;
+      refreshBrain();
+      save({ brain: brain.value });
+    });
+    models.addEventListener('change', () => save({ brainModels: models.value }));
+    key.addEventListener('change', saveKey);
+    this.app.on('providers', loadBrains);
     city.addEventListener('change', () => save({ city: city.value }).then(showWeather));
     for (const [name, control] of Object.entries(topics)) {
       control.input.addEventListener('change', () => save({ topics: { [name]: control.input.checked } }));
     }
     this.socket.on('preferences', apply);
-    fetch(apiUrl('/api/preferences'))
+    loadBrains()
+      .then(() => fetch(apiUrl('/api/preferences')))
       .then((response) => (response.ok ? response.json() : null))
       .then((prefs) => prefs && apply(prefs))
       .catch(() => {});
@@ -514,6 +565,10 @@ export class CharacterView {
       ...Object.values(topics).map((control) => control.node),
       this._row('Città', city),
       weatherLine,
+      this._row('Chi le scrive', brain),
+      modelsRow,
+      keyRow,
+      brainLine,
     );
   }
 

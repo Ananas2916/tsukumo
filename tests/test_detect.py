@@ -92,12 +92,16 @@ def test_detect_all_runs_in_parallel_and_keeps_the_order(monkeypatch):
         await asyncio.sleep(0.3)
         return {"found": True, "detail": "ok"}
 
-    for provider in detect.AUTO_ORDER:
+    for provider in list(detect.DETECTORS):
         monkeypatch.setitem(detect.DETECTORS, provider, slow)
     started = time.perf_counter()
-    result = asyncio.run(detect.detect_all(lambda provider: {}))
+    result = asyncio.run(detect.detect_all(lambda provider: {}, detect.AUTO_ORDER))
     assert time.perf_counter() - started < 1.0
     assert list(result) == list(detect.AUTO_ORDER)
+    # Senza elenco: tutti i motori riconoscibili, anche gli agenti "a comando".
+    everything = asyncio.run(detect.detect_all(lambda provider: {}))
+    assert set(everything) == set(detect.DETECTORS)
+    assert {"antigravity", "cline", "gemini_cli"} <= set(everything)
 
 
 def test_candidates_follow_the_preferred_order():
@@ -117,6 +121,7 @@ def test_candidates_follow_the_preferred_order():
 FAKE_DETECTED = {
     "claude_code": {"found": False, "detail": "claude non e' nel PATH"},
     "codex": {"found": False, "detail": "codex non trovato"},
+    "antigravity": {"found": False, "detail": "agy non trovato"},
     "openclaw": {"found": True, "detail": "http://127.0.0.1:18789/health"},
     "ollama": {"found": True, "detail": "http://127.0.0.1:11434/api/tags"},
     "openai": {"found": False, "detail": "non risponde"},

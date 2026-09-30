@@ -50,10 +50,12 @@ contextBridge.exposeInMainWorld('companion', {
   setAnchors: (anchors) => ipcRenderer.send('pet:anchors', anchors),
   /** Sedersi, alzarsi o sdraiarsi sulla barra: `'sit' | 'stand' | 'lie' | 'side'`. */
   requestPosture: (posture) => ipcRenderer.invoke('pet:posture', posture),
+  /** Sprint della fiammella lungo la barra: `'dash' | 'lap'` o niente (a caso). Falso se non puo'. */
+  sprint: (kind) => ipcRenderer.invoke('pet:sprint', kind),
   /** Rotellina: moltiplica la scala del personaggio. */
   scaleBy: (factor) => ipcRenderer.invoke('pet:scale-by', factor),
 
-  /** Cadute, atterraggi, finestre su cui e' seduta, bordi a cui e' aggrappata. */
+  /** Cadute, atterraggi, finestre su cui e' seduta, bordi a cui e' aggrappata, sprint. */
   onMotion: (callback) => listen('pet:motion', callback),
   /**
    * Posizione del cursore relativa alla finestra, misurata dal processo main.

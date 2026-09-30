@@ -8,8 +8,11 @@
  *    verde se risponde, ambra che gira mentre pensa, rosso se e' spento), la
  *    voce (l'anello si riempie col volume mentre parla; clic = muta), il
  *    microfono (livello mentre ascolta; clic = parla) e la musica (batte a
- *    tempo con Spotify; clic = balla o no);
- *  - a destra la **navigazione**: chat, personaggio, motori, spegni.
+ *    tempo con Spotify; clic = balla o no) e i consumi degli agenti (l'anello
+ *    e' il limite piu' vicino a finire di Claude Code o Codex; clic = scheda
+ *    Lavoro; c'e' solo se si sa qualcosa);
+ *  - a destra la **navigazione**: chat, personaggio, cambia forma (VRM o
+ *    fiammella; senza corpo non c'e'), motori, spegni.
  *
  * Si apre col tasto destro sul personaggio e si richiude da solo quando il
  * cursore se ne va. Gli archi seguono il busto: se si siede o si sdraia, i
@@ -25,11 +28,33 @@ const LEFT = [
   { id: 'voice', icon: 'volume', color: 'var(--accent)' },
   { id: 'mic', icon: 'mic', color: 'var(--info)' },
   { id: 'music', icon: 'music', color: 'var(--pink)' },
+  { id: 'usage', icon: 'gauge', color: 'var(--ok)' },
 ];
+
+/** Come si chiamano le finestre dei limiti, per la didascalia. */
+const WINDOW_WORDS = { 300: '5 ore', 10080: 'settimana', 43200: 'mese' };
+
+/** Colore del limite: verde, ambra dal 70%, rosso dal 90%. */
+function usageColor(used) {
+  if (used >= 90) return 'var(--danger)';
+  if (used >= 70) return 'var(--warn)';
+  return 'var(--ok)';
+}
+
+function resetWords(epoch) {
+  if (!epoch) return '';
+  const moment = new Date(epoch * 1000);
+  const now = new Date();
+  const clock = moment.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  if (moment.toDateString() === now.toDateString()) return `si azzera alle ${clock}`;
+  const days = Math.ceil((moment - now) / 86_400_000);
+  return days <= 1 ? `si azzera domani alle ${clock}` : `si azzera tra ${days} giorni`;
+}
 
 const RIGHT = [
   { id: 'chat', icon: 'chat', label: 'Chat' },
   { id: 'character', icon: 'character', label: 'Personaggio' },
+  { id: 'form', icon: 'flame', label: 'Diventa fiammella' },
   { id: 'engines', icon: 'engines', label: 'Motori' },
   { id: 'power', icon: 'power', label: 'Chiudi Tsukumo' },
 ];
@@ -67,6 +92,13 @@ export class Hud {
     this.muted = false;
     this.mic = { available: false, enabled: false };
     this.musicPlaying = false;
+    this.form = 'vrm';
+    /** Senza corpo il bottone della forma sparisce. */
+    this.bodiless = false;
+    /** Il limite piu' vicino a finire: `{agent, label, limit}` o null (vedi setUsage). */
+    this.usage = null;
+    /** Bottoni nascosti: non occupano posto sull'arco. */
+    this.hidden = new Set(['usage']);
     this.activeTab = null;
     this.frame = null;
     this._geometry = null;
@@ -226,18 +258,20 @@ export class Hud {
     const cx = this.frame?.cx ?? W / 2;
     const cyRaw = this.frame?.cy ?? H * 0.38;
 
+    const left = LEFT.filter((item) => !this.hidden.has(item.id));
+    const right = RIGHT.filter((item) => !this.hidden.has(item.id));
     const thickness = Math.round(Math.min(46, Math.max(34, W * 0.15)));
     const button = thickness - 8;
     const gap = button + 6;
     const reach = Math.max(thickness, Math.min(cx, W - cx) - thickness / 2 - 3);
     const radius = reach * 1.35;
     const step = gap / radius;
-    const halfSpan = (step * (LEFT.length - 1)) / 2;
+    const halfSpan = (step * (Math.max(left.length, right.length) - 1)) / 2;
     const theta = halfSpan + (button / 2 + 7) / radius;
     const halfHeight = radius * Math.sin(theta) + thickness / 2 + 4;
     const cy = Math.min(Math.max(cyRaw, halfHeight), H - halfHeight);
 
-    const key = `${W}x${H}|${Math.round(cx)}|${Math.round(cy)}`;
+    const key = `${W}x${H}|${Math.round(cx)}|${Math.round(cy)}|${left.length}|${right.length}`;
     if (!force && key === this._geometry) return;
     this._geometry = key;
 
@@ -248,9 +282,10 @@ export class Hud {
     this.svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
 
     const sides = {
-      left: { center: cx + (radius - reach), base: Math.PI, items: LEFT, sign: -1 },
-      right: { center: cx - (radius - reach), base: 0, items: RIGHT, sign: 1 },
+      left: { center: cx + (radius - reach), base: Math.PI, items: left, sign: -1 },
+      right: { center: cx - (radius - reach), base: 0, items: right, sign: 1 },
     };
+    for (const [id, node] of this.buttons) node.style.display = this.hidden.has(id) ? 'none' : '';
     for (const [side, spec] of Object.entries(sides)) {
       const point = (angle) => [spec.center + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
       // Dall'alto in basso. A sinistra l'angolo scende da π+θ a π-θ (verso
@@ -278,7 +313,14 @@ export class Hud {
     }
 
     this.caption.style.left = `${cx}px`;
-    this.caption.style.top = `${Math.min(H - 30, cy + halfHeight + 6)}px`;
+    this._captionTop = cy + halfHeight + 6;
+    this._placeCaption();
+  }
+
+  /** Sotto i dock, ma dentro la finestra anche quando va a capo (la fiammella sta in fondo). */
+  _placeCaption() {
+    const limit = window.innerHeight - this.caption.offsetHeight - 8;
+    this.caption.style.top = `${Math.max(0, Math.min(this._captionTop ?? limit, limit))}px`;
   }
 
   // ---------------------------------------------------------------- stato
@@ -297,6 +339,49 @@ export class Hud {
   setMuted(muted) {
     this.muted = Boolean(muted);
     this._renderStatic();
+  }
+
+  /** 'vrm' o 'flame': il bottone della forma propone l'altra. */
+  setForm(form) {
+    this.form = form;
+    this.buttons.get('form')?.setAttribute('aria-label', form === 'flame' ? 'Torna nel corpo' : 'Diventa fiammella');
+    this._renderCaption();
+  }
+
+  /** Senza corpo non c'e' una forma da cambiare: il bottone sparisce. */
+  setBodiless(value) {
+    this.bodiless = Boolean(value);
+    this._setHidden('form', this.bodiless);
+  }
+
+  /**
+   * I consumi degli agenti (messaggio `usage` del backend). L'anello mostra il
+   * limite piu' vicino a finire, preferendo il cervello attivo se e' uno di loro.
+   */
+  setUsage(snapshot, activeBrain) {
+    let best = null;
+    for (const agent of snapshot?.agents ?? []) {
+      for (const limit of agent.limits ?? []) {
+        const score = limit.used + (agent.id === activeBrain ? 1000 : 0);
+        if (!best || score > best.score) best = { score, agent: agent.label, limit };
+      }
+    }
+    this.usage = best;
+    this._setHidden('usage', !best);
+    if (best) {
+      const color = usageColor(best.limit.used);
+      this._ring('usage', Math.max(0.04, best.limit.used / 100), color);
+      this._dot('usage', color);
+    }
+    this._renderCaption();
+  }
+
+  _setHidden(id, hidden) {
+    if (this.hidden.has(id) === hidden) return;
+    if (hidden) this.hidden.add(id);
+    else this.hidden.delete(id);
+    if (this._hovered === id) this._hovered = null;
+    this._layout(true);
   }
 
   setMic(state) {
@@ -380,6 +465,7 @@ export class Hud {
     const text = this._captionFor(this._hovered);
     this.caption.textContent = text;
     this.caption.classList.toggle('shown', Boolean(text));
+    if (text) this._placeCaption();
   }
 
   _captionFor(id) {
@@ -403,8 +489,17 @@ export class Hud {
       }
       case 'music':
         return this.musicPlaying ? 'Balla con Spotify — clic per smettere' : 'Nessuna musica da Spotify';
+      case 'usage': {
+        if (!this.usage) return '';
+        const { agent, limit } = this.usage;
+        const window = WINDOW_WORDS[limit.windowMinutes] ?? 'limite';
+        const reset = resetWords(limit.resetsAt);
+        return `${agent}: ${Math.round(limit.used)}% (${window})${reset ? `, ${reset}` : ''}`;
+      }
       case 'power':
         return this.buttons.get('power').classList.contains('confirm') ? 'Clicca ancora per chiudere' : 'Chiudi Tsukumo';
+      case 'form':
+        return this.form === 'flame' ? 'Torna nel corpo' : 'Diventa fiammella';
       default: {
         const nav = RIGHT.find((item) => item.id === id);
         return nav ? nav.label : '';
