@@ -350,10 +350,12 @@ class UsageService:
             self._claude.refresh(moment)
         note = None
         if not limits:
+            # La barra di stato c'e' solo in Claude Code nel terminale: dall'estensione
+            # di VS Code (verificato: nessuna lettura in un pomeriggio d'uso) non arriva niente.
             note = (
-                "Per i limiti del piano collega la barra di stato (qui sotto). Li mostra solo agli abbonati Pro e Max."
+                "Per i limiti del piano collega la barra di stato (qui sotto): li manda Claude Code nel terminale, con Pro o Max."
                 if not linked
-                else "Collegata: i limiti arrivano alla prossima risposta di Claude Code (solo con Pro o Max)."
+                else "Collegata: i limiti arrivano quando usi Claude Code nel terminale, con un piano Pro o Max (dall'estensione di VS Code no)."
             )
         return {
             "id": "claude_code",

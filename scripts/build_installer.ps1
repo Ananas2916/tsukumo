@@ -121,7 +121,10 @@ if (Test-Path $appDir) { Remove-Item -Recurse -Force $appDir }
 New-Item -ItemType Directory -Force $appDir | Out-Null
 robocopy (Join-Path $root 'backend') (Join-Path $appDir 'backend') /E /XD __pycache__ /NFL /NDL /NJH /NJS | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $appDir 'scripts') | Out-Null
-Copy-Item (Join-Path $root 'scripts\tsukumo_notify.py') (Join-Path $appDir 'scripts')
+# Gli script che lanciano Claude Code e Codex: avvisi e barra di stato (limiti del piano).
+foreach ($script in 'tsukumo_notify.py', 'tsukumo_statusline.py') {
+    Copy-Item (Join-Path $root "scripts\$script") (Join-Path $appDir 'scripts')
+}
 # models e animations in dist sarebbero copie di frontend\public: mai nell'installer.
 robocopy (Join-Path $root 'frontend\dist') (Join-Path $appDir 'frontend\dist') /E /XD models animations /NFL /NDL /NJH /NJS | Out-Null
 $avatarDir = Join-Path $appDir 'frontend\public\models'

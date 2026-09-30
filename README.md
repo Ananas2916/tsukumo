@@ -838,7 +838,7 @@ che gli agenti scrivono già sul PC: niente rete, niente credenziali
 | Agente | Limiti del piano | Token di oggi |
 |--------|------------------|---------------|
 | **Codex** | dai suoi log (`~/.codex/sessions/**/rollout-*.jsonl`, eventi `token_count` con `rate_limits`): niente da collegare | dagli stessi log (input non in cache + output) |
-| **Claude Code** | li passa solo al comando della sua **barra di stato**, e solo agli abbonati Pro e Max: *Lavoro → Mostra i limiti di Claude Code* imposta `statusLine` a `scripts/tsukumo_statusline.py`, che li salva in `state/claude_limits.json` e stampa una barra (modello, contesto, 5h, 7d). Se avevi già una barra la nostra la lancia e ne mostra l'uscita; scollegando torna quella di prima | dalle trascrizioni (`~/.claude/projects/**/*.jsonl`: input, cache scritta, output; ogni risposta una volta sola) |
+| **Claude Code** | li passa solo al comando della sua **barra di stato**, e solo agli abbonati Pro e Max, e solo nel terminale (l'estensione di VS Code non usa la barra di stato): *Lavoro → Mostra i limiti di Claude Code* imposta `statusLine` a `scripts/tsukumo_statusline.py`, che li salva in `state/claude_limits.json` e stampa una barra (modello, contesto, 5h, 7d). Se avevi già una barra la nostra la lancia e ne mostra l'uscita; scollegando torna quella di prima | dalle trascrizioni (`~/.claude/projects/**/*.jsonl`: input, cache scritta, output; ogni risposta una volta sola) |
 | **Antigravity** | non li scrive sul PC: le quote si vedono nella sua app | — (si sa solo quando l'hai usato) |
 
 **Avvisi.** All'80 e al 95% di un limite lei te lo dice ("Claude Code ha già
@@ -1062,7 +1062,7 @@ si muove sulla sola ampiezza, come un lip-sync "a volume".
 **Server → client**
 
 ```jsonc
-{ "type": "hello",  "version": "2.0.0", "config": {...}, "voices": [...],
+{ "type": "hello",  "version": "2.1.0", "config": {...}, "voices": [...],
                     "engines": {...}, "blendshapes": {...}, "avatar": {...} }
 { "type": "engines", "llm": { "id": "claude_code", "label": "Claude Code",
                               "state": "online", "detail": null, ... },

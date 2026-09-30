@@ -358,7 +358,7 @@ export class Welcome {
       'Limiti di Claude Code',
       integrations.claude_usage?.wraps
         ? 'Ti dico quanto resta del piano. La tua barra di stato resta com’è: la nostra la mostra uguale.'
-        : 'Ti dico quanto resta del piano (Pro e Max). Aggiunge a Claude Code una barra di stato con modello, contesto e limiti.',
+        : 'Ti dico quanto resta del piano (Pro o Max, usando Claude Code nel terminale). Aggiunge a Claude Code una barra di stato con modello, contesto e limiti.',
     );
     if (integrations.codex?.available) {
       rows.push(

@@ -5,4 +5,4 @@ voci, estrazione dei visemi per il lip-sync, stato dei motori e server
 WebSocket.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
