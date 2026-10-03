@@ -77,7 +77,23 @@ def test_security_headers(client):
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["referrer-policy"] == "no-referrer"
+    # Non "no-referrer": farebbe partire i moduli POST con "Origin: null".
+    assert response.headers["referrer-policy"] == "same-origin"
+
+
+def test_qr_page_opens_from_a_link_elsewhere(client, monkeypatch):
+    from backend import phone
+
+    async def no_tailscale(port):
+        return phone.Tailscale()
+
+    monkeypatch.setattr(phone, "tailscale_status", no_tailscale)
+    # Un link alla pagina del QR cliccato su GitHub o in una chat: navigazione cross-site.
+    navigation = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+    assert client.get("/api/phone", headers=navigation).status_code == 200
+    # Le altre API restano chiuse agli altri siti, e il pulsante "Attiva" anche.
+    assert client.get("/api/memory", headers=navigation).status_code == 403
+    assert client.post("/api/phone/serve", headers={"Origin": "https://sito-malevolo.example"}).status_code == 403
 
 
 def test_html_pages_get_a_content_security_policy(client):

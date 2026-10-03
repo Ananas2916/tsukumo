@@ -383,7 +383,7 @@ built to accept orders only from you. Since **2.1.1**:
   page `/api/phone` works only from this PC. If you turn on Tailscale Funnel
   the link becomes reachable from the whole internet, and the QR page says so.
 - **Hardened pages.** Strict Content-Security-Policy, no framing, `nosniff`,
-  `no-referrer`, `no-store` on API responses, and request bodies capped even
+  `Referrer-Policy: same-origin`, `no-store` on API responses, and request bodies capped even
   without a `Content-Length` header.
 - **Hardened desktop shell.** Electron 44 with every renderer sandboxed and
   context-isolated, navigation locked to the backend, `window.open` and links

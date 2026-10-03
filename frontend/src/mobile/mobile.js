@@ -150,7 +150,10 @@ function lock(text) {
 // ---------------------------------------------------------------------------
 // Collegamento
 
-/** Scambia il token con il cookie del WebSocket: 'ok', 'denied' o 'offline'. */
+/**
+ * Scambia il token con il cookie del WebSocket: 'ok', 'denied', 'offline'
+ * (niente risposta) o il codice HTTP di un altro errore.
+ */
 async function openSession(token) {
   try {
     const response = await fetch('/api/phone/session', {
@@ -160,7 +163,8 @@ async function openSession(token) {
       cache: 'no-store',
     });
     if (response.ok) return 'ok';
-    return response.status === 401 ? 'denied' : 'offline';
+    if (response.status === 401) return 'denied';
+    return response.status >= 500 ? 'offline' : String(response.status);
   } catch {
     return 'offline';
   }
@@ -308,8 +312,10 @@ async function start() {
   }
   restoreHistory();
   let session = await openSession(token);
-  while (session === 'offline') {
-    setStatus('offline', 'Non raggiungo il PC: Tailscale e Tsukumo sono accesi?');
+  while (session !== 'ok' && session !== 'denied') {
+    // Un errore diverso (es. 403) non e' "PC spento": lo diciamo col suo codice.
+    const why = session === 'offline' ? 'Non raggiungo il PC: Tailscale e Tsukumo sono accesi?' : `Il PC rifiuta il collegamento (errore ${session})`;
+    setStatus('offline', why);
     await new Promise((resolve) => setTimeout(resolve, 5000));
     session = await openSession(token);
   }

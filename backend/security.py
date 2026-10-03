@@ -64,8 +64,10 @@ PROXY_HEADERS = (
 #: Metodi che leggono soltanto.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 #: Questi percorsi arrivano da un altro sito per costruzione: il ritorno da
-#: Spotify dopo il permesso (protetto da ``state`` e PKCE, vedi music.py).
-CROSS_SITE_OK = ("/api/music/spotify/callback",)
+#: Spotify dopo il permesso (protetto da ``state`` e PKCE, vedi music.py), e
+#: la pagina del QR aperta da un link altrove (note della release, una chat):
+#: e' solo una lettura, solo dal PC, e un altro sito non puo' leggerla.
+CROSS_SITE_OK = ("/api/music/spotify/callback", "/api/phone")
 #: Cosa non si fa da lontano nemmeno col token: motori, programmi da lanciare,
 #: hook installati negli agenti, pacchetti pip, voci, preferenze, contesto del PC.
 LOCAL_ONLY: tuple[tuple[str, str], ...] = (
@@ -287,7 +289,10 @@ def content_security_policy(host: str) -> str:
 _COMMON_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"x-content-type-options", b"nosniff"),
     (b"x-frame-options", b"DENY"),
-    (b"referrer-policy", b"no-referrer"),
+    # Agli altri siti nessun Referer, come con "no-referrer". Ma con
+    # "no-referrer" le POST dei moduli (e, a seconda del browser, anche altre)
+    # partono con "Origin: null", che qui viene sempre respinto.
+    (b"referrer-policy", b"same-origin"),
     (b"cross-origin-opener-policy", b"same-origin"),
     (b"cross-origin-resource-policy", b"same-origin"),
     # camera e display-capture: il ritmo della musica ascolta l'audio del desktop
