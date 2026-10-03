@@ -19,11 +19,13 @@ export default defineConfig({
     // three.js + three-vrm superano i 500 kB: alziamo la soglia per non
     // riempire il log di warning inutili.
     chunkSizeWarningLimit: 1500,
-    // Due pagine: il personaggio e il pannello (chat + impostazioni) di Electron.
+    // Tre pagine: il personaggio e il pannello (chat + impostazioni) di Electron,
+    // e la chat solo testo per il telefono (backend/phone.py).
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         panel: fileURLToPath(new URL('./panel.html', import.meta.url)),
+        mobile: fileURLToPath(new URL('./mobile.html', import.meta.url)),
       },
     },
   },

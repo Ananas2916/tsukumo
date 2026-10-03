@@ -8,7 +8,15 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from backend.config import save_dotenv
-from backend.security import AccessPolicy, SecurityMiddleware, clean_env_value, is_loopback, local_only, within
+from backend.security import (
+    AccessPolicy,
+    SecurityMiddleware,
+    clean_env_value,
+    is_loopback,
+    local_only,
+    public_shell,
+    within,
+)
 
 EVIL = "https://sito-malevolo.example"
 SAME = "http://127.0.0.1:8770"
@@ -222,6 +230,23 @@ def test_local_only_paths():
     assert local_only("DELETE", "/api/voices/abc")
     assert not local_only("GET", "/api/providers")
     assert not local_only("POST", "/api/attachments")
+    # Il QR col token e il pulsante che lancia tailscale serve: solo dal PC.
+    assert local_only("GET", "/api/phone")
+    assert local_only("POST", "/api/phone/serve")
+    assert not local_only("POST", "/api/phone/session")
+
+
+# Il guscio della pagina del telefono: l'unica cosa che da fuori si apre senza token.
+def test_public_shell_rules():
+    assert public_shell("GET", "/mobile.html")
+    assert public_shell("HEAD", "/assets/mobile-abc.css")
+    assert not public_shell("POST", "/mobile.html")
+    assert not public_shell("GET", "/assets/")
+    assert not public_shell("GET", "/assets/../panel.html")
+    assert not public_shell("GET", "/assets/sub/file.js")
+    assert not public_shell("GET", "/assets\\..\\panel.html")
+    assert not public_shell("GET", "/panel.html")
+    assert not public_shell("GET", "/models/avatar.vrm")
 
 
 def test_clean_env_value():

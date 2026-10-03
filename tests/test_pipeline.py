@@ -142,6 +142,22 @@ def test_muted_sends_captions_without_synthesis():
     assert companion.current_settings()["muted"] is True
 
 
+def test_silent_turns_from_the_phone_do_not_speak():
+    # Scritto dal telefono: risposta solo testo, il PC a casa non parla.
+    companion = _companion()
+    phone, pc = Recorder(), Recorder()
+
+    async def two_turns():
+        await companion.chat("ciao", phone, silent=True)
+        # Il turno dopo, dal PC, ha di nuovo la voce.
+        await companion.chat("ciao di nuovo", pc)
+
+    asyncio.run(two_turns())
+    assert phone.of("caption") and not phone.of("speech")
+    assert pc.of("speech")
+    assert companion.current_settings()["muted"] is False
+
+
 def test_agents_get_only_the_last_message():
     companion = _companion()
     agent = RecordingAgent()

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Tsukumo</title>
+    <!-- Safari, "Aggiungi alla schermata Home": si apre a tutto schermo, senza barre. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Tsukumo" />
+    <meta name="theme-color" content="#111115" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="apple-touch-icon" href="./src/mobile/icon.png" />
+    <link rel="stylesheet" href="./src/mobile/mobile.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="who">
+          <strong>Tsukumo</strong>
+          <span id="status" class="status" data-state="offline">Connessione…</span>
+        </div>
+      </header>
+
+      <main id="log" class="log" aria-live="polite">
+        <p id="empty" class="empty">Scrivile qualcosa: risponde da casa, solo testo.</p>
+      </main>
+
+      <!-- Il link non valido o mancante: niente chat finche' non si riapre dal QR. -->
+      <section id="locked" class="locked hidden">
+        <h1>Serve il link dal PC</h1>
+        <p id="locked-text">Sul PC apri <b>http://127.0.0.1:8770/api/phone</b> e inquadra il QR con la Fotocamera.</p>
+      </section>
+
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Scrivi a Tsukumo" enterkeyhint="send" autocomplete="off"></textarea>
+        <!-- Mentre pensa lo stesso tasto la ferma. -->
+        <button id="send" type="submit" aria-label="Invia" data-mode="send">
+          <svg class="i-send" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 12l16-8-6 16-2.5-6.5z" fill="currentColor" /></svg>
+          <svg class="i-stop" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" /></svg>
+        </button>
+      </form>
+    </div>
+    <script type="module" src="./src/mobile/mobile.js"></script>
+  </body>
+</html>

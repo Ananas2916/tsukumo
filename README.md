@@ -53,14 +53,15 @@ follows the chosen voice. Translating the panel is a great first contribution.
 4. [Voices and listening](#voices-and-listening)
 5. [The desktop mascot](#the-desktop-mascot)
 6. [The assistant: reminders, comments, notifications](#the-assistant-reminders-comments-notifications)
-7. [Security](#security)
-8. [For AI agents and integrators](#for-ai-agents-and-integrators)
-9. [Configuration](#configuration)
-10. [How the lip-sync works](#how-the-lip-sync-works)
-11. [Project layout](#project-layout)
-12. [Troubleshooting](#troubleshooting)
-13. [Contributing](#contributing)
-14. [License](#license)
+7. [On your phone](#on-your-phone)
+8. [Security](#security)
+9. [For AI agents and integrators](#for-ai-agents-and-integrators)
+10. [Configuration](#configuration)
+11. [How the lip-sync works](#how-the-lip-sync-works)
+12. [Project layout](#project-layout)
+13. [Troubleshooting](#troubleshooting)
+14. [Contributing](#contributing)
+15. [License](#license)
 
 ---
 
@@ -336,6 +337,27 @@ want a 3D body at all, choose *flame only* and the VRM is never loaded.
 
 ---
 
+## On your phone
+
+Text chat with her from your phone, at home or away, through
+[Tailscale](https://tailscale.com): a private network between your own
+devices, so nothing is exposed to the internet.
+
+1. Install Tailscale on the PC and on the phone, signed in to the same account.
+2. On the PC open `http://127.0.0.1:8770/api/phone` and press **Attiva**. It
+   runs `tailscale serve --bg`: HTTPS on your PC's Tailscale name, reachable
+   only from your devices.
+3. Scan the QR code with the phone camera, open the link in Safari, then
+   Share → **Add to Home Screen**. It opens full screen, like an app.
+
+It's text only for now: the phone receives no audio, and messages you write
+there get a text reply without her speaking out loud at home. The QR contains
+the access key, so don't photograph or share it. To revoke it on every phone,
+delete `state/access_token` (installed app: `%APPDATA%\Tsukumo\state`) and
+restart Tsukumo.
+
+---
+
 ## Security
 
 Tsukumo can drive agents that read files and run commands, so the backend is
@@ -353,6 +375,13 @@ built to accept orders only from you. Since **2.1.1**:
   present the 256-bit token in `state/access_token`. Even with the token,
   remote clients can't change engines, install hooks, pip-install packages,
   clone voices or attach files outside the upload folder.
+- **Phone access stays private and keyed.** The phone link
+  (`https://<pc>.<tailnet>.ts.net/mobile.html#t=<token>`) carries the token
+  after `#`, so it never reaches the server or its logs; the page swaps it for
+  an `HttpOnly`, `Secure`, `SameSite=Strict` cookie. Only the page's own HTML
+  and `/assets/*` (public code, no data) load without the token, and the QR
+  page `/api/phone` works only from this PC. If you turn on Tailscale Funnel
+  the link becomes reachable from the whole internet, and the QR page says so.
 - **Hardened pages.** Strict Content-Security-Policy, no framing, `nosniff`,
   `no-referrer`, `no-store` on API responses, and request bodies capped even
   without a `Content-Length` header.
@@ -432,6 +461,10 @@ Server → client (broadcast to every connected client):
 { "type": "error", "message": "...", "source": "llm" | "tts" | "stt", "hint": "...", "action": "engines" }
 ```
 
+A text-only client (the phone page) connects to `/ws?mode=text`: it never
+receives `audio` or `visemes`, and its `chat` turns get a text reply without
+being spoken.
+
 Viseme timeline: `t` start (s), `d` duration, `v` viseme (`a i u e o sil`),
 `w` weight 0–1.
 
@@ -455,6 +488,8 @@ Viseme timeline: `t` start (s), `d` duration, `v` viseme (`a i u e o sil`),
 | `GET` | `/api/usage` | Claude Code / Codex / Antigravity limits and today's tokens |
 | `GET/POST` | `/api/preferences` | how chatty, about what, weather city |
 | `POST` | `/api/attachments?name=x.png` | upload a file (raw body), returns its path |
+| `GET` · `POST` | `/api/phone` · `/api/phone/serve` | PC only: Tailscale status and the QR for the phone; turn on `tailscale serve` |
+| `POST` | `/api/phone/session` | the phone swaps its token (`Authorization: Bearer`) for a cookie |
 | `GET` | `/api/context` · `/api/weather` · `/api/animations` · `/api/config` | what she sees |
 
 Interactive OpenAPI docs: <http://127.0.0.1:8770/docs>.

@@ -33,6 +33,7 @@ else.
 |---|---|
 | **A web page in the user's browser** (cross-site WebSocket hijacking, CSRF, DNS rebinding) | Origin must equal the backend's own origin for WebSocket and state-changing requests; `Origin: null` and `Sec-Fetch-Site: cross-site` refused; `Host` must be loopback or explicitly allowed; CORS closed |
 | **Another device on the network** | Backend binds to `127.0.0.1` by default. Non-loopback clients, and requests forwarded by a local proxy, need the 256-bit token in `state/access_token` (constant-time comparison) and can't reach configuration endpoints |
+| **Someone who gets the phone link** | The link is the key: it carries the token after `#`, which browsers never send to the server, so it stays out of logs. The page exchanges it for an `HttpOnly`, `Secure`, `SameSite=Strict` cookie. It's reachable only through `tailscale serve` (the user's own Tailscale devices) unless the user turns on Funnel, which the QR page flags. Only the page's static shell (`/mobile.html`, `/assets/*`) loads without the token. The QR page works only from the PC. Deleting `state/access_token` revokes every link |
 | **Malicious content in the UI** (agent replies, news headlines, file names) | Replies are rendered as DOM text, never HTML; links only `http(s)`; strict CSP (`script-src 'self'`, no inline scripts, `connect-src` limited to the backend); no framing |
 | **A compromised renderer** | Electron sandbox + context isolation, no Node in pages, minimal preload bridge, IPC accepted only from the backend's pages, navigation and new windows locked, permissions allow-listed, fuses disable `RunAsNode`, `NODE_OPTIONS` and `--inspect` |
 | **Config injection** | `.env` writes reject control characters and unknown keys; agent permission values must be among the panel's options |
@@ -56,6 +57,6 @@ else.
 - API keys: `.env` in the project (from source) or `%APPDATA%\Tsukumo\tsukumo.env`
   (installed app). They're never sent to the UI; the panel only sees "set / not
   set".
-- Spotify tokens: `state/spotify.json`. Remote access token: `state/access_token`.
+- Spotify tokens: `state/spotify.json`. Remote access token: `state/access_token`. It's also inside the phone link and its QR code.
 - If you run from source inside a synced folder (OneDrive, Dropbox), those
   files get synced too. The installed app keeps them in `%APPDATA%`.

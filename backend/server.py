@@ -69,7 +69,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -79,6 +79,7 @@ from .config import Settings, save_dotenv
 from .context import PCContext
 from .news import NewsService
 from . import notify as agent_notify
+from . import phone
 from .preferences import Preferences
 from .proactive import Proactive
 from .reminders import (
@@ -91,7 +92,7 @@ from .reminders import (
 )
 from .reminders import Reminder as ReminderItem
 from .memory import MemoryStore
-from .security import AccessPolicy, SecurityMiddleware, clean_env_value, is_loopback, within
+from .security import TOKEN_NAME, AccessPolicy, SecurityMiddleware, clean_env_value, is_loopback, within
 from .music import MusicService, SpotifyError
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
@@ -168,19 +169,29 @@ class ConnectionHub:
     Il broadcast serve perche' ci sono piu' finestre aperte (il personaggio,
     il pannello, magari una scheda del browser): tutte devono vedere lo stesso
     stato e lo stesso avatar parlare.
+
+    I client "solo testo" (la pagina del telefono, ``/ws?mode=text``) non
+    ricevono l'audio: sul telefono, magari in 4G, sarebbe solo peso.
     """
+
+    #: Campi che un client solo testo non riceve.
+    HEAVY = frozenset({"audio", "visemes"})
 
     def __init__(self) -> None:
         self._clients: set[WebSocket] = set()
+        self._text_only: set[WebSocket] = set()
         self._lock = asyncio.Lock()
 
-    async def add(self, websocket: WebSocket) -> None:
+    async def add(self, websocket: WebSocket, text_only: bool = False) -> None:
         async with self._lock:
             self._clients.add(websocket)
+            if text_only:
+                self._text_only.add(websocket)
 
     async def remove(self, websocket: WebSocket) -> None:
         async with self._lock:
             self._clients.discard(websocket)
+            self._text_only.discard(websocket)
 
     @property
     def count(self) -> int:
@@ -189,16 +200,19 @@ class ConnectionHub:
     async def broadcast(self, message: dict[str, Any]) -> None:
         async with self._lock:
             targets = list(self._clients)
+            text_only = set(self._text_only)
+        light = {k: v for k, v in message.items() if k not in self.HEAVY} if text_only and self.HEAVY & message.keys() else message
         dead: list[WebSocket] = []
         for client in targets:
             try:
-                await client.send_json(message)
+                await client.send_json(light if client in text_only else message)
             except Exception:
                 dead.append(client)
         if dead:
             async with self._lock:
                 for client in dead:
                     self._clients.discard(client)
+                    self._text_only.discard(client)
 
 
 hub = ConnectionHub()
@@ -263,6 +277,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         DETECTION_DONE.set()
     usage_task = asyncio.create_task(_usage_loop(), name="usage")
+    if SETTINGS.detect_engines:
+        # Il nome del PC su Tailscale, per il telefono (phone.py). E' una sonda
+        # sul PC come la ricerca dei motori, e si spegne con lei (nei test).
+        _spawn(_detect_tailscale(), report=False)
 
     if not is_loopback(POLICY.bind_host):
         logger.warning(
@@ -1392,12 +1410,79 @@ def _avatar_info() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Il telefono (backend/phone.py)
+# ---------------------------------------------------------------------------
+def _trust_tailscale(info: phone.Tailscale) -> None:
+    """Il nome del PC su Tailscale diventa un Host e un'origine accettati.
+
+    Non apre niente da solo: chi arriva da li' passa da ``tailscale serve``,
+    quindi non e' "dal PC" e deve comunque avere il token. Un nome .ts.net
+    non si risolve mai in 127.0.0.1, quindi non serve al DNS rebinding.
+    """
+    global POLICY
+    if not info.hostname or info.hostname in POLICY.extra_hosts:
+        return
+    POLICY = dataclasses.replace(
+        POLICY,
+        extra_hosts=POLICY.extra_hosts | {info.hostname},
+        extra_origins=POLICY.extra_origins | {f"https://{info.hostname}"},
+    )
+    logger.info("Tailscale: accetto %s (dal telefono serve comunque il token)", info.hostname)
+
+
+async def _detect_tailscale() -> None:
+    info = await phone.tailscale_status(SETTINGS.port)
+    _trust_tailscale(info)
+
+
+@app.get("/api/phone", response_class=HTMLResponse, include_in_schema=False)
+async def phone_page() -> HTMLResponse:
+    """Solo dal PC: lo stato di Tailscale e il QR col link per il telefono."""
+    info = await phone.tailscale_status(SETTINGS.port)
+    _trust_tailscale(info)
+    return HTMLResponse(phone.render_page(info, POLICY.token))
+
+
+@app.post("/api/phone/serve", include_in_schema=False, response_model=None)
+async def phone_serve() -> HTMLResponse | RedirectResponse:
+    """Solo dal PC: il pulsante "Attiva" della pagina qui sopra."""
+    ok, problem = await phone.start_serve(SETTINGS.port)
+    if ok:
+        return RedirectResponse("/api/phone", status_code=303)
+    info = await phone.tailscale_status(SETTINGS.port)
+    return HTMLResponse(phone.render_page(info, POLICY.token, problem))
+
+
+@app.post("/api/phone/session")
+async def phone_session(request: Request) -> JSONResponse:
+    """Il telefono scambia il token del link con un cookie, che accompagna il WebSocket.
+
+    Arrivati qui il middleware ha gia' controllato il token e l'origine.
+    """
+    response = JSONResponse({"ok": True})
+    if request.scope.get("tsukumo.remote"):
+        https = request.headers.get("origin", "").startswith("https://") or request.headers.get("x-forwarded-proto") == "https"
+        response.set_cookie(
+            TOKEN_NAME,
+            POLICY.token,
+            max_age=180 * 24 * 3600,
+            path="/",
+            secure=https,
+            httponly=True,
+            samesite="strict",
+        )
+    return response
+
+
+# ---------------------------------------------------------------------------
 # WebSocket
 # ---------------------------------------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    # La pagina del telefono: niente audio, e quello che scrive non si legge ad alta voce.
+    text_only = websocket.query_params.get("mode") == "text"
     await websocket.accept()
-    await hub.add(websocket)
+    await hub.add(websocket, text_only=text_only)
     logger.info("Client connesso (%d totali)", hub.count)
 
     try:
@@ -1436,7 +1521,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 if remote:
                     # Da fuori solo i file caricati (POST /api/attachments), mai un percorso del PC.
                     files = [item for item in files if within(Path(item), [SETTINGS.state_dir / "uploads"])]
-                _spawn(instance.chat(message.get("text", ""), hub.broadcast, files=files, screen=bool(message.get("screen"))))
+                _spawn(
+                    instance.chat(
+                        message.get("text", ""),
+                        hub.broadcast,
+                        files=files,
+                        screen=bool(message.get("screen")),
+                        silent=text_only,
+                    )
+                )
             elif kind == "capabilities":
                 # La finestra del personaggio in Electron sa fare gli screenshot.
                 if message.get("screen") and not remote:

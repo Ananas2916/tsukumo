@@ -12,6 +12,9 @@ pydantic>=2.7
 # Client HTTP asincrono (Ollama, Kokoro-FastAPI)
 httpx>=0.27
 
+# Il QR per aprire Tsukumo sul telefono (backend/phone.py)
+segno>=1.6
+
 # Analisi audio e generazione della timeline dei visemi
 numpy>=1.26,<3.0
 

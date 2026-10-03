@@ -16,7 +16,8 @@ qualunque sito. Qui ci sono le difese, dalla piu' esterna:
    ``Sec-Fetch-Site: cross-site`` viene respinto anche sulle letture.
 3. **Token** - chi non e' sul PC (un'altra macchina, un proxy come
    ``tailscale serve``) deve presentare il token di ``state/access_token``,
-   e non puo' comunque toccare le impostazioni (``LOCAL_ONLY``).
+   e non puo' comunque toccare le impostazioni (``LOCAL_ONLY``). Fa
+   eccezione solo il guscio della pagina del telefono (``public_shell``).
 4. **Header** - CSP, niente iframe, niente sniffing, niente cache delle API.
 5. **Limiti** - corpo delle richieste limitato anche senza Content-Length.
 
@@ -78,7 +79,15 @@ LOCAL_ONLY: tuple[tuple[str, str], ...] = (
     ("POST", "/api/preferences"),
     ("POST", "/api/music/"),
     ("PUT", "/api/memory/persona"),
+    # Il QR col token e il pulsante che lancia ``tailscale serve``.
+    ("GET", "/api/phone"),
+    ("POST", "/api/phone/serve"),
 )
+#: Il guscio della pagina del telefono: l'HTML e il bundle (codice gia'
+#: pubblico, nessun dato). Si carica senza token perche' il token sta dopo "#"
+#: nel link e lo legge proprio questa pagina (vedi phone.py).
+PUBLIC_PAGE = "/mobile.html"
+PUBLIC_ASSETS = "/assets/"
 #: Dove serve un corpo grande (file, audio, voci da clonare).
 UPLOAD_PATHS = ("/api/attachments", "/api/voices/clone", "/api/transcribe")
 #: Corpo massimo delle altre richieste (JSON di impostazioni, chat, promemoria).
@@ -243,6 +252,13 @@ def local_only(method: str, path: str) -> bool:
     return any(method == m and (path == p or (p.endswith("/") and path.startswith(p))) for m, p in LOCAL_ONLY)
 
 
+def public_shell(method: str, path: str) -> bool:
+    """La pagina del telefono e i suoi file, in lettura: un file per nome, niente sottocartelle."""
+    if method not in ("GET", "HEAD") or ".." in path or "\\" in path:
+        return False
+    return path == PUBLIC_PAGE or (path.startswith(PUBLIC_ASSETS) and path.count("/") == 2 and len(path) > len(PUBLIC_ASSETS))
+
+
 def content_security_policy(host: str) -> str:
     """La CSP delle pagine: solo codice nostro, connessioni solo verso di noi.
 
@@ -340,6 +356,8 @@ class SecurityMiddleware:
                 if not policy.origin_allowed(origin, host):
                     return 403, "origine non permessa"
         if not is_local(scope, headers):
+            if public_shell(method, path):
+                return None
             if not policy.token_ok(presented_token(scope, headers)):
                 return 401, "serve il token di accesso"
             if local_only(method, path):

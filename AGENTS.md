@@ -17,6 +17,7 @@ the HTTP/WebSocket API.
 |---|---|
 | `backend/server.py` | FastAPI app: REST, WebSocket `/ws`, engine switching, static files |
 | `backend/security.py` | **Access control**: Host/Origin checks, remote token, security headers, body limits |
+| `backend/phone.py`, `frontend/mobile.html`, `frontend/src/mobile/` | **Phone access**: Tailscale detection, the QR page `/api/phone`, the text-only chat page |
 | `backend/pipeline.py` | `Companion`: brain stream → sentences → TTS → visemes → broadcast; cancel; echo detection |
 | `backend/provider_specs.py` | Declarative registry of every engine (LLM, TTS, STT). The panel renders itself from it |
 | `backend/llm/` | `cli_agents.py` (Claude Code, Codex, Antigravity, Gemini CLI… via subprocess), `openclaw.py`, `openai_compatible.py`, `ollama.py`, `anthropic.py`, `gemini.py`, `mock.py`, `detect.py` |
@@ -69,7 +70,8 @@ The backend can drive agents that run commands, so:
 
 1. All requests go through `SecurityMiddleware` (`backend/security.py`). Don't
    add routes that bypass it, don't reintroduce `CORS *`, and don't accept
-   `Origin: null`.
+   `Origin: null`. For remote clients only `security.public_shell` (the phone
+   page's HTML and `/assets/*`) loads without the token: don't widen it.
 2. Any new endpoint that changes configuration, installs something, launches
    programs or touches files outside `state/uploads` must be added to
    `LOCAL_ONLY`.
