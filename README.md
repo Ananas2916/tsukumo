@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/flame.png" width="112" alt="Tsukumo's spirit flame"></p>
+
 # Tsukumo
 
 **Give your AI agent a body.** Tsukumo is a 3D desktop companion that becomes
