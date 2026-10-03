@@ -201,6 +201,44 @@ def test_antigravity_denied_tools_and_failures():
     _feed(failed, [_line(event="result", result={"status": "ERROR", "error": "quota esaurita"})])
     assert failed.error == "quota esaurita"
 
+    # Interrotta a meta' risposta: l'errore vale anche se un pezzo di testo e' arrivato.
+    cut = AntigravityStreamParser()
+    _feed(
+        cut,
+        [
+            _agy(1, "agent_response", "ACTIVE", text_delta="Allora, "),
+            _line(event="result", result={"status": "ERROR", "response": "Allora, ", "error": "The stream was interrupted."}),
+        ],
+    )
+    assert cut.error == "The stream was interrupted."
+
+
+def test_antigravity_ignores_an_old_error_after_a_complete_answer():
+    # Righe vere di agy 1.2.16 riprendendo una conversazione interrotta due giorni prima:
+    # la risposta arriva intera, ma il riepilogo resta in ERROR a ogni turno.
+    interrupted = "The stream was interrupted. Please continue the task you were working on."
+    lines = [
+        _line(event="init", conversation_id=CONV, init={"cwd": "C:\\Users\\filip"}),
+        _agy(33, "user_input"),
+        _agy(34, "system_message", duration_seconds=0.0005067),
+        _agy(35, "agent_response", "ACTIVE", text_delta="ciao"),
+        _agy(35, "agent_response", "DONE", text_delta="\n", duration_seconds=2.8182023),
+        _line(
+            event="result",
+            result={
+                "conversation_id": CONV,
+                "status": "ERROR",
+                "response": "ciao\n",
+                "error": interrupted,
+                "duration_seconds": 173435.9943541,
+                "num_turns": 8,
+            },
+        ),
+    ]
+    parser = AntigravityStreamParser()
+    assert _feed(parser, lines) == "ciao\n"
+    assert parser.error is None and parser.stale_error == interrupted
+
 
 def test_antigravity_argv_attaches_the_prompt(tmp_path):
     agy = tmp_path / "agy.exe"

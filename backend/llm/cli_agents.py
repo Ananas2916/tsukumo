@@ -667,10 +667,13 @@ class AntigravityStreamParser:
         self.conversation_id: str | None = None
         self.finished = False
         self.error: str | None = None
+        #: Errore che il riepilogo si porta dietro da un turno precedente, a risposta gia' completa.
+        self.stale_error: str | None = None
         #: Tool rifiutati perche' chiedevano un permesso (senza finestra non si puo' dare).
         self.denied: list[str] = []
         self.activities: list[Activity] = []
         self._produced = False
+        self._answered = False
         self._last_step: Any = None
         self._tools: set[Any] = set()
 
@@ -695,8 +698,11 @@ class AntigravityStreamParser:
             step = event.get("step_update") or {}
             self.conversation_id = step.get("conversation_id") or self.conversation_id
             index = step.get("step_index")
-            if step.get("step_type") == "agent_response" and step.get("text_delta"):
-                return self._emit(str(step["text_delta"]), index)
+            if step.get("step_type") == "agent_response":
+                if step.get("state") == "DONE":
+                    self._answered = True
+                if step.get("text_delta"):
+                    return self._emit(str(step["text_delta"]), index)
             if step.get("step_type") == "tool" and index not in self._tools:
                 # Un tool arriva due volte (iniziato, finito): si racconta una volta.
                 self._tools.add(index)
@@ -715,7 +721,14 @@ class AntigravityStreamParser:
             ]
             status = str(result.get("status") or "SUCCESS")
             if status != "SUCCESS":
-                self.error = str(result.get("error") or result.get("response") or status)
+                error = str(result.get("error") or result.get("response") or status)
+                # Il risultato riassume tutta la conversazione: un turno interrotto
+                # una volta la lascia in ERROR per sempre, anche quando la risposta
+                # di adesso e' arrivata fino in fondo. Quella vale, l'errore no.
+                if self._answered:
+                    self.stale_error = error
+                    return []
+                self.error = error
                 return []
             if not self._produced and result.get("response"):
                 return self._emit(str(result["response"]), None)
@@ -803,6 +816,8 @@ class AntigravityClient(_CLIAgent):
             self.session.save(parser.conversation_id)
         if parser.error:
             raise AgentError(f"Antigravity: {parser.error}")
+        if parser.stale_error:
+            logger.info("Antigravity ha risposto, ma la conversazione riporta ancora: %s", parser.stale_error)
         if parser.denied and not produced:
             raise AgentError(
                 f"Antigravity voleva usare {', '.join(parser.denied)}, ma senza la sua finestra non può "
