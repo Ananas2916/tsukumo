@@ -71,7 +71,14 @@ class PetPhysics {
   }
 
   setAnchors(anchors) {
-    this.anchors = { ...this.anchors, ...anchors };
+    // Arrivano dal renderer: con la finestra ridotta a icona innerHeight vale 0
+    // e una frazione diventa Infinity o NaN, che poi finirebbe in setPosition.
+    const next = { ...this.anchors };
+    for (const key of ['feet', 'seat', 'center']) {
+      const value = Number(anchors?.[key]);
+      if (Number.isFinite(value) && value > -1 && value < 2) next[key] = value;
+    }
+    this.anchors = next;
     this.snap();
   }
 

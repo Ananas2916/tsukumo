@@ -249,7 +249,11 @@ LLM_REGISTRY.register(
                     {"value": "default", "label": "Prudente — rifiuta ciò che chiederebbe conferma"},
                     {"value": "plan", "label": "Solo pianificazione"},
                     {"value": "accept-edits", "label": "Puo' modificare file nella cartella"},
-                    {"value": "skip", "label": "Approva tutto da solo (anche i comandi)"},
+                    {"value": "skip", "label": "Approva tutto da solo (anche i comandi) — rischioso"},
+                ),
+                help=(
+                    "Con «Approva tutto» esegue qualunque comando senza chiedere: chi riesce a "
+                    "parlarle (o un testo che le fai leggere) puo' agire sul tuo PC. Sceglilo solo se sai cosa fai."
                 ),
                 advanced=True,
             ),

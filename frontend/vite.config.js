@@ -31,8 +31,10 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     // In sviluppo il frontend gira su 5173 e inoltra API e WebSocket al backend.
+    // Host e Origin restano quelli della pagina (localhost:5173): per il
+    // backend e' la stessa origine, quindi niente eccezioni in security.py.
     proxy: {
-      '/api': { target: BACKEND, changeOrigin: true },
+      '/api': { target: BACKEND },
       '/ws': { target: BACKEND, ws: true },
     },
   },

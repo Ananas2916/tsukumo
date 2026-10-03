@@ -30,6 +30,7 @@ const {
   nativeImage,
   powerMonitor,
   screen,
+  session,
   shell,
 } = require('electron');
 const { spawn, spawnSync } = require('node:child_process');
@@ -118,6 +119,7 @@ const LOG_FILE = process.env.DC_LOG_FILE || path.join(DATA_ROOT, 'logs', 'compan
 const HOST = process.env.DC_HOST || '127.0.0.1';
 const PORT = Number(process.env.DC_PORT || 8770);
 const BACKEND_URL = `http://${HOST}:${PORT}`;
+const BACKEND_ORIGIN = new URL(BACKEND_URL).origin;
 const SPAWN_BACKEND = process.env.DC_NO_SPAWN !== '1';
 
 /**
@@ -173,6 +175,89 @@ let narrowSince = null;
 let panelTab = 'chat';
 /** Ultimo stato di Spotify mandato alle pagine. */
 let music = { open: false, playing: false, artist: '', title: '' };
+
+// ---------------------------------------------------------------------------
+// Sicurezza: le finestre mostrano solo le pagine del backend
+// ---------------------------------------------------------------------------
+// Ogni renderer in sandbox: anche se una pagina venisse compromessa non
+// avrebbe Node, e il preload espone solo i comandi elencati in preload.js.
+app.enableSandbox();
+
+/** L'URL e' una pagina servita dal nostro backend? */
+function ownPage(url) {
+  try {
+    return new URL(url).origin === BACKEND_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/** Un link esterno va nel browser di sistema, ma solo se e' http(s): mai file://, ms-*, smb://... */
+function openOutside(url) {
+  try {
+    const { protocol } = new URL(url);
+    if (protocol === 'https:' || protocol === 'http:') shell.openExternal(url);
+  } catch {
+    /* non e' un URL */
+  }
+}
+
+/** I permessi che le nostre pagine usano davvero (microfono, appunti, notifiche). */
+const ALLOWED_PERMISSIONS = new Set(['media', 'clipboard-sanitized-write', 'notifications', 'fullscreen', 'speaker-selection']);
+
+app.on('web-contents-created', (_event, contents) => {
+  // Nessuna finestra nuova: i link si aprono nel browser.
+  contents.setWindowOpenHandler(({ url }) => {
+    openOutside(url);
+    return { action: 'deny' };
+  });
+  // Una pagina che prova ad andare altrove (link, redirect, script) resta dov'e':
+  // fuori dal backend il preload darebbe i nostri comandi a un sito qualunque.
+  contents.on('will-navigate', (event) => {
+    if (ownPage(event.url)) return;
+    event.preventDefault();
+    openOutside(event.url);
+  });
+  contents.on('will-redirect', (event) => {
+    if (!ownPage(event.url)) event.preventDefault();
+  });
+  contents.on('will-attach-webview', (event) => event.preventDefault());
+});
+
+function guardPermissions() {
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    callback(ALLOWED_PERMISSIONS.has(permission) && ownPage(details?.requestingUrl || contents.getURL()));
+  });
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => ALLOWED_PERMISSIONS.has(permission) && ownPage(origin));
+}
+
+/** Chi manda un messaggio IPC deve essere una nostra pagina (non un iframe, non un sito). */
+function trusted(event) {
+  try {
+    return ownPage(event.senderFrame?.url ?? '');
+  } catch {
+    return false; // frame gia' distrutto
+  }
+}
+
+function handleIpc(channel, listener) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!trusted(event)) throw new Error(`IPC ${channel} rifiutato: mittente sconosciuto`);
+    return listener(event, ...args);
+  });
+}
+
+function onIpc(channel, listener) {
+  ipcMain.on(channel, (event, ...args) => {
+    if (trusted(event)) listener(event, ...args);
+  });
+}
+
+/** `console-message`: da Electron 35 i dati stanno nell'evento, e il livello e' una parola. */
+function consoleEntry(event) {
+  const levels = { debug: 0, verbose: 0, info: 1, warning: 2, error: 3 };
+  return { level: levels[event?.level] ?? 1, message: String(event?.message ?? '') };
+}
 
 // ---------------------------------------------------------------------------
 // Impostazioni che sopravvivono ai riavvii
@@ -441,7 +526,7 @@ function createPetWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       additionalArguments: ['--dc-role=pet'],
       // La finestra e' quasi sempre in click-through, quindi spesso non
       // riceve il "gesto dell'utente" che Chromium pretende per sbloccare
@@ -458,15 +543,12 @@ function createPetWindow() {
   // finestra restava trasparente e vuota, e sembrava che non fosse partito niente.
   showSplash(petWindow, { title: `${APP_NAME} si sta svegliando…`, detail: 'Avvio il cervello e la voce.' });
 
-  // I link esterni vanno nel browser di sistema, non dentro la finestra.
-  petWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  // I link esterni vanno nel browser di sistema: vedi 'web-contents-created'.
 
   // I console.log della pagina finiscono nel terminale: senza questo, in una
   // finestra senza DevTools aperti il renderer e' una scatola nera.
-  petWindow.webContents.on('console-message', (_event, level, message) => {
+  petWindow.webContents.on('console-message', (event) => {
+    const { level, message } = consoleEntry(event);
     if (message.startsWith('[pet]') || level >= 2) console.log(`[renderer] ${message}`);
   });
 
@@ -644,6 +726,8 @@ function ownHandles() {
 const physics = new PetPhysics({
   bounds: () => petWindow.getBounds(),
   move: (x, y) => {
+    // Un NaN qui fa lanciare un'eccezione a Electron a ogni tick (60 al secondo).
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     if (alive(petWindow)) petWindow.setPosition(Math.round(x), Math.round(y));
   },
   workArea: (bounds) =>
@@ -716,6 +800,7 @@ function keepOnTop() {
 
 /** Nuova scala: la finestra cresce tenendo fermi i piedi (o la seduta) e l'asse del corpo. */
 function setScale(scale) {
+  if (!Number.isFinite(scale)) return settings.scale;
   settings.scale = clamp(scale, ...SCALE_RANGE);
   saveSettings();
   if (!alive(petWindow)) return settings.scale;
@@ -797,7 +882,7 @@ function createPanelWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       additionalArguments: ['--dc-role=panel'],
     },
   });
@@ -808,11 +893,8 @@ function createPanelWindow() {
   panelWindow.on('show', broadcastState);
   panelWindow.on('hide', broadcastState);
 
-  panelWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  panelWindow.webContents.on('console-message', (_event, level, message) => {
+  panelWindow.webContents.on('console-message', (event) => {
+    const { level, message } = consoleEntry(event);
     if (level >= 2) console.log(`[panel] ${message}`);
   });
 
@@ -1011,7 +1093,7 @@ function updateTrayMenu() {
 // IPC (le controparti sono in preload.js)
 // ---------------------------------------------------------------------------
 /** Il renderer dice se il cursore e' sopra un pixel opaco del personaggio. */
-ipcMain.on('pet:set-interactive', (_event, value) => applyInteractive(Boolean(value)));
+onIpc('pet:set-interactive', (_event, value) => applyInteractive(Boolean(value)));
 /**
  * "Guarda lo schermo": uno screenshot dello schermo col cursore, salvato nei
  * file temporanei. Solo su richiesta esplicita (chat, voce, menu), mai da solo.
@@ -1032,10 +1114,10 @@ async function captureScreen() {
   return file;
 }
 
-ipcMain.handle('pet:capture-screen', () => captureScreen());
+handleIpc('pet:capture-screen', () => captureScreen());
 
 // Promemoria e notifiche: anche con il personaggio coperto o a schermo intero.
-ipcMain.on('pet:notify', (_event, { title, body } = {}) => {
+onIpc('pet:notify', (_event, { title, body } = {}) => {
   if (!Notification.isSupported()) return;
   new Notification({
     title: String(title || APP_NAME),
@@ -1045,31 +1127,32 @@ ipcMain.on('pet:notify', (_event, { title, body } = {}) => {
   }).show();
 });
 
-ipcMain.handle('pet:drag-start', () => {
+handleIpc('pet:drag-start', () => {
   physics.grab();
   const [x, y] = petWindow.getPosition();
   return { x, y };
 });
 
-ipcMain.on('pet:drag-move', (_event, { x, y }) => {
+onIpc('pet:drag-move', (_event, { x, y } = {}) => {
   if (physics.state !== 'held' || !alive(petWindow)) return;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
   petWindow.setPosition(Math.round(x), Math.round(y));
 });
 
-ipcMain.handle('pet:drag-end', () => {
+handleIpc('pet:drag-end', () => {
   if (physics.state === 'held') physics.release();
   return true;
 });
 
 /** Dove stanno piedi, seduta e asse del corpo nella finestra (frazioni). */
-ipcMain.on('pet:anchors', (_event, anchors) => physics.setAnchors(anchors));
+onIpc('pet:anchors', (_event, anchors) => physics.setAnchors(anchors));
 
-ipcMain.handle('pet:posture', (_event, posture) => physics.requestPosture(posture));
+handleIpc('pet:posture', (_event, posture) => physics.requestPosture(posture));
 // Lo sprint della fiammella: quando farlo lo decide il renderer, la corsa la fa la fisica.
-ipcMain.handle('pet:sprint', (_event, kind) => physics.sprint(kind));
+handleIpc('pet:sprint', (_event, kind) => physics.sprint(kind));
 
-ipcMain.handle('pet:scale-by', (_event, factor) => setScale(settings.scale * factor));
-ipcMain.handle('pet:set-scale', (_event, value) => setScale(Number(value)));
+handleIpc('pet:scale-by', (_event, factor) => setScale(settings.scale * factor));
+handleIpc('pet:set-scale', (_event, value) => setScale(Number(value)));
 
 function togglePinned() {
   settings.pinned = !settings.pinned;
@@ -1090,10 +1173,10 @@ function toggleGhost() {
   return ghostMode;
 }
 
-ipcMain.handle('pet:toggle-always-on-top', togglePinned);
-ipcMain.handle('pet:toggle-ghost', toggleGhost);
+handleIpc('pet:toggle-always-on-top', togglePinned);
+handleIpc('pet:toggle-ghost', toggleGhost);
 
-ipcMain.handle('pet:set-windows', (_event, value) => {
+handleIpc('pet:set-windows', (_event, value) => {
   settings.windows = Boolean(value);
   physics.windowsEnabled = settings.windows;
   saveSettings();
@@ -1102,7 +1185,7 @@ ipcMain.handle('pet:set-windows', (_event, value) => {
 });
 
 /** Sceglie un altro modello .vrm e lo passa al personaggio come dati binari. */
-ipcMain.handle('pet:pick-model', async () => {
+handleIpc('pet:pick-model', async () => {
   const result = await dialog.showOpenDialog(alive(panelWindow) ? panelWindow : petWindow, {
     title: 'Scegli un modello VRM',
     filters: [{ name: 'Modelli VRM', extensions: ['vrm'] }],
@@ -1120,19 +1203,19 @@ ipcMain.handle('pet:pick-model', async () => {
 });
 
 /** Comandi dal pannello al personaggio (guadagno della bocca, azioni, debug...). */
-ipcMain.on('pet:command', (_event, command) => sendToPet('pet:command', command));
+onIpc('pet:command', (_event, command) => sendToPet('pet:command', command));
 
-ipcMain.on('panel:tab', (_event, tab) => {
+onIpc('panel:tab', (_event, tab) => {
   panelTab = String(tab || 'chat');
   sendToPet('pet:state', panelState());
 });
 
-ipcMain.handle('panel:toggle', (_event, focus) => togglePanel(focus));
-ipcMain.handle('panel:open', (_event, focus) => showPanel(focus));
-ipcMain.handle('panel:hide', () => panelWindow?.hide());
-ipcMain.handle('panel:state', () => panelState());
+handleIpc('panel:toggle', (_event, focus) => togglePanel(focus));
+handleIpc('panel:open', (_event, focus) => showPanel(focus));
+handleIpc('panel:hide', () => panelWindow?.hide());
+handleIpc('panel:state', () => panelState());
 
-ipcMain.handle('panel:set-docked', (_event, value) => {
+handleIpc('panel:set-docked', (_event, value) => {
   settings.docked = Boolean(value);
   saveSettings();
   dockPanel();
@@ -1140,7 +1223,7 @@ ipcMain.handle('panel:set-docked', (_event, value) => {
   return settings.docked;
 });
 
-ipcMain.handle('panel:set-pinned', (_event, value) => {
+handleIpc('panel:set-pinned', (_event, value) => {
   settings.panelPinned = Boolean(value);
   saveSettings();
   panelWindow?.setAlwaysOnTop(settings.panelPinned);
@@ -1185,14 +1268,14 @@ function registerPushToTalk(key) {
   }
 }
 
-ipcMain.handle('voice:set-key', (_event, key) => registerPushToTalk(key));
+handleIpc('voice:set-key', (_event, key) => registerPushToTalk(key));
 
-ipcMain.on('voice:state', (_event, state) => {
+onIpc('voice:state', (_event, state) => {
   voiceState = state ?? {};
   sendToPanel('voice:command', { type: 'state', ...voiceState });
 });
 
-ipcMain.handle('app:quit', () => app.quit());
+handleIpc('app:quit', () => app.quit());
 
 // ---------------------------------------------------------------------------
 // Ciclo di vita
@@ -1208,6 +1291,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     console.log(`[electron] ${APP_NAME} ${app.getVersion()} in avvio`);
+    guardPermissions();
     loadSettings();
     physics.windowsEnabled = settings.windows;
 

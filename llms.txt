@@ -1,0 +1,24 @@
+# Tsukumo
+
+> Tsukumo gives an AI agent a body: a 3D VRM desktop companion for Windows that becomes the face and voice of any brain (Claude Code, Codex, Gemini CLI, OpenClaw, Antigravity and 13 more CLI agents, LM Studio, Ollama, or cloud APIs). Local text-to-speech with lip-sync, voice input, reminders, agent notifications and usage limits. Python (FastAPI) backend, Three.js + three-vrm frontend, Electron shell. Offline by default. AGPL-3.0.
+
+- Backend: `http://127.0.0.1:8770`, WebSocket `/ws`, REST `/api/*`, OpenAPI at `/docs`.
+- Local scripts (no `Origin` header) may call the API directly; browsers only from the app's origin; other devices need `Authorization: Bearer <state/access_token>`.
+- Useful calls: `POST /api/say {"text"}`, `POST /api/chat {"text"}`, `POST /api/notify {"source","kind","message"}`, `POST /api/reminders {"phrase"}`, `GET /api/usage`.
+
+## Docs
+
+- [README](https://github.com/Ananas2916/tsukumo/blob/master/README.md): features, install, configuration, WebSocket and REST reference
+- [AGENTS.md](https://github.com/Ananas2916/tsukumo/blob/master/AGENTS.md): code map, commands, conventions, security invariants for contributors and coding agents
+- [SECURITY.md](https://github.com/Ananas2916/tsukumo/blob/master/SECURITY.md): threat model and how to report vulnerabilities
+
+## Code
+
+- [backend/provider_specs.py](https://github.com/Ananas2916/tsukumo/blob/master/backend/provider_specs.py): declarative registry of every LLM, TTS and STT engine
+- [backend/pipeline.py](https://github.com/Ananas2916/tsukumo/blob/master/backend/pipeline.py): brain stream to sentences, voice, visemes
+- [backend/security.py](https://github.com/Ananas2916/tsukumo/blob/master/backend/security.py): access control and security headers
+- [backend/llm/cli_agents.py](https://github.com/Ananas2916/tsukumo/blob/master/backend/llm/cli_agents.py): how CLI agents are driven
+
+## Optional
+
+- [Releases](https://github.com/Ananas2916/tsukumo/releases/latest): Windows installer

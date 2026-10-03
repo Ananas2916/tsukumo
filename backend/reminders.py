@@ -129,8 +129,12 @@ class ReminderStore:
         """E' scattato: si toglie, o si sposta al giorno dopo se si ripete."""
         now = time.time() if now is None else now
         if reminder.repeat == "daily":
-            while reminder.due <= now:
-                reminder.due += 86400
+            # Stessa ora *sul tuo orologio*, non 86400 secondi dopo: col cambio
+            # dell'ora una sveglia delle 7 scatterebbe alle 6 (o alle 8).
+            moment = datetime.fromtimestamp(reminder.due)
+            while moment.timestamp() <= now:
+                moment += timedelta(days=1)
+            reminder.due = moment.timestamp()
             with self._lock:
                 self._items[reminder.id] = reminder
             self._save()

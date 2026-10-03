@@ -1168,7 +1168,8 @@ export class VrmStage {
 
     // Le ancore si misurano a camera ferma, subito dopo il suo aggiornamento.
     if (this._anchorsDirty && (this.body || this.spiritOnly) && this.onAnchors) {
-      if (Math.abs(this.orbit.distance - this.orbit.targetDistance) < 1e-3) {
+      // Finestra ridotta a icona: niente misure (si dividerebbe per zero).
+      if (Math.abs(this.orbit.distance - this.orbit.targetDistance) < 1e-3 && window.innerWidth && window.innerHeight) {
         this._anchorsDirty = false;
         this.onAnchors(this._computeAnchors());
       }

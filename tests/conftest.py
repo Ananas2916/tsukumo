@@ -48,5 +48,14 @@ def client():
 
     from backend import server
 
-    with TestClient(server.app) as test_client:
+    class LocalClient(TestClient):
+        """Come la shell Electron: dal PC stesso, verso 127.0.0.1 (vedi security.py)."""
+
+        def websocket_connect(self, url, *args, **kwargs):
+            # Il TestClient manderebbe "Host: testserver" anche ai WebSocket.
+            if url.startswith("/"):
+                url = f"ws://127.0.0.1:8770{url}"
+            return super().websocket_connect(url, *args, **kwargs)
+
+    with LocalClient(server.app, base_url="http://127.0.0.1:8770", client=("127.0.0.1", 50000)) as test_client:
         yield test_client

@@ -8,6 +8,7 @@ nella root del progetto (vedi ``.env.example``).
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,12 @@ from . import __version__
 from . import provider_specs  # noqa: F401  (l'import popola i registri)
 from .languages import system_language
 from .providers import REGISTRIES
+from .security import clean_env_value
 
 # Root del progetto: .../desk-companion
 ROOT = Path(__file__).resolve().parent.parent
+#: Le chiavi che il pannello puo' scrivere nel .env.
+_ENV_KEY = re.compile(r"DC_[A-Z0-9_]{1,64}")
 
 
 def env_file() -> Path:
@@ -61,6 +65,11 @@ def save_dotenv(updates: dict[str, str], path: Path | None = None) -> Path:
     imporre una stringa vuota.
     """
     path = path or env_file()
+    for key in updates:
+        if not _ENV_KEY.fullmatch(key):
+            raise ValueError(f"Nome di variabile non valido: {key!r}")
+    # Un a capo nel valore scriverebbe una riga (una variabile) in piu'.
+    updates = {key: clean_env_value(value) for key, value in updates.items()}
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
     remaining = dict(updates)
     output: list[str] = []
@@ -164,7 +173,11 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8770
     log_level: str = "info"
-    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    #: Origini in piu' (oltre al backend stesso) che possono usare API e WebSocket.
+    #: Vuoto di default: vedi backend/security.py.
+    cors_origins: list[str] = field(default_factory=list)
+    #: Nomi in piu' accettati nell'header Host (per un proxy come ``tailscale serve``).
+    allowed_hosts: list[str] = field(default_factory=list)
 
     # --- LLM --------------------------------------------------------------
     # "ollama" = LLM locale via Ollama
@@ -261,12 +274,14 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         load_dotenv()
-        origins = _env("CORS_ORIGINS", "*")
+        origins = _env("CORS_ORIGINS", "")
+        hosts = _env("ALLOWED_HOSTS", "")
         return cls(
             host=_env("HOST", "127.0.0.1"),
             port=_env_int("PORT", 8770),
             log_level=_env("LOG_LEVEL", "info"),
             cors_origins=[o.strip() for o in origins.split(",") if o.strip()],
+            allowed_hosts=[h.strip() for h in hosts.split(",") if h.strip()],
             llm_backend=_env("LLM_BACKEND", "ollama").lower(),
             ollama_url=_env("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/"),
             ollama_model=_env("OLLAMA_MODEL", "llama3.2"),

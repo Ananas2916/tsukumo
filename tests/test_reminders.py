@@ -145,3 +145,17 @@ def test_commands_cancel_remaining_and_list():
     assert command_reply("annulla il timer", store, NOW) == ("Fatto, ho annullato: Timer 5 minuti.", True)
     assert command_reply("cancel the timer", store, NOW) == ("There's nothing to cancel.", False)
     assert command_reply("che ore sono?", store, NOW) is None
+
+
+def test_daily_reminder_keeps_the_wall_clock_across_dst(tmp_path):
+    """Una sveglia delle 7 resta alle 7 anche dopo il cambio dell'ora (25 ottobre 2026 in Italia)."""
+    from datetime import datetime
+
+    from backend.reminders import Reminder, ReminderStore
+
+    store = ReminderStore(tmp_path / "reminders.json")
+    due = datetime(2026, 10, 24, 7, 0).timestamp()
+    reminder = store.add(Reminder(kind="alarm", due=due, text="sveglia", repeat="daily"))
+    store.done(reminder, now=due + 1)
+    following = datetime.fromtimestamp(store.get(reminder.id).due)
+    assert (following.year, following.month, following.day, following.hour, following.minute) == (2026, 10, 25, 7, 0)

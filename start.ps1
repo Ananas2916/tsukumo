@@ -64,7 +64,7 @@ function Get-Python {
 
 function Assert-Node {
     if ($null -eq (Get-Command npm -ErrorAction SilentlyContinue)) {
-        throw 'npm non trovato nel PATH. Installa Node.js 18 o superiore.'
+        throw 'npm non trovato nel PATH. Installa Node.js 22.12 o superiore (lo chiede Electron).'
     }
 }
 

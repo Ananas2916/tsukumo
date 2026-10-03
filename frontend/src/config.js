@@ -1,37 +1,27 @@
 /**
  * Risoluzione degli endpoint del backend.
  *
- * Tre scenari supportati:
+ * Due scenari:
  *  1. build servita da FastAPI (http://127.0.0.1:8770)  -> stessa origine
  *  2. dev server Vite (http://localhost:5173)           -> proxy verso il backend
- *  3. pagina aperta da file:// o su un'altra porta      -> ?backend=http://host:porta
+ *
+ * Prima c'era anche `?backend=http://host:porta`, salvato in localStorage:
+ * bastava un link per far parlare la pagina con un server qualunque, per
+ * sempre. Il backend ora accetta solo la propria origine (security.py),
+ * quindi non servirebbe comunque.
  */
 
 const DEFAULT_BACKEND = 'http://127.0.0.1:8770';
 
-/** Legge l'override passato in query string o salvato in localStorage. */
-function readOverride() {
-  const fromQuery = new URLSearchParams(window.location.search).get('backend');
-  if (fromQuery) {
-    try {
-      window.localStorage.setItem('dc:backend', fromQuery);
-    } catch {
-      /* localStorage puo' essere disabilitato: non e' un problema */
-    }
-    return fromQuery;
-  }
-  try {
-    return window.localStorage.getItem('dc:backend');
-  } catch {
-    return null;
-  }
+try {
+  // Un override rimasto da una versione precedente non deve piu' contare.
+  window.localStorage.removeItem('dc:backend');
+} catch {
+  /* localStorage puo' essere disabilitato: non e' un problema */
 }
-
-const override = readOverride();
 
 /** Origine HTTP del backend (senza slash finale). */
 export const httpBase = (() => {
-  if (override) return override.replace(/\/$/, '');
   // Con i protocolli http/https usiamo la stessa origine: in dev ci pensa il
   // proxy di Vite, in produzione il backend serve anche i file statici.
   if (window.location.protocol.startsWith('http')) return '';

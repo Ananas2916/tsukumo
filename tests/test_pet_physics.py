@@ -107,3 +107,24 @@ def test_grabbing_her_stops_the_sprint(tmp_path):
     out = _run(tmp_path, kind="dash", randoms=[0.9, 0.0], grabAfter=0.5)
     assert out["state"] == "held" and out["run"] is None
     assert out["phases"][-1] == "end"
+
+
+def test_invalid_anchors_never_reach_the_window():
+    """Con la finestra ridotta a icona il renderer misurava le ancore dividendo per zero."""
+    script = """
+const { PetPhysics } = require(%s);
+const moves = [];
+const physics = new PetPhysics({
+  bounds: () => ({ x: 100, y: 500, width: 300, height: 460 }),
+  move: (x, y) => moves.push([x, y]),
+  workArea: () => ({ x: 0, y: 0, width: 1920, height: 1040 }),
+  windows: () => [], windowRect: () => null, emit: () => {}, random: () => 0.5,
+});
+physics.setAnchors({ feet: Infinity, seat: NaN, center: 1 / 0 });
+physics.setAnchors({ feet: 'x', center: -5 });
+physics.setAnchors(null);
+console.log(JSON.stringify({ anchors: physics.anchors, finite: moves.every(([x, y]) => Number.isFinite(x) && Number.isFinite(y)) }));
+""" % json.dumps(str(PHYSICS))
+    result = json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
+    assert result["anchors"] == {"feet": 0.985, "seat": 0.56, "center": 0.5}
+    assert result["finite"]

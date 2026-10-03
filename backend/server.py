@@ -91,6 +91,7 @@ from .reminders import (
 )
 from .reminders import Reminder as ReminderItem
 from .memory import MemoryStore
+from .security import AccessPolicy, SecurityMiddleware, clean_env_value, is_loopback, within
 from .music import MusicService, SpotifyError
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
@@ -108,6 +109,8 @@ from .weather import WeatherService
 logger = logging.getLogger("tsukumo")
 
 SETTINGS = Settings.from_env()
+#: Chi puo' parlare col backend (Host, Origin, token per chi non e' sul PC).
+POLICY = AccessPolicy.from_settings(SETTINGS)
 
 #: Variabile d'ambiente che dice quale motore e' attivo, per tipo.
 SELECT_KEYS = {"llm": "DC_LLM_BACKEND", "tts": "DC_TTS_ENGINE", "stt": "DC_STT_ENGINE"}
@@ -261,6 +264,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         DETECTION_DONE.set()
     usage_task = asyncio.create_task(_usage_loop(), name="usage")
 
+    if not is_loopback(POLICY.bind_host):
+        logger.warning(
+            "In ascolto su %s: dagli altri dispositivi serve il token di accesso (%s)",
+            POLICY.bind_host,
+            POLICY.token_path,
+        )
+        POLICY.token  # creato adesso, cosi' il file c'e' gia'
     companion = app.state.companion
     logger.info(
         "Pronto: cervello=%s  voce=%s  ascolto=%s  -> http://%s:%s",
@@ -286,13 +296,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Tsukumo", version=__version__, lifespan=lifespan)
+# Il CORS serve solo per le origini aggiunte a mano (DC_CORS_ORIGINS): le
+# pagine di Tsukumo stanno sulla stessa origine del backend.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=SETTINGS.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=sorted(POLICY.extra_origins),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+# Aggiunto per ultimo = il piu' esterno: decide prima di tutto il resto.
+app.add_middleware(SecurityMiddleware, policy=lambda: POLICY)
 
 
 def companion() -> Companion:
@@ -466,7 +480,17 @@ def _request_options(spec: ProviderSpec, options: dict[str, str | None]) -> dict
         text = "" if value is None else str(value)
         if allowed[env_name].secret and not text.strip():
             continue
-        cleaned[env_name] = text
+        if len(text) > 4096:
+            raise HTTPException(status_code=400, detail=f"Valore troppo lungo per {env_name}")
+        spec_field = allowed[env_name]
+        if spec_field.type == "select" and env_name.endswith(("_PERMISSION", "_SANDBOX")) and text:
+            # I permessi di un agente solo fra quelli del menu: niente "bypassPermissions" di straforo.
+            if text not in {option["value"] for option in spec_field.options}:
+                raise HTTPException(status_code=400, detail=f"{env_name}: valore non previsto {text!r}")
+        try:
+            cleaned[env_name] = clean_env_value(text)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"{env_name}: {exc}") from exc
     return cleaned
 
 
@@ -790,7 +814,12 @@ async def api_transcribe(request: Request) -> dict[str, Any]:
     """Trascrive PCM 16 bit 16 kHz mono senza avviare un turno: e' la prova del microfono."""
     if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Audio troppo lungo")
-    transcript = await companion().transcribe(await request.body())
+    try:
+        transcript = await companion().transcribe(await request.body())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Il riconoscimento vocale non funziona: {describe_error(exc)}") from exc
     if transcript is None:
         raise HTTPException(status_code=400, detail="Il riconoscimento vocale non è attivo: sceglilo in Motori, sezione Ascolto.")
     return {"text": transcript.text, "language": transcript.language}
@@ -1390,8 +1419,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             }
         )
 
+        remote = bool(websocket.scope.get("tsukumo.remote"))
         while True:
             message = await websocket.receive_json()
+            if not isinstance(message, dict):
+                continue
             kind = str(message.get("type", "")).lower()
             # Il motore puo' essere cambiato dal pannello nel frattempo.
             instance = companion()
@@ -1401,10 +1433,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             elif kind == "chat":
                 # Task separato: il loop resta libero di ricevere "cancel".
                 files = [str(item) for item in (message.get("files") or []) if isinstance(item, str)]
+                if remote:
+                    # Da fuori solo i file caricati (POST /api/attachments), mai un percorso del PC.
+                    files = [item for item in files if within(Path(item), [SETTINGS.state_dir / "uploads"])]
                 _spawn(instance.chat(message.get("text", ""), hub.broadcast, files=files, screen=bool(message.get("screen"))))
             elif kind == "capabilities":
                 # La finestra del personaggio in Electron sa fare gli screenshot.
-                if message.get("screen"):
+                if message.get("screen") and not remote:
                     SCREEN_CLIENTS.add(websocket)
             elif kind == "say":
                 _spawn(instance.say(message.get("text", ""), hub.broadcast, message.get("voice")))
@@ -1594,6 +1629,8 @@ def main() -> None:
     parser.add_argument("--log-level", default=SETTINGS.log_level)
     parser.add_argument("--reload", action="store_true", help="Auto-reload per lo sviluppo")
     args = parser.parse_args()
+    global POLICY
+    POLICY = dataclasses.replace(POLICY, bind_host=args.host)
 
     import uvicorn
 
@@ -1604,6 +1641,7 @@ def main() -> None:
             port=args.port,
             log_level=args.log_level,
             reload=args.reload,
+            server_header=False,
         )
 
 

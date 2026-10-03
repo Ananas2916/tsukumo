@@ -113,6 +113,9 @@ export class VoiceInput {
     this.processor = null;
 
     this.running = false;
+    /** Apertura in corso (una sola alla volta) e quante volte e' stato chiuso. */
+    this._starting = null;
+    this._generation = 0;
     this.muted = false;
     /** Lei sta parlando: si ascolta solo chi la interrompe davvero. */
     this.guarded = false;
@@ -134,17 +137,40 @@ export class VoiceInput {
     this.threshold = threshold;
     this.silenceSeconds = silenceSeconds;
     if (this.running) return true;
+    // Due pressioni ravvicinate aprivano due flussi: il primo restava acceso
+    // (con la spia del microfono) e nessuno lo chiudeva piu'.
+    this._starting ??= this._open(deviceId).finally(() => {
+      this._starting = null;
+    });
+    return this._starting;
+  }
 
+  async _open(deviceId) {
+    const generation = this._generation;
+    let stream;
     try {
-      this.stream = await openMicrophone(deviceId);
+      stream = await openMicrophone(deviceId);
     } catch (error) {
       this.onError(new Error(`Microfono non disponibile: ${error.message}`));
       return false;
     }
+    if (generation !== this._generation) {
+      // stop() e' arrivato mentre Windows apriva il microfono.
+      stream.getTracks().forEach((track) => track.stop());
+      return false;
+    }
+    this.stream = stream;
 
-    // Chiedere direttamente 16 kHz evita di ricampionare a mano.
-    this.context = new AudioContext({ sampleRate: SAMPLE_RATE });
-    if (this.context.state === 'suspended') await this.context.resume();
+    try {
+      // Chiedere direttamente 16 kHz evita di ricampionare a mano.
+      this.context = new AudioContext({ sampleRate: SAMPLE_RATE });
+      if (this.context.state === 'suspended') await this.context.resume();
+    } catch (error) {
+      this.stop();
+      this.onError(new Error(`Microfono non disponibile: ${error.message}`));
+      return false;
+    }
+    if (generation !== this._generation) return false; // chiuso durante resume()
 
     this.source = this.context.createMediaStreamSource(this.stream);
     // ScriptProcessor e' deprecato ma qui e' la scelta giusta: il lavoro per
@@ -167,6 +193,7 @@ export class VoiceInput {
 
   /** Chiude il microfono e libera la spia di registrazione del sistema. */
   stop() {
+    this._generation += 1;
     this.running = false;
     this.capturing = false;
     this.buffers = [];
@@ -174,7 +201,7 @@ export class VoiceInput {
     this.processor?.disconnect();
     this.source?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
-    this.context?.close();
+    this.context?.close().catch(() => {});
     this.processor = this.source = this.stream = this.context = null;
   }
 
