@@ -240,6 +240,20 @@ def test_the_phone_swaps_the_token_for_a_cookie(phone_client):
         assert ws.receive_json()["type"] == "hello"
 
 
+def test_missed_replies_only_reach_a_phone_with_the_token(phone_client):
+    from backend import server
+
+    server.hub.transcript.observe({"type": "reply", "text": "Il codice e' 4417.", "turn": 1})
+    with pytest.raises(WebSocketDisconnect):
+        with phone_client.websocket_connect(f"wss://{HOST}/ws?mode=text") as ws:
+            ws.receive_json()
+    # Un client senza browser: token nell'header, nessun Origin.
+    bearer = {"Authorization": f"Bearer {server.POLICY.token}"}
+    with phone_client.websocket_connect(f"wss://{HOST}/ws?mode=text", headers=bearer) as ws:
+        hello = ws.receive_json()
+    assert hello["transcript"][-1]["text"] == "Il codice e' 4417."
+
+
 def test_the_phone_page_shell_is_served(phone_client):
     # La build del frontend c'e' solo se e' stata fatta: senza, basta che non serva il token.
     response = phone_client.get("/mobile.html")

@@ -458,7 +458,8 @@ Server → client (broadcast to every connected client):
 { "type": "working", "kind": "read", "label": "reads main.js" }   // agent tool use
 { "type": "speech", "text": "Hi!", "audio": "<wav base64>", "sampleRate": 24000,
   "duration": 1.42, "visemes": [{ "t": 0.08, "d": 0.11, "v": "a", "w": 0.73 }], "mood": "happy" }
-{ "type": "reply", "text": "full answer", "elapsed": 2.31, "failed": false }
+{ "type": "user", "text": "hi!", "turn": 7, "seq": 1759560000123 }
+{ "type": "reply", "text": "full answer", "turn": 7, "seq": 1759560004567, "elapsed": 2.31, "failed": false }
 { "type": "engines" | "reminders" | "memory" | "usage" | "notify" | "context", ... }
 { "type": "error", "message": "...", "source": "llm" | "tts" | "stt", "hint": "...", "action": "engines" }
 ```
@@ -466,6 +467,12 @@ Server → client (broadcast to every connected client):
 A text-only client (the phone page) connects to `/ws?mode=text`: it never
 receives `audio` or `visemes`, and its `chat` turns get a text reply without
 being spoken.
+
+Chat lines (`user` and `reply`) carry a `seq` that only grows, even across
+backend restarts. The `hello` includes `transcript`, the last 30 lines
+(`{seq, role, text, turn, at}`, text only). A client that was asleep, like the
+phone page after Safari suspends it, keeps the last `seq` it saw and adds the
+newer lines on reconnect, without duplicates.
 
 Viseme timeline: `t` start (s), `d` duration, `v` viseme (`a i u e o sil`),
 `w` weight 0–1.

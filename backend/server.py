@@ -14,7 +14,8 @@ Client -> server::
 
 Server -> client::
 
-    {"type": "hello",  "config": {...}, "voices": [...], "engines": {...}}
+    {"type": "hello",  "config": {...}, "voices": [...], "engines": {...},
+     "transcript": [{"seq": 1759..., "role": "assistant", "text": "...", ...}]}
     {"type": "engines", "llm": {...}, "tts": {...}, "stt": {...}}   # stato dei motori
     {"type": "voices", "voices": [...], "voice": "..."}  # elenco voci (cambia col motore)
     {"type": "providers", "kind": "llm", "selected": {...}, "settings": {...}}  # motori cambiati
@@ -29,11 +30,14 @@ Server -> client::
     {"type": "usage", "agents": [...]}      # consumi e limiti di Claude Code, Codex, Antigravity
     {"type": "capture", "text": "..."}       # "guarda lo schermo": fai uno screenshot
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
-    {"type": "user",   "text": "..."}
+    {"type": "user",   "text": "...", "seq": 1759...}
     {"type": "token",  "text": "..."}        # streaming del cervello
     {"type": "speech", "audio": "<wav base64>", "visemes": [...], ...}
     {"type": "caption", "text": "..."}       # frase senza audio (muto o voce guasta)
-    {"type": "reply",  "text": "..."}        # risposta completa
+    {"type": "reply",  "text": "...", "seq": 1759...}   # risposta completa
+
+``seq`` numera le battute della chat; ``transcript`` nel hello contiene le
+ultime, per chi si ricollega dopo essersele perse (vedi transcript.py).
     {"type": "notice" | "error", "message": "...", "source": "llm", "hint": "..."}
     {"type": "pong"}
 
@@ -100,6 +104,7 @@ from .phonemes import VISEME_BLENDSHAPES
 from .pipeline import Companion
 from .providers import REGISTRIES, ProviderSpec, describe_all
 from .status import EngineMonitor, llm_entry
+from .transcript import Transcript
 from .tts import build_tts_engine
 from .usage import UsageService
 from .usage import describe as describe_usage
@@ -172,6 +177,9 @@ class ConnectionHub:
 
     I client "solo testo" (la pagina del telefono, ``/ws?mode=text``) non
     ricevono l'audio: sul telefono, magari in 4G, sarebbe solo peso.
+
+    Le battute della chat passano anche da ``transcript``, che le numera e le
+    tiene per chi si ricollega (vedi transcript.py).
     """
 
     #: Campi che un client solo testo non riceve.
@@ -181,6 +189,7 @@ class ConnectionHub:
         self._clients: set[WebSocket] = set()
         self._text_only: set[WebSocket] = set()
         self._lock = asyncio.Lock()
+        self.transcript = Transcript()
 
     async def add(self, websocket: WebSocket, text_only: bool = False) -> None:
         async with self._lock:
@@ -198,6 +207,7 @@ class ConnectionHub:
         return len(self._clients)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
+        message = self.transcript.observe(message)
         async with self._lock:
             targets = list(self._clients)
             text_only = set(self._text_only)
@@ -1501,6 +1511,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "memory": MEMORY.as_dict(),
                 "animations": _animations_info(),
                 "usage": USAGE.latest,
+                # Il telefono sospeso si e' perso le risposte: le recupera da qui.
+                "transcript": hub.transcript.recent(),
             }
         )
 

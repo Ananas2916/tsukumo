@@ -16,6 +16,7 @@ import { CompanionSocket } from '../ws.js';
 
 const TOKEN_KEY = 'tsukumo:phone-token';
 const HISTORY_KEY = 'tsukumo:phone-chat';
+const SYNCED_KEY = 'tsukumo:phone-seq';
 const MAX_HISTORY = 80;
 
 const $ = (id) => document.getElementById(id);
@@ -50,14 +51,62 @@ function readToken() {
 // ---------------------------------------------------------------------------
 // Messaggi
 
-/** @type {{role: string, text: string, note?: string, el?: HTMLElement, pending?: boolean}[]} */
+/** @type {{role: string, text: string, note?: string, el?: HTMLElement, pending?: boolean, broken?: boolean}[]} */
 let messages = [];
 const replies = new Map(); // turno -> messaggio dell'assistente in arrivo
 let renderTimer = null;
+// L'ultima battuta numerata dal backend (seq) che abbiamo visto: al
+// ricollegarsi si prendono dal hello solo quelle dopo.
+let synced = Number(load(SYNCED_KEY)) || 0;
 
 function saveHistory() {
   const kept = messages.filter((m) => !m.pending && m.text).slice(-MAX_HISTORY);
   store(HISTORY_KEY, JSON.stringify(kept.map(({ role, text, note }) => ({ role, text, note }))));
+  store(SYNCED_KEY, String(synced));
+}
+
+function seen(message) {
+  synced = Math.max(synced, Number(message.seq) || 0);
+}
+
+/**
+ * Le battute arrivate mentre Safari teneva la pagina sospesa (``transcript``
+ * del hello). La prima volta con una cronologia gia' piena, di cui non
+ * conosciamo i numeri, le diamo per viste: meglio perderne una che doppiarle.
+ */
+function catchUp(lines) {
+  if (!Array.isArray(lines) || !lines.length) return;
+  const fresh = lines.filter((line) => line && typeof line.text === 'string' && Number(line.seq) > synced);
+  const known = synced > 0 || !messages.length;
+  lines.forEach(seen);
+  if (!known || !fresh.length) {
+    saveHistory();
+    return;
+  }
+  for (const line of fresh.sort((a, b) => a.seq - b.seq)) {
+    if (line.role === 'user') {
+      const mine = messages.find((m) => m.pending && m.text.trim() === line.text.trim());
+      if (mine) {
+        mine.pending = false;
+        draw(mine);
+      } else if (line.text) {
+        add({ role: 'user', text: line.text });
+      }
+    } else if (line.role === 'assistant') {
+      // Il turno a meta' quando la pagina si e' sospesa: si completa li'.
+      const partial = replies.get(line.turn);
+      const note = line.cancelled ? 'interrotta' : undefined;
+      if (partial) {
+        replies.delete(line.turn);
+        Object.assign(partial, { text: line.text, note, streaming: false, broken: false });
+        draw(partial);
+      } else {
+        add({ role: 'assistant', text: line.text, note });
+      }
+    }
+  }
+  scrollDown();
+  saveHistory();
 }
 
 function draw(message) {
@@ -180,7 +229,12 @@ function connect() {
   socket.on('close', () => {
     setStatus('offline', 'Non raggiungo il PC…');
     setBusy(false);
+    // Una parte dello streaming e' andata persa: alla fine vale il testo del reply.
+    replies.forEach((reply) => {
+      reply.broken = true;
+    });
   });
+  socket.on('hello', (message) => catchUp(message.transcript));
 
   socket.on('state', (message) => {
     if (message.value === 'thinking') {
@@ -196,6 +250,7 @@ function connect() {
   });
 
   socket.on('user', (message) => {
+    seen(message);
     const text = String(message.text ?? '');
     // Il messaggio scritto qui torna dal backend: diventa "consegnato".
     const mine = messages.find((m) => m.pending && m.text.trim() === text.trim());
@@ -227,11 +282,13 @@ function connect() {
 
   socket.on('reply', (message) => {
     if (message.said) return;
+    seen(message);
     const reply = replies.get(message.turn);
     replies.delete(message.turn);
     if (reply) {
       reply.streaming = false;
-      reply.text = reply.text.trim() || message.text || '';
+      reply.text = (reply.broken ? message.text : reply.text.trim()) || message.text || reply.text.trim();
+      reply.broken = false;
       if (message.cancelled) reply.note = 'interrotta';
       if (reply.text) draw(reply);
       else {

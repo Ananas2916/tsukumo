@@ -1,7 +1,7 @@
 {
   "name": "tsukumo",
   "productName": "Tsukumo",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "private": true,
   "description": "Finestra desktop (Electron) di Tsukumo: avvia il backend Python e mostra l'avatar VRM senza cornice.",
   "main": "main.js",
