@@ -364,7 +364,7 @@ const DRAW = {
  * Each accessory: `head` (follows the gaze and the squashes, child of
  * pivot), `side` (floats beside her, child of root), `swing(dx, dy, t)` for
  * the soft parts, `hat` if it falls from above, `top` how much it raises the
- * tip.
+ * tip, `left`/`right` how far it reaches sideways (the island's slot fits her).
  */
 const BUILD = {
   hachimaki(u) {
@@ -486,7 +486,7 @@ const BUILD = {
     ]);
     piece(head, cone, 0xffffff, { uniforms: u, map: texture('straw'), side: THREE.DoubleSide });
     piece(head, lathe([[0.25, 0.462], [0.212, 0.482]]), 0xd9434e, { uniforms: u, line: 0.006 });
-    return { head, hat: true, top: 0 };
+    return { head, hat: true, top: 0, left: 0.64, right: 0.64 };
   },
 
   witch(u) {
@@ -519,7 +519,7 @@ const BUILD = {
     piece(head, lathe([[0.37, 0.25], [0.335, 0.325]]), 0xf59e2b, { uniforms: u, line: 0.006 });
     const slope = Math.atan(0.035 / 0.075);
     piece(head, baked(new THREE.BoxGeometry(0.075, 0.06, 0.015), { pos: new THREE.Vector3(0, 0.287, 0.357), rot: [-slope, 0, 0] }), 0xffd166, { uniforms: u, line: 0.006 });
-    return { head, hat: true, top: 0.28 };
+    return { head, hat: true, top: 0.28, left: 0.64, right: 0.64 };
   },
 
   santa(u) {
@@ -547,7 +547,228 @@ const BUILD = {
     piece(head, baked(new THREE.SphereGeometry(0.055, 14, 10), { pos: new THREE.Vector3(0, 0.975, 0) }), 0xffd166, { uniforms: u });
     return { head, hat: true, top: 0.24 };
   },
+
+  bowtie() {
+    // A red bow tie low on the bulb, under the mouth: she dresses up.
+    const head = new THREE.Group();
+    const y = -0.235;
+    const at = onSurface(y, 0, 0.014);
+    const bow = new THREE.Group();
+    bow.position.copy(at);
+    bow.lookAt(at.clone().add(at.clone().normalize()));
+    head.add(bow);
+    const knotted = new THREE.Group();
+    bow.add(knotted);
+    const wing = new THREE.Shape();
+    wing.moveTo(0.02, 0);
+    wing.bezierCurveTo(0.06, 0.022, 0.1, 0.078, 0.14, 0.064);
+    wing.quadraticCurveTo(0.168, 0, 0.14, -0.064);
+    wing.bezierCurveTo(0.1, -0.078, 0.06, -0.022, 0.02, 0);
+    const right = extruded(wing, 0.028);
+    // The left one is the right one turned round: same winding, same outline.
+    for (const geometry of [right, right.clone().rotateY(Math.PI)]) piece(knotted, geometry, 0xd63846, { line: 0.007 });
+    piece(knotted, new THREE.SphereGeometry(1, 16, 12).scale(0.036, 0.043, 0.03), 0xb02a3a, { line: 0.007 });
+    return {
+      head,
+      swing(dx, dy, t) {
+        knotted.rotation.z = dx * 0.25 + Math.sin(t * 2.4) * 0.03;
+      },
+    };
+  },
+
+  crown(u) {
+    // A little golden crown on the upper bulb: the tip comes out of the top.
+    const head = new THREE.Group();
+    const gold = 0xf2c14e;
+    piece(head, lathe([[0.336, 0.3], [0.35, 0.4]]), gold, { uniforms: u, side: THREE.DoubleSide });
+    for (const [y, r] of [[0.3, 0.338], [0.4, 0.352]]) {
+      piece(head, baked(new THREE.TorusGeometry(r, 0.013, 8, 48), { pos: new THREE.Vector3(0, y, 0), rot: [Math.PI / 2, 0, 0] }), 0xd9a43a, { uniforms: u, line: 0.006 });
+    }
+    for (let i = 0; i < 5; i += 1) {
+      const a = (i * Math.PI * 2) / 5;
+      const x = Math.sin(a) * 0.35;
+      const z = Math.cos(a) * 0.35;
+      piece(head, baked(new THREE.ConeGeometry(0.05, 0.13, 12), { pos: new THREE.Vector3(x, 0.465, z) }), gold, { uniforms: u, line: 0.007 });
+      piece(head, baked(new THREE.SphereGeometry(0.023, 12, 10), { pos: new THREE.Vector3(x, 0.537, z) }), gold, { uniforms: u, line: 0.006 });
+    }
+    // A ruby in front, two sapphires on the sides.
+    for (const [deg, size, color] of [[0, 0.036, 0xe0404a], [-62, 0.025, 0x5ec8ff], [62, 0.025, 0x5ec8ff]]) {
+      const a = (deg * Math.PI) / 180;
+      const gem = new THREE.SphereGeometry(1, 14, 10).scale(size, size, size * 0.5);
+      piece(head, baked(gem, { pos: new THREE.Vector3(Math.sin(a) * 0.352, 0.35, Math.cos(a) * 0.352), rot: [0, a, 0] }), color, { uniforms: u, line: 0.005, emissive: 0x220808 });
+    }
+    return { head, hat: true, top: 0 };
+  },
+
+  angel(u) {
+    // A halo floating above the tip (it follows her sway) and two small wings behind.
+    const head = new THREE.Group();
+    const halo = new THREE.Group();
+    head.add(halo);
+    piece(halo, baked(new THREE.TorusGeometry(0.17, 0.024, 12, 48), { pos: new THREE.Vector3(0, TIP + 0.17, 0), rot: [Math.PI / 2 - 0.42, 0, 0] }), 0xffd166, { uniforms: u, line: 0.007, emissive: 0x6b4a00 });
+    const shine = glowSprite(0xffe9a8, 0.75, 0.3);
+    shine.position.set(0, TIP + 0.17, 0);
+    halo.add(shine);
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.bezierCurveTo(0.05, 0.13, 0.2, 0.21, 0.31, 0.17);
+    shape.quadraticCurveTo(0.28, 0.11, 0.23, 0.1);
+    shape.quadraticCurveTo(0.26, 0.04, 0.18, 0.03);
+    shape.quadraticCurveTo(0.19, -0.035, 0.11, -0.025);
+    shape.quadraticCurveTo(0.05, -0.045, 0, 0);
+    const feathers = extruded(shape, 0.02).scale(1.2, 1.2, 1);
+    const wings = [1, -1].map((side) => {
+      const wing = new THREE.Group();
+      wing.position.copy(onSurface(0.03, side * 112, -0.03));
+      wing.rotation.y = side * 0.55;
+      head.add(wing);
+      piece(wing, side > 0 ? feathers : feathers.clone().rotateY(Math.PI), 0xfdfcff, { line: 0.008 });
+      return wing;
+    });
+    return {
+      head,
+      top: 0.26,
+      left: 0.76,
+      right: 0.76,
+      swing(dx, dy, t) {
+        halo.position.y = Math.sin(t * 2) * 0.012;
+        wings.forEach((wing, i) => {
+          const side = i ? -1 : 1;
+          wing.rotation.y = side * (0.55 + Math.sin(t * 3.1) * 0.16 + dy * 0.4) + dx * 0.3;
+        });
+      },
+    };
+  },
+
+  devil(u) {
+    // Two little horns on the upper bulb and a pointed tail wagging behind.
+    const head = new THREE.Group();
+    const red = 0xc92a3e;
+    for (const side of [1, -1]) {
+      // A lathe, not a cone: the tip keeps a tiny radius, or its triangles have no
+      // area and the normals break up into speckles. Curled sideways, then leaning
+      // out of her surface (radially): along it, it would sink into her.
+      const horn = lathe(
+        [[0.066, 0], [0.062, 0.05], [0.052, 0.1], [0.037, 0.15], [0.019, 0.2], [0.0005, 0.235]],
+        (v) => {
+          v.x += side * 0.07 * (v.y / 0.235) ** 2;
+        },
+        20,
+      );
+      const deg = side * 48;
+      const base = onSurface(0.28, deg, -0.015);
+      horn.applyMatrix4(new THREE.Matrix4().makeRotationX(0.5));
+      horn.applyMatrix4(new THREE.Matrix4().makeRotationY((deg * Math.PI) / 180));
+      horn.translate(base.x, base.y, base.z);
+      piece(head, horn, red, { uniforms: u, line: 0.008 });
+    }
+    const tail = new THREE.Group();
+    tail.position.copy(onSurface(-0.2, 150, -0.02));
+    head.add(tail);
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0.08, -0.06, -0.06),
+      new THREE.Vector3(0.22, -0.05, -0.1),
+      new THREE.Vector3(0.32, 0.05, -0.08),
+      new THREE.Vector3(0.34, 0.16, -0.05),
+    ]);
+    piece(tail, new THREE.TubeGeometry(curve, 32, 0.019, 8), red, { line: 0.007 });
+    const end = curve.getPoint(1);
+    const spade = new THREE.ConeGeometry(0.06, 0.12, 4).scale(1, 1, 0.35);
+    piece(tail, baked(spade, { pos: end.clone().add(new THREE.Vector3(0.005, 0.04, 0)), rot: [0, 0, -0.1] }), red, { line: 0.006 });
+    return {
+      head,
+      right: 0.62,
+      swing(dx, dy, t) {
+        tail.rotation.y = Math.sin(t * 2.6) * 0.3 + dx * 0.8;
+        tail.rotation.z = Math.sin(t * 1.7) * 0.12 + dy * 0.4;
+      },
+    };
+  },
+
+  headphones() {
+    // Big headphones, for dancing to Spotify: the band goes behind the tip.
+    const head = new THREE.Group();
+    const dark = 0x2b2533;
+    const y = 0.02;
+    piece(head, baked(new THREE.TorusGeometry(0.49, 0.03, 10, 48, Math.PI), { pos: new THREE.Vector3(0, y, 0), rot: [-0.78, 0, 0] }), dark, { line: 0.01 });
+    for (const side of [1, -1]) {
+      const x = side * (radiusAt(y) + 0.03);
+      piece(head, baked(new THREE.TorusGeometry(0.088, 0.032, 10, 28), { pos: new THREE.Vector3(x, y, 0), rot: [0, Math.PI / 2, 0] }), 0x3a3344, { line: 0.008 });
+      piece(head, baked(new THREE.CylinderGeometry(0.118, 0.118, 0.075, 28), { pos: new THREE.Vector3(x + side * 0.05, y, 0), rot: [0, 0, Math.PI / 2] }), dark, { line: 0.01 });
+      piece(head, baked(new THREE.TorusGeometry(0.07, 0.013, 8, 28), { pos: new THREE.Vector3(x + side * 0.09, y, 0), rot: [0, Math.PI / 2, 0] }), 0xff7eb6, { line: 0, emissive: 0x3a0f22 });
+    }
+    return { head, left: 0.6, right: 0.6 };
+  },
+
+  catears() {
+    // Cat ears on the upper bulb, which twitch now and then.
+    const head = new THREE.Group();
+    const ears = [1, -1].map((side) => {
+      const ear = new THREE.Group();
+      ear.position.copy(onSurface(0.3, side * 40, -0.03));
+      ear.rotation.set(-0.15, side * 0.25, -side * 0.45);
+      head.add(ear);
+      // A three-sided cone with one flat face to the front, and the pink inside on it.
+      const outer = new THREE.ConeGeometry(0.125, 0.24, 3, 1, false, Math.PI / 3).scale(1, 1, 0.5);
+      outer.translate(0, 0.12, 0);
+      piece(ear, outer, 0x2b2533, { line: 0.009 });
+      const inside = new THREE.Shape();
+      inside.moveTo(-0.057, 0.03);
+      inside.lineTo(0.057, 0.03);
+      inside.lineTo(0, 0.185);
+      inside.closePath();
+      const inner = new THREE.ShapeGeometry(inside);
+      // The front face: from z = r/4 at the base to 0 at the top (the cone is flattened by half).
+      const face = 0.125 * 0.25;
+      inner.rotateX(-Math.atan(face / 0.24));
+      inner.translate(0, 0, face * (1 - 0.03 / 0.24) + 0.004);
+      piece(ear, inner, 0xff9ec7, { line: 0, side: THREE.DoubleSide });
+      return ear;
+    });
+    return {
+      head,
+      swing(dx, dy, t) {
+        // A quick twitch every few seconds, one ear at a time.
+        ears.forEach((ear, i) => {
+          const side = i ? -1 : 1;
+          const twitch = Math.max(0, Math.sin(t * 1.3 + i * 2.1)) ** 30;
+          ear.rotation.z = -side * (0.45 + twitch * 0.35) + dx * 0.2;
+          ear.rotation.x = -0.15 - dy * 0.3;
+        });
+      },
+    };
+  },
+
+  tophat(u) {
+    // A gentleman's top hat with a red ribbon: it covers the tip.
+    const head = new THREE.Group();
+    const black = 0x262130;
+    piece(head, lathe([[0.33, 0.27], [0.318, 0.6], [0.336, 0.9], [0.0005, 0.9]]), black, { uniforms: u });
+    piece(
+      head,
+      lathe([
+        [0.32, 0.255],
+        [0.52, 0.25],
+        [0.555, 0.272],
+        [0.52, 0.286],
+        [0.32, 0.29],
+        [0.32, 0.255],
+      ]),
+      black,
+      { uniforms: u },
+    );
+    piece(head, lathe([[0.336, 0.29], [0.33, 0.38]]), 0xc8324a, { uniforms: u, line: 0.006 });
+    return { head, hat: true, top: 0.14, left: 0.57, right: 0.57 };
+  },
 };
+
+/** A flat shape made thick (centred on its plane), with soft edges. */
+function extruded(shape, depth) {
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 14 });
+  geometry.translate(0, 0, -depth / 2);
+  return geometry;
+}
 
 /**
  * What she wears and the change: `set(name)` (one of OUTFITS or 'none'),
@@ -583,10 +804,16 @@ export class Wardrobe {
     return this.wearing === 'none' ? 0 : (this.items[this.wearing]?.top ?? 0) * this.presence;
   }
 
-  /** How far right of the centre it reaches (the lantern floats beside her), in drop units. */
+  /** How far right of the centre it reaches (the lantern floats beside her, wings open), in drop units. */
   get right() {
     const right = this.wearing === 'none' ? R : (this.items[this.wearing]?.right ?? R);
     return R + (right - R) * this.presence;
+  }
+
+  /** The same on the left. */
+  get left() {
+    const left = this.wearing === 'none' ? R : (this.items[this.wearing]?.left ?? R);
+    return R + (left - R) * this.presence;
   }
 
   get busy() {

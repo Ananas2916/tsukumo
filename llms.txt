@@ -1,6 +1,6 @@
 # Tsukumo
 
-> Tsukumo gives an AI agent a face: a little spirit flame on the Windows desktop (with an optional 3D VRM body) that becomes the face and voice of any brain (Claude Code, Codex, Gemini CLI, OpenClaw, Antigravity and 13 more CLI agents, LM Studio, Ollama, or cloud APIs). Local text-to-speech with lip-sync, voice input, reminders, a dashboard of agents at work, agent notifications and usage limits. Interface in English and Italian. Python (FastAPI) backend, Three.js frontend, Electron shell. Offline by default. AGPL-3.0.
+> Tsukumo gives an AI agent a face: a little spirit flame on the Windows desktop that becomes the face and voice of any brain (Claude Code, Codex, Gemini CLI, OpenClaw, Antigravity and 13 more CLI agents, LM Studio, Ollama, or cloud APIs). Local text-to-speech with lip-sync, voice input, reminders, a dashboard of agents at work, agent notifications and usage limits. Interface in English and Italian. Python (FastAPI) backend, Three.js frontend, Electron shell. Offline by default. AGPL-3.0.
 
 - Backend: `http://127.0.0.1:8770`, WebSocket `/ws`, REST `/api/*`, OpenAPI at `/docs`.
 - Local scripts (no `Origin` header) may call the API directly; browsers only from the app's origin; other devices need `Authorization: Bearer <state/access_token>`.

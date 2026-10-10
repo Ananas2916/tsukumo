@@ -14,9 +14,6 @@
     <!-- The character. Everything else appears only when needed. -->
     <canvas id="stage"></canvas>
 
-    <!-- The arc docks beside the 3D body: right-click to open them -->
-    <div id="hud" aria-label="Tsukumo commands" data-i18n-attrs="aria-label"></div>
-
     <!-- What she's saying, above her head -->
     <div id="bubble" class="bubble hidden" aria-live="polite"></div>
     <div id="zzz" class="zzz hidden" aria-hidden="true"><span>z</span><span>z</span><span>Z</span></div>
@@ -29,8 +26,6 @@
       <input id="input" class="input" type="text" placeholder="Write her something…" aria-label="Message" data-i18n-attrs="placeholder,aria-label" />
       <button id="btn-send" class="composer-send" type="submit" title="Send (Enter)" aria-label="Send" data-i18n-attrs="title,aria-label"></button>
     </form>
-
-    <input id="file-vrm" type="file" accept=".vrm" hidden />
 
     <!-- Loading and blocking problems -->
     <div id="overlay" class="overlay" data-solid>
@@ -46,7 +41,6 @@
       <div class="debug-row"><span>viseme</span><b id="dbg-viseme">sil</b></div>
       <div class="debug-row"><span>rms</span><b id="dbg-rms">0.00</b></div>
       <div class="debug-row"><span>fps</span><b id="dbg-fps">0</b></div>
-      <div class="debug-row"><span>driver</span><b id="dbg-driver">-</b></div>
       <div class="debug-bars">
         <div class="bar"><i data-viseme="a"></i><span>A</span></div>
         <div class="bar"><i data-viseme="i"></i><span>I</span></div>

@@ -70,7 +70,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -102,7 +102,6 @@ from .security import TOKEN_NAME, AccessPolicy, SecurityMiddleware, clean_env_va
 from .music import MusicService, SpotifyError
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
-from .phonemes import VISEME_BLENDSHAPES
 from .pipeline import Companion
 from .providers import REGISTRIES, ProviderSpec, describe_all
 from .status import EngineMonitor, llm_entry
@@ -178,7 +177,7 @@ class ConnectionHub:
 
     The broadcast is needed because there are several open windows (the
     character, the panel, maybe a browser tab): they must all see the same
-    state and the same avatar speaking.
+    state and the same Tsukumo speaking.
 
     "Text only" clients (the phone's page, ``/ws?mode=text``) don't receive the
     audio: on the phone, maybe on 4G, it would only be weight.
@@ -452,7 +451,6 @@ async def health() -> dict[str, Any]:
         "version": __version__,
         "clients": hub.count,
         "engines": monitor.status,
-        "avatar": _avatar_info(),
     }
 
 
@@ -464,11 +462,7 @@ async def status() -> dict[str, Any]:
 
 @app.get("/api/config")
 async def config() -> dict[str, Any]:
-    return {
-        **SETTINGS.public_dict(),
-        "blendshapes": VISEME_BLENDSHAPES,
-        "avatar": _avatar_info(),
-    }
+    return SETTINGS.public_dict()
 
 
 @app.get("/api/providers")
@@ -1344,6 +1338,23 @@ async def spotify_callback(code: str = "", state: str = "", error: str = "") -> 
     return HTMLResponse(_music_page(True, _spotify_words("connected_as", user=user) if user else _spotify_words("connected")))
 
 
+class MusicControlRequest(BaseModel):
+    action: Literal["pause", "resume", "next", "previous"]
+
+
+@app.post("/api/music/control")
+async def music_control(request: MusicControlRequest) -> dict[str, Any]:
+    """The island's small player: Spotify's API if connected, otherwise Windows' media keys."""
+    try:
+        await MUSIC.control(request.action)
+    except SpotifyError as exc:
+        # In English: the page translates it (frontend/src/i18n/it.js).
+        raise HTTPException(status_code=409, detail=exc.explain("en")) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Spotify isn't answering.") from exc
+    return {"ok": True}
+
+
 @app.post("/api/music/spotify/disconnect")
 async def spotify_disconnect() -> dict[str, Any]:
     MUSIC.spotify.disconnect()
@@ -1463,30 +1474,6 @@ def _without_audio(payload: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in payload.items() if k != "audio"}
 
 
-def _animations_info() -> list[dict[str, str]]:
-    """The .vrma clips of the animations folder, with the URL to load them from."""
-    directory: Path = SETTINGS.animations_dir
-    files = sorted(p.name for p in directory.glob("*.vrma")) if directory.is_dir() else []
-    return [{"name": name, "url": f"/animations/{name}"} for name in files]
-
-
-@app.get("/api/animations")
-async def animations() -> dict[str, Any]:
-    return {"directory": str(SETTINGS.animations_dir), "animations": _animations_info()}
-
-
-def _avatar_info() -> dict[str, Any]:
-    """Looks for a .vrm model in the avatars folder."""
-    directory: Path = SETTINGS.avatar_dir
-    files = sorted(p.name for p in directory.glob("*.vrm")) if directory.is_dir() else []
-    default = "avatar.vrm" if "avatar.vrm" in files else (files[0] if files else None)
-    return {
-        "directory": str(directory),
-        "files": files,
-        "default": f"/models/{default}" if default else None,
-    }
-
-
 # ---------------------------------------------------------------------------
 # The phone (backend/phone.py)
 # ---------------------------------------------------------------------------
@@ -1589,14 +1576,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "type": "hello",
                 "version": __version__,
                 "config": {**SETTINGS.public_dict(), **instance.current_settings()},
-                "blendshapes": VISEME_BLENDSHAPES,
                 "voices": instance.voice_list or [],
                 "engines": monitor.status,
-                "avatar": _avatar_info(),
                 "context": PC.as_dict(),
                 "reminders": [item.as_dict() for item in REMINDERS.all()],
                 "memory": MEMORY.as_dict(),
-                "animations": _animations_info(),
                 "usage": USAGE.latest,
                 "agents": hub.agents.public(),
                 # The suspended phone missed the replies: it gets them back from here.
@@ -1787,13 +1771,7 @@ class BuildAwareStatics(StaticFiles):
 
 
 def mount_frontend() -> None:
-    """Mounts the static files. The order matters: /models before the catch-all /."""
-    if SETTINGS.avatar_dir.is_dir():
-        # The avatar can be replaced on the fly: no aggressive caching.
-        app.mount("/models", BuildAwareStatics(directory=SETTINGS.avatar_dir), name="models")
-    SETTINGS.animations_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/animations", BuildAwareStatics(directory=SETTINGS.animations_dir), name="animations")
-
+    """Mounts the built pages, or a placeholder that says how to build them."""
     if SETTINGS.frontend_dist.is_dir() and (SETTINGS.frontend_dist / "index.html").is_file():
         app.mount("/", BuildAwareStatics(directory=SETTINGS.frontend_dist, html=True), name="frontend")
         logger.info("Frontend served from %s", SETTINGS.frontend_dist)

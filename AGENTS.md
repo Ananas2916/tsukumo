@@ -11,13 +11,11 @@ her panel, and an Electron shell that makes her a transparent, always-on-top
 desktop mascot on Windows. See [README.md](README.md) for the feature tour and
 the HTTP/WebSocket API.
 
-**The flame comes first.** Tsukumo *is* the flame (`frontend/src/flame.js`):
-new installs start without a body, and every feature must work, and look
-finished, on the flame alone. A VRM model is an optional body she can enter
-and leave. Body-only behaviour (sitting, lying down, `.vrma` clips, the two
-arc docks of the right-click menu) stays behind `form === 'vrm'`; the flame
-has her own menu (the black island in `island.js`, which she slides into) and
-her own reactions.
+**The flame is all there is.** Tsukumo *is* the flame (`frontend/src/flame.js`):
+since 3.0 there's no 3D body, and every feature must work, and look finished,
+on her. She has her own menu (the black island in `island.js`, which she
+slides into and which can be dragged around), her own reactions, her wardrobe
+and her own sounds (`sfx.js`, synthesized: never ship sound or model files).
 
 ## Map
 
@@ -36,12 +34,12 @@ her own reactions.
 | `backend/proactive.py` | Spontaneous comments (time, weather, battery, YouTube, news) |
 | `backend/usage.py`, `notify.py` | Agent usage limits from local files; Claude Code/Codex hooks |
 | `frontend/src/flame.js`, `flame/` | **The flame (Tsukumo herself)**: moods, reactions, work props (terminal, page, lens, helper flame), effects. `motion.js` (keyed curves, springs, contact squash) and `moves.js` (every reaction as curves: anticipation, action, overshoot, hold); `wardrobe.js` (outfits, seasonal "auto") and `outfits.js` (their 3D, soft parts on springs); `palettes.js` (named colours and free `#rrggbb`) |
-| `frontend/src/main.js`, `vrm.js`, `body.js`, `hud.js`, `island.js` | The stage: rendering, the optional VRM body and its procedural animation, the right-click menu (`hud.js` holds its state and draws the body's arc docks; `island.js` is the flame's Coucou-style island) |
+| `frontend/src/main.js`, `stage.js`, `hud.js`, `island.js`, `sfx.js` | Her window: `stage.js` renders her (scene, camera, frame rate, anchors for the physics, per-pixel click-through), `main.js` wires voice, socket and Electron, the right-click menu (`hud.js` holds its state, `island.js` draws the Coucou-style island with the Spotify mini-player), `sfx.js` her synthesized sounds |
 | `frontend/dashboard.html`, `src/dashboard.js`, `src/dashboard/` | **Dashboard**: week, today, weather, agents, chat. The pet window docks into its corner (`setPetStage` in `electron/main.js`); "−" sends her back to the desktop |
 | `frontend/src/panel.js`, `panel/`, `engines.js` | The panel (chat, character, agenda, work, engines) |
 | `frontend/src/i18n.js`, `i18n/it.js`, `electron/i18n.js` | **Interface language**: `t()`/`tx()`, the Italian catalog keyed by the English text, the choice in *Character → Language* (`dc:ui-language`, else the system language) |
 | `electron/main.js` | Windows, backend process, IPC, tray, **renderer hardening** |
-| `electron/pet-physics.js`, `desktop.js` | Falling, throwing (the flame flies and bounces off screen edges), sitting on windows, taskbar, sprints; Win32 via koffi |
+| `electron/pet-physics.js`, `desktop.js` | Falling, throwing (she flies and bounces off screen edges), sitting on windows, taskbar, sprints, the moved island holding her up (`parked`); Win32 via koffi |
 | `scripts/build_installer.ps1` | Public Windows installer (embedded Python + electron-builder NSIS) |
 | `tests/` | pytest suite (no network, no models, no user `.env`) |
 
@@ -121,10 +119,9 @@ The backend can drive agents that run commands, so:
 
 ## Never commit
 
-`.env`, `state/`, `logs/`, `models/`, `build/`, `electron/dist/`, personal
-avatars or animation clips whose license forbids redistribution (the public
-installer ships only the CC0 sample avatar, enforced by
-`scripts/package_audit.py`).
+`.env`, `state/`, `logs/`, `models/`, `build/`, `electron/dist/`, or any file
+whose license forbids redistribution. The installer holds only the app's own
+files, enforced by `scripts/package_audit.py contents`.
 
 ## Releases
 

@@ -1,13 +1,17 @@
 /**
- * The flame's menu: a black island, like Coucou's.
+ * Tsukumo's menu: a black island, like Coucou's.
  *
  * On right-click the island is born from her (it spreads from her centre)
  * and she slides into it, left of the card, like Mochi in hers: the flame
  * stays the centre of everything. At the top the tabs (chat, dashboard,
  * character) and the tools (voice, microphone, engines); in the card the
  * brain and what it's doing, step by step (done, in progress), and the usage
- * limit closest to running out; below, the pills: the 3D body, dancing when
- * Spotify plays, quit.
+ * limit closest to running out; below, the pills: the wardrobe, dancing and
+ * a small Spotify player while Spotify is open, quit.
+ *
+ * It's a wide, low strip (Coucou's is 4:1; ours keeps room for her and the
+ * steps): about 448 x 210 at scale 1. Grabbing its black, not a button, moves
+ * it around the screen with her inside; when it closes she drops from there.
  *
  * It sits UNDER the canvas, so the flame is drawn over the island's black.
  * While it's open the canvas doesn't take clicks (`body.island-open`) and
@@ -25,11 +29,13 @@ import { outfitPreview } from './panel/wardrobe-art.js';
 /**
  * Design height: the window at scale 1 is 460 px tall. The island's scale
  * follows the height (which doesn't change), the width follows the window:
- * when open it widens it to 440 (electron/main.js, setIslandWide).
+ * when open it widens it to 460 (electron/main.js, setIslandWide).
  */
 const DESIGN_HEIGHT = 460;
 /** Below this design width the window hasn't widened (yet). */
 const WIDE_FROM = 400;
+/** A press that moves less than this (px) is a click, not a drag. */
+const DRAG_FROM = 4;
 
 const TABS = [
   { id: 'chat', icon: 'chat' },
@@ -40,6 +46,12 @@ const TOOLS = [
   { id: 'voice', icon: 'volume' },
   { id: 'mic', icon: 'mic' },
   { id: 'engines', icon: 'engines' },
+];
+/** The small Spotify player beside the dance pill. */
+const PLAYER = [
+  { id: 'previous', icon: 'skipBack' },
+  { id: 'toggle', icon: 'play' },
+  { id: 'next', icon: 'skipForward' },
 ];
 
 /** How many agent steps are shown in the card. */
@@ -71,6 +83,7 @@ export class Island {
     this.open = false;
     this.buttons = new Map();
     this._confirmTimer = null;
+    this._drag = null;
     this._build();
   }
 
@@ -124,14 +137,17 @@ export class Island {
     this.closet.addEventListener('click', (event) => event.stopPropagation());
     this.card.append(this.slot, info, this.closet);
 
-    // The pills: the body, the dance (only while music plays), quit.
+    // The pills: the wardrobe, the dance and the player (while Spotify is open), quit.
     const pills = node('div', 'island-pills');
-    this.formPill = this._pill('form', 'body');
     this.wardrobePill = this._pill('wardrobe', 'hanger');
     this.musicPill = this._pill('music', null);
+    this.player = node('div', 'island-player');
+    this.player.dataset.id = 'player';
+    for (const item of PLAYER) this.player.append(this._playerButton(item));
+    this._hover(this.player, 'player');
     this.powerPill = this._pill('power', 'power');
     this.powerPill.classList.add('power');
-    pills.append(this.formPill, this.wardrobePill, this.musicPill, this.powerPill);
+    pills.append(this.wardrobePill, this.musicPill, this.player, this.powerPill);
 
     this.caption = node('div', 'island-caption');
     this.box.append(top, this.card, pills);
@@ -139,8 +155,9 @@ export class Island {
     this.root.addEventListener('pointermove', () => this.hud.touch());
     this.root.addEventListener('pointerdown', () => this.hud.touch());
     window.addEventListener('resize', () => this.relayout());
-    // Right-click on the island closes it again (as on the character); not on the buttons.
+    // Right-click on the island closes it again (as on her); not on the buttons.
     this.box.addEventListener('contextmenu', (event) => event.target !== this.box && event.stopPropagation());
+    this._bindDrag();
   }
 
   _icon(item) {
@@ -174,16 +191,33 @@ export class Island {
     return button;
   }
 
+  _playerButton(item) {
+    const button = node('button', 'island-player-btn', { type: 'button' });
+    button.dataset.id = item.id;
+    button.innerHTML = iconSvg(item.icon, 14);
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.hud.onAction('player', item.id);
+    });
+    this._hover(button, item.id);
+    this.buttons.set(item.id, button);
+    return button;
+  }
+
   _hover(element, id) {
     element.addEventListener('pointerenter', () => this._caption(id));
-    element.addEventListener('pointerleave', () => this._caption(null));
+    element.addEventListener('pointerleave', (event) => {
+      // From a player button back onto the player: its caption (the track) again.
+      const parent = event.relatedTarget?.closest?.('[data-id]')?.dataset.id;
+      this._caption(parent && parent !== id ? parent : null);
+    });
   }
 
   _caption(id) {
     this._hovered = id;
     const text = !id ? '' : id === 'wardrobe' ? (this.closetOpen ? t('Back to the card') : t('Wardrobe')) : id.startsWith('outfit:') ? this._outfitWords(id.slice(7)) : this.hud._captionFor(id);
     this.caption.textContent = text;
-    this.caption.classList.toggle('shown', Boolean(text) && this.open);
+    this.caption.classList.toggle('shown', Boolean(text) && this.open && !this._drag?.moved);
   }
 
   /** Quit: the first click asks for confirmation, the second really closes. */
@@ -201,8 +235,52 @@ export class Island {
     }, 3000);
   }
 
+  // ------------------------------------------------------------ moving it
+  /**
+   * The island's black (not its buttons) is a handle: dragging it moves the
+   * window, her and the island together (hud.onIslandDrag, electron/main.js).
+   * A press that doesn't move stays a click (the card opens the engines).
+   */
+  _bindDrag() {
+    this.box.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || !this.open || event.target.closest('button, .island-closet')) return;
+      this._drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false, origin: null };
+      this.box.setPointerCapture?.(event.pointerId);
+    });
+    this.box.addEventListener('pointermove', (event) => {
+      const drag = this._drag;
+      if (!drag || event.pointerId !== drag.id) return;
+      const dx = event.screenX - drag.x;
+      const dy = event.screenY - drag.y;
+      if (!drag.moved) {
+        if (Math.abs(dx) + Math.abs(dy) <= DRAG_FROM) return;
+        drag.moved = true;
+        this.box.classList.add('dragging');
+        this._caption(null);
+        Promise.resolve(this.hud.onIslandDrag?.('start')).then((origin) => {
+          if (this._drag === drag) drag.origin = origin ?? null;
+        });
+      }
+      if (drag.origin) this.hud.onIslandDrag?.('move', { x: drag.origin.x + dx, y: drag.origin.y + dy });
+    });
+    const end = (event) => {
+      const drag = this._drag;
+      if (!drag || event.pointerId !== drag.id) return;
+      this._drag = null;
+      this.box.classList.remove('dragging');
+      if (!drag.moved) return;
+      this.hud.onIslandDrag?.('end');
+      // The click that follows the drag must not open the engines.
+      const swallow = (click) => click.stopPropagation();
+      window.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
+    };
+    this.box.addEventListener('pointerup', end);
+    this.box.addEventListener('pointercancel', end);
+  }
+
   // ------------------------------------------------------------ geometry
-  /** The island's scale: it follows the window's height, i.e. the flame's size. */
+  /** The island's scale: it follows the window's height, i.e. her size. */
   get scale() {
     return window.innerHeight / DESIGN_HEIGHT;
   }
@@ -217,9 +295,9 @@ export class Island {
   }
 
   /**
-   * It opens growing from the flame's centre. First it asks to widen the
-   * window (hud.onIslandShape) and waits for it to happen, then it grows: so
-   * you don't see the narrow island changing shape.
+   * It opens growing from her centre. First it asks to widen the window
+   * (hud.onIslandShape) and waits for it to happen, then it grows: so you
+   * don't see the narrow island changing shape.
    */
   show(origin) {
     const token = (this._token = (this._token ?? 0) + 1);
@@ -269,9 +347,11 @@ export class Island {
     this.open = false;
     this.closetOpen = false;
     this._token = (this._token ?? 0) + 1;
-    this.box.classList.remove('open');
+    this.box.classList.remove('open', 'dragging');
     this.powerPill.classList.remove('confirm');
     this._caption(null);
+    if (this._drag?.moved) this.hud.onIslandDrag?.('end');
+    this._drag = null;
     // Back inside her, the window goes narrow again.
     clearTimeout(this._narrowTimer);
     this._narrowTimer = setTimeout(() => {
@@ -289,7 +369,7 @@ export class Island {
     return this.root.getBoundingClientRect().top;
   }
 
-  /** Where the flame must be: the slot left of the card, in window pixels. */
+  /** Where she must be: the slot left of the card, in window pixels. */
   slotRect() {
     const k = this.scale;
     const rect = this.root.getBoundingClientRect();
@@ -334,17 +414,25 @@ export class Island {
     const label = (pill, text) => {
       pill.querySelector('.island-pill-label').textContent = text;
     };
-    label(this.formPill, hud.bodiless ? t('3D body') : t('Enter the body'));
     label(this.wardrobePill, t('Wardrobe'));
     this.wardrobePill.classList.toggle('active', Boolean(this.closetOpen));
     this.info.classList.toggle('hidden', Boolean(this.closetOpen));
+    // The closet grows the card: every outfit in sight, no scrolling.
+    this.card.classList.toggle('closet-open', Boolean(this.closetOpen));
     this.closet.classList.toggle('hidden', !this.closetOpen);
     if (this.closetOpen) this._renderCloset();
-    this.musicPill.classList.toggle('hidden', !hud.musicPlaying);
+
+    // Dancing only while it plays; the player as long as Spotify is open (paused too).
+    const music = hud.music;
+    this.musicPill.classList.toggle('hidden', !music.playing);
     this.musicPill.querySelector('.island-pill-icon').innerHTML = hud.dancing
       ? '<span class="island-eq"><b></b><b></b><b></b></span>'
       : iconSvg('music', 15);
     label(this.musicPill, hud.dancing ? t('Dance') : t('Still'));
+    this.player.classList.toggle('hidden', !music.open);
+    this.player.classList.toggle('playing', music.playing);
+    this.buttons.get('toggle').innerHTML = iconSvg(music.playing ? 'pause' : 'play', 14);
+
     label(this.powerPill, this.powerPill.classList.contains('confirm') ? t('Quit?') : '');
     if (this._hovered) this._caption(this._hovered);
   }

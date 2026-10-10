@@ -2,7 +2,7 @@
  * The DOM of the character's window, in one place.
  *
  * The interface is meant to be almost invisible, desktop-mascot style:
- * normally you only see her. Right-click opens the menu around her (hud.js),
+ * normally you only see her. Right-click opens the menu island (island.js),
  * chat and settings live in the separate panel, the indicators show up only
  * when something is wrong.
  *
@@ -19,13 +19,11 @@ export class UI {
   constructor() {
     this.elements = {
       stage: $('stage'),
-      hud: $('hud'),
       bubble: $('bubble'),
       toast: $('toast'),
       composer: $('composer'),
       input: $('input'),
       send: $('btn-send'),
-      fileInput: $('file-vrm'),
       overlay: $('overlay'),
       overlayText: $('overlay-text'),
       overlayHint: $('overlay-hint'),
@@ -33,7 +31,6 @@ export class UI {
       dbgViseme: $('dbg-viseme'),
       dbgRms: $('dbg-rms'),
       dbgFps: $('dbg-fps'),
-      dbgDriver: $('dbg-driver'),
     };
     this.elements.send.innerHTML = iconSvg('send', 16);
 
@@ -45,7 +42,6 @@ export class UI {
     // Callbacks set by main.js.
     this.onSend = () => {};
     this.onStop = () => {};
-    this.onModelFile = () => {};
     /** Right-click: opens/closes the menu. */
     this.onContextMenu = () => {};
     /** Double click or starting to type: opens the chat (with the first key inside). */
@@ -75,19 +71,9 @@ export class UI {
       this.onContextMenu(event.clientX, event.clientY);
     });
 
-    elements.fileInput.addEventListener('change', (event) => {
-      const file = event.target.files?.[0];
-      if (file) this.onModelFile(file);
-      event.target.value = '';
-    });
-
-    // Drop a .vrm on the window to load it on the fly.
+    // A file dropped outside her must not open in the window (main.js feeds her the ones dropped on her).
     window.addEventListener('dragover', (event) => event.preventDefault());
-    window.addEventListener('drop', (event) => {
-      event.preventDefault();
-      const file = [...(event.dataTransfer?.files ?? [])].find((f) => f.name.toLowerCase().endsWith('.vrm'));
-      if (file) this.onModelFile(file);
-    });
+    window.addEventListener('drop', (event) => event.preventDefault());
 
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
@@ -123,10 +109,6 @@ export class UI {
   closeComposer() {
     this.elements.composer.classList.add('hidden');
     this.elements.input.value = '';
-  }
-
-  pickModel() {
-    this.elements.fileInput.click();
   }
 
   // ---------------------------------------------------------------- bubble
@@ -175,12 +157,11 @@ export class UI {
     this.elements.debug.classList.toggle('hidden', !visible);
   }
 
-  updateDebug({ viseme, level, fps, weights, driver }) {
+  updateDebug({ viseme, level, fps, weights }) {
     if (this.elements.debug.classList.contains('hidden')) return;
     this.elements.dbgViseme.textContent = viseme;
     this.elements.dbgRms.textContent = level.toFixed(2);
     this.elements.dbgFps.textContent = String(fps);
-    if (driver) this.elements.dbgDriver.textContent = driver;
     for (const key of VISEME_KEYS) {
       const bar = this.bars.get(key);
       if (bar) bar.style.height = `${Math.max(2, (weights[key] ?? 0) * 100)}%`;

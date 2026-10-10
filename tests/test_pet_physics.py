@@ -258,3 +258,43 @@ console.log(JSON.stringify({ state: physics.state, before, wide, moved: axis() }
     assert out["state"] == "window"
     assert abs(out["wide"] - out["before"]) < 1
     assert abs(out["moved"] - (out["before"] + 50)) < 1
+
+
+def test_the_moved_island_holds_her_up_until_it_closes(tmp_path):
+    """Moved by its black and let go, the island stays in the air with her; closed, she falls."""
+    script = tmp_path / "park.cjs"
+    script.write_text(
+        """
+const { PetPhysics } = require(%s);
+const area = { x: 0, y: 0, width: 1920, height: 1040 };
+const bounds = { x: 600, y: 200, width: 460, height: 460 };
+const messages = [];
+const physics = new PetPhysics({
+  bounds: () => ({ ...bounds }),
+  move: (x, y) => { bounds.x = x; bounds.y = y; },
+  workArea: () => area,
+  windows: () => [],
+  windowRect: () => null,
+  emit: (message) => messages.push(message),
+  random: () => 0.5,
+});
+physics.grab();
+bounds.x = 300; bounds.y = 120;
+physics.park();
+for (let i = 0; i < 120; i += 1) physics.step(1 / 60);
+const parked = { state: physics.state, x: bounds.x, y: bounds.y };
+physics.park();  // only from "held"
+const again = physics.state;
+physics.release();
+for (let i = 0; i < 240 && physics.state === 'falling'; i += 1) physics.step(1 / 60);
+console.log(JSON.stringify({ parked, again, state: physics.state, y: bounds.y, first: messages[0] }));
+"""
+        % json.dumps(str(PHYSICS)),
+        encoding="utf-8",
+    )
+    out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=30, check=True).stdout)
+    assert out["parked"] == {"state": "parked", "x": 300, "y": 120}
+    assert out["again"] == "parked"
+    assert out["first"] == {"state": "falling"}
+    assert out["state"] == "ground"
+    assert out["y"] > 120

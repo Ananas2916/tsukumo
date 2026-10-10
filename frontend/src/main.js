@@ -1,29 +1,26 @@
 /**
- * Entry point of the character's window.
+ * Entry point of Tsukumo's window.
  *
  * It puts the pieces together:
  *
- *   WebSocket  ->  SpeechPlayer  ->  LipSync  ->  VrmStage
- *   (backend)      (WebAudio)        (weights)    (blendshapes)
+ *   WebSocket  ->  SpeechPlayer  ->  LipSync  ->  Stage (the flame)
+ *   (backend)      (WebAudio)        (vowels)     (mouth, mood)
  *
  * The backend sends a `speech` message for every sentence: base64 WAV +
  * viseme timeline. The player plays it and measures the instantaneous
- * volume, LipSync combines timeline and volume, VrmStage writes the weights
- * on the mouth's blendshapes every frame.
+ * volume, LipSync combines timeline and volume, and the flame opens and
+ * rounds her mouth with them every frame.
  *
  * In Electron there's also the mascot behaviour: per-pixel click-through,
- * you pick her up and move her (she dangles, then falls and lands; the flame
- * can also be thrown), she reacts when you touch her, and right-click opens
- * the menu (hud.js): the island around the flame, the docks beside the body.
- *
- * Tsukumo is the flame (flame.js), who now and then sprints along the
- * taskbar. The 3D body (VRM) is optional: whoever wants it gives it to her
- * and she enters and leaves it; without it, the VRM isn't even loaded.
+ * you pick her up and move her (she dangles, then falls and lands, or flies
+ * if you throw her), she reacts when you touch her, now and then she sprints
+ * along the taskbar, and right-click opens the menu island (island.js). Her
+ * little sounds are in sfx.js.
  */
 
-import { apiUrl, DEFAULT_BLENDSHAPES, wsUrl } from './config.js';
+import { apiUrl, wsUrl } from './config.js';
 import { SpeechPlayer } from './audio.js';
-import { readBody, readSetting, writeSetting } from './dom.js';
+import { readSetting, writeSetting } from './dom.js';
 import { resolveOutfit } from './flame/wardrobe.js';
 import { Hud } from './hud.js';
 import { LANG, t, translateDom, tx, watchLanguage } from './i18n.js';
@@ -31,10 +28,10 @@ import { LipSync } from './lipsync.js';
 import { MusicListener } from './music.js';
 import { Presence, SLEEP_LEVEL } from './presence.js';
 import { Sfx } from './sfx.js';
+import { Stage } from './stage.js';
 import { UI } from './ui.js';
 import { greetingForNow, Vocals } from './vocals.js';
 import { VoiceController } from './voice.js';
-import { VrmStage } from './vrm.js';
 import { CompanionSocket } from './ws.js';
 
 const pet = window.companion?.isElectron ? window.companion : null;
@@ -43,44 +40,35 @@ watchLanguage();
 // The tray menu and the dialogs speak the interface's language too.
 pet?.setLanguage?.(LANG);
 
-/** The chosen form: 'vrm' or 'flame'. The panel reads it too (same origin). */
-const FORM_SETTING = 'dc:form';
-/** With the body ('vrm') or without ('none': just the flame, the VRM isn't loaded). */
-const BODY_SETTING = 'dc:body';
-
-/** How often the flame sprints, if nothing holds her back (ms). */
+/** How often she sprints, if nothing holds her back (ms). */
 const SPRINT_EVERY = [4 * 60_000, 9 * 60_000];
 /** At the right moment she can't (she's speaking, you're in a meeting...): retry soon. */
 const SPRINT_RETRY = 45_000;
 /** Only if you're at the PC: nobody sees her run if you've been away longer than this (s). */
 const SPRINT_MAX_IDLE = 90;
 
-/** The flame's colour (flame/palettes.js): the panel chooses it. */
+/** Her colour (flame/palettes.js): the panel chooses it. */
 const COLOR_SETTING = 'dc:flame-color';
 /** What she wears (flame/wardrobe.js): "auto" follows the seasons. */
 const OUTFIT_SETTING = 'dc:flame-outfit';
 
+/** The cursor resting on her this long (s) and she sends little hearts, like Mochi; then a pause (s). */
+const LOVE_AFTER = 2.2;
+const LOVE_PAUSE = 30;
+/** The "tink" of the cursor arriving on her, at most this often (s). */
+const HOVER_SOUND_PAUSE = 1.5;
+
 const ui = new UI();
-const hud = new Hud(ui.elements.hud, document.getElementById('island'));
-const stage = new VrmStage(document.getElementById('stage'));
+const hud = new Hud(document.getElementById('island'));
+const stage = new Stage(document.getElementById('stage'));
 setFlameColor(readSetting(COLOR_SETTING, 'lilac'));
 setFlameOutfit();
 // "Automatic": at midnight on Halloween the hat changes by itself.
 setInterval(setFlameOutfit, 10 * 60 * 1000);
-// The choice is fixed at first start: after the introduction the default would change (see readBody).
-const bodiless = readBody() === 'none';
-writeSetting(BODY_SETTING, bodiless ? 'none' : 'vrm');
-// Without a body the flame is there right away, even before the backend: no model to download.
-if (bodiless) stage.useSpirit();
-else stage.setForm(readSetting(FORM_SETTING, 'vrm'), { animate: false });
-hud.setForm(stage.form);
-hud.setBodiless(bodiless);
-document.body.classList.toggle('flame-form', stage.form === 'flame');
 const lipSync = new LipSync({ gain: readSetting('dc:gain', 1.15) });
 const player = new SpeechPlayer({
   onClipStart: (payload) => {
     lipSync.setTimeline(payload.visemes);
-    stage.startClip(payload);
     // A real reply wakes her; one of her vocals doesn't.
     if (!payload.vocal) presence.touch();
     if (payload.text) ui.showBubble(payload.text, Math.max(2500, payload.duration * 1000 + 1200));
@@ -97,15 +85,9 @@ const socket = new CompanionSocket(wsUrl);
 
 /** Local state, kept minimal on purpose. */
 const state = {
-  /** There's something on stage: the loaded VRM, or the flame alone. */
-  avatarLoaded: bodiless,
-  /** 'vrm' or 'none' (see BODY_SETTING). */
-  body: bodiless ? 'none' : 'vrm',
-  /** The backend's default model: needed to give her the body back. */
-  avatarUrl: null,
-  /** She has already greeted on appearing (without a body that happens at the first contact with the backend). */
+  /** She has already greeted on appearing (at the first contact with the backend). */
   greeted: false,
-  /** The agents' usage from the backend (`usage` message), for the HUD's ring. */
+  /** The agents' usage from the backend (`usage` message), for the island. */
   usage: null,
   backendState: 'idle',
   /** Last value sent to Electron for the click-through. */
@@ -115,8 +97,8 @@ const state = {
   micLevel: 0,
   dancing: readSetting('dc:dance', true),
   musicPlaying: false,
-  /** She lay down to sleep: on waking she gets up. */
-  sleptLying: false,
+  /** She's in the dashboard's corner: no island there, the dashboard has its own controls. */
+  docked: false,
   /** When the last drag ended: if she falls right after, you threw her. */
   droppedAt: -Infinity,
   /** The user's activity from the backend: `{kind, label, detail, dnd, watching}`. */
@@ -125,6 +107,10 @@ const state = {
   idleSeconds: 0,
   /** When she may do the next sprint (performance.now()). */
   nextSprintAt: performance.now() + SPRINT_EVERY[0],
+  /** The cursor on her: since when (s, stage time), and when the last hearts were. */
+  hoverSince: null,
+  hoverSoundAt: -Infinity,
+  lovedAt: -Infinity,
 };
 
 const voice = new VoiceController({
@@ -137,16 +123,16 @@ const voice = new VoiceController({
     }
     if (event.type === 'level') state.micLevel = event.level;
     if (event.type === 'enabled') reportVoice();
-    // You called her by name: she raises her hand, "here I am".
-    if (event.type === 'summoned') stage.playClipRole('here');
+    // You called her by name: "here I am".
+    if (event.type === 'summoned') stage.play('greet');
   },
 });
 
 /** Rhythm of Spotify's music, listening to the system audio (Electron only). */
 const music = new MusicListener();
 
-/** Pop, thud, chime, knock-knock: synthesized, never over the mouth (see sfx.js). */
-const sfx = new Sfx({ isMuted: () => state.muted });
+/** Her little sounds, synthesized, never over the mouth (see sfx.js). */
+const sfx = new Sfx({ isMuted: () => state.muted || Boolean(state.activity?.dnd) });
 
 /** "Hii!" when she greets, "Ehehe!" when petted: in the chosen voice (see vocals.js). */
 const vocals = new Vocals({
@@ -158,19 +144,19 @@ const vocals = new Vocals({
 const presence = new Presence({
   onChange: (next, { welcome }) => {
     stage.setSleep(SLEEP_LEVEL[next]);
-    if (next === 'asleep') lieDownToSleep();
-    const stoodUp = next === 'awake' ? getUpFromSleep() : false;
+    if (next === 'asleep') sfx.play('sleep');
     if (welcome) {
+      sfx.play('wake');
       setTimeout(() => {
         stage.greet();
         vocals.say('welcome');
-      }, stoodUp ? 1400 : 500);
+      }, 500);
     }
   },
 });
 
 /**
- * Cursor circles around her head: three fast circles and her head spins.
+ * Cursor circles around her: three fast circles and her head spins.
  * The accumulated angle drains by itself, so it only counts if it's quick.
  */
 const spin = { angle: null, total: 0, at: 0 };
@@ -196,7 +182,7 @@ function trackSpin(x, y) {
   if (Math.abs(spin.total) > 3 * 2 * Math.PI) {
     spin.total = 0;
     if (stage.play('dizzy')) {
-      sfx.blip(false);
+      sfx.play('dizzy');
       vocals.say('dizzy');
     }
   }
@@ -217,6 +203,8 @@ function pokeStreak() {
 
 /** Happy reactions speak like a pat, the others like a poke. */
 const HAPPY_POKES = new Set(['pat', 'hearts', 'sing', 'cool']);
+/** The sound of each reaction to a touch. */
+const TOUCH_SOUNDS = { pat: 'pat', hearts: 'love', dizzy: 'dizzy', pout: 'annoyed' };
 
 /** She's doing something, or the user is watching a video: no sleep. */
 function busyForSleep() {
@@ -229,22 +217,7 @@ function busyForSleep() {
   );
 }
 
-/** Asleep on the taskbar: she lies on her side. On a window she stays where she is. */
-function lieDownToSleep() {
-  const body = stage.body;
-  if (!pet || !body || stage.form === 'flame' || body.surface !== 'ground' || !['stand', 'sit'].includes(body.mode)) return;
-  state.sleptLying = true;
-  pet.requestPosture('side');
-}
-
-function getUpFromSleep() {
-  if (!pet || !state.sleptLying) return false;
-  state.sleptLying = false;
-  pet.requestPosture('stand');
-  return true;
-}
-
-/** The sleep "z"s rise from her head, wherever it is (lying down too). */
+/** The sleep "z"s rise from her tip, wherever she is. */
 const zzz = document.getElementById('zzz');
 function updateZzz() {
   const head = stage.asleep ? stage.headScreen() : null;
@@ -252,16 +225,12 @@ function updateZzz() {
   if (head) zzz.style.transform = `translate(${Math.round(head.x + 12)}px, ${Math.round(head.y - 40)}px)`;
 }
 
-/**
- * The speech bubble sits at the top of the window; with the flame, who is
- * small and low, it sits above her, or above the island when the menu is open.
- */
+/** The speech bubble sits above her, or above the island when the menu is open. */
 function placeBubble() {
   const bubble = ui.elements.bubble;
-  const flame = stage.form === 'flame' && !stage.morphing;
   let above = null;
-  if (flame && hud.visible) above = hud.top > 48 ? hud.top - 8 : null;
-  else if (flame) above = stage.headScreen()?.y - 14;
+  if (hud.visible) above = hud.top > 48 ? hud.top - 8 : null;
+  else above = stage.headScreen()?.y - 14;
   if (Number.isFinite(above)) {
     bubble.style.top = 'auto';
     bubble.style.bottom = `${Math.round(window.innerHeight - above)}px`;
@@ -271,89 +240,27 @@ function placeBubble() {
   }
 }
 
-/** Changes form: the flame enters the body or leaves it (see VrmStage.setForm). */
-function setForm(form) {
-  const next = form === 'flame' ? 'flame' : 'vrm';
-  if (!stage.setForm(next, { animate: state.avatarLoaded })) return false;
-  writeSetting(FORM_SETTING, next);
-  // The menu changes form with her (island or docks): the open one closes.
-  hud.hide();
-  showForm(next);
-  if (state.avatarLoaded) sfx.pop();
-  if (next === 'flame' && pet) {
-    // Sitting or lying on the taskbar she couldn't sprint: when the switch is
-    // over she stands up (on a window she stays seated).
-    state.sleptLying = false;
-    setTimeout(() => stage.form === 'flame' && pet.requestPosture('stand'), 1300);
-  }
-  return true;
-}
-
-function showForm(form) {
-  hud.setForm(form);
-  document.body.classList.toggle('flame-form', form === 'flame');
-}
-
-/**
- * With or without the body. Without: the flame leaves the body and the VRM is
- * unloaded (and at the next starts it isn't loaded at all). With: the VRM is
- * loaded and the flame enters it, in the requested form.
- */
-async function setBody(body, form = 'vrm') {
-  const next = body === 'none' ? 'none' : 'vrm';
-  state.body = next;
-  writeSetting(BODY_SETTING, next);
-  hud.setBodiless(next === 'none');
-  if (next === 'none') {
-    writeSetting(FORM_SETTING, 'flame');
-    if (stage.spiritOnly) return;
-    // She leaves the body with her animation; the VRM is unloaded at the end (onMorphEnd).
-    if (stage.vrm && stage.form === 'vrm' && setForm('flame')) return;
-    if (!stage.morphing) {
-      stage.useSpirit();
-      showForm('flame');
-    }
-    return;
-  }
-  if (stage.spiritOnly || !stage.vrm) {
-    if (!state.avatarUrl) {
-      ui.toast(t('The 3D model is missing: choose it from Character → Look.'), true, 5000);
-      return;
-    }
-    if (!(await loadAvatar(state.avatarUrl, state.avatarUrl.split('/').pop(), { greet: false }))) return;
-  }
-  if (form === 'vrm') setForm('vrm');
-  else {
-    writeSetting(FORM_SETTING, 'flame');
-    showForm(stage.form);
-  }
-}
-
-// Leaving the body is over and the body isn't wanted any more: the VRM's memory is freed.
-stage.onMorphEnd = (form) => {
-  if (form === 'flame' && state.body === 'none' && !stage.spiritOnly) stage.useSpirit();
-};
-
-/** She appears: a "pop", then she waves her hand (or the flame her own way) and greets. */
+/** She appears: a "pop", then she greets her way, fitting the hour. */
 function appear() {
   state.greeted = true;
-  sfx.pop();
+  ui.hideOverlay();
+  sfx.play('pop');
   setTimeout(() => {
     stage.greet();
+    sfx.play('greet');
     vocals.say(greetingForNow());
   }, 700);
 }
 
 /**
- * The sprint starts only if nobody needs her: flame at rest, no voice or
- * thoughts in progress, you at the PC but not in a meeting, full screen, a
- * game or watching a video (the rules of the spontaneous comments).
+ * The sprint starts only if nobody needs her: at rest, no voice or thoughts
+ * in progress, you at the PC but not in a meeting, full screen, a game or
+ * watching a video (the rules of the spontaneous comments).
  */
 function sprintAllowed() {
   return (
-    stage.form === 'flame' &&
-    !stage.morphing &&
     socket.connected &&
+    !state.docked &&
     !player.playing &&
     state.backendState === 'idle' &&
     presence.state === 'awake' &&
@@ -377,59 +284,75 @@ function maybeSprint(now) {
   pet.sprint();
 }
 
+/**
+ * The cursor resting on her: a "tink" when it arrives and, if it stays a
+ * while, little hearts (Mochi's "love"). Not while she's busy or held.
+ */
+function trackHover(elapsed) {
+  const on = stage.pointerOnFlame && !hud.visible && !document.body.classList.contains('dragging');
+  if (!on) {
+    state.hoverSince = null;
+    return;
+  }
+  if (state.hoverSince === null) {
+    state.hoverSince = elapsed;
+    // Not at every flicker of the cursor on her edge.
+    if (elapsed - state.hoverSoundAt > HOVER_SOUND_PAUSE) {
+      state.hoverSoundAt = elapsed;
+      sfx.play('hover');
+    }
+    return;
+  }
+  const calm = !player.playing && state.backendState === 'idle' && presence.state === 'awake';
+  if (calm && elapsed - state.hoverSince > LOVE_AFTER && elapsed - state.lovedAt > LOVE_PAUSE && stage.play('hearts')) {
+    state.lovedAt = elapsed;
+    sfx.play('love');
+  }
+}
+
 hud.setMuted(state.muted);
 hud.setDancing(state.dancing);
 
 // ---------------------------------------------------------------------------
 // Render loop: the only place where the mouth is updated.
 // ---------------------------------------------------------------------------
-stage.onFrame((dt) => {
+stage.onFrame((dt, elapsed) => {
   const level = player.update(dt);
-  const weights = lipSync.update(player.currentTime, level, dt, player.playing);
-  // The body gestures and nods in time with the voice's volume.
-  stage.setSpeech(player.playing, level);
+  const vowels = lipSync.update(player.currentTime, level, dt, player.playing);
+  stage.setSpeech(player.playing, level, player.playing ? vowels : null);
   const rhythm = music.update(dt);
   stage.setMusic(rhythm);
 
-  // The island open: the flame slides into her slot in the card.
-  stage.setMenu(hud.visible && hud.layout === 'island', hud.flameSlot);
-  if (hud.visible) {
-    hud.setFrame(stage.hudFrame());
-    hud.update({
-      voice: level,
-      mic: voice.listening ? state.micLevel : 0,
-      music: rhythm.active ? Math.max(0, 1 - rhythm.phase * 2.5) * Math.min(1, rhythm.energy * 4) : 0,
-    });
-  }
+  // The island open: she slides into her slot in the card.
+  stage.setMenu(hud.visible, hud.flameSlot);
 
   ui.updateDebug({
     viseme: player.playing ? lipSync.activeViseme : 'sil',
     level,
     fps: stage.fps,
-    weights,
-    driver: stage.mouthDriverLabel,
+    weights: vowels,
   });
 
   updateZzz();
   placeBubble();
   if (pet) {
     updateClickThrough();
+    trackHover(elapsed);
     maybeSprint(performance.now());
   }
-  return weights;
 });
 stage.start();
 
 /**
- * Per-pixel click-through: the window is "solid" only where the character
- * really is (alpha of the pixel under the cursor, read from the framebuffer)
- * or where there's a clickable piece of interface (the docks, a notice).
- * Everywhere else the mouse passes through to the windows below.
+ * Per-pixel click-through: the window is "solid" only where she really is
+ * (alpha of the pixel under the cursor, read from the framebuffer) or where
+ * there's a clickable piece of interface (the island, a notice). Everywhere
+ * else the mouse passes through to the windows below.
  */
 function updateClickThrough() {
   const { x, y } = stage.pointerPx;
   const overUI = x >= 0 && ui.isOverSolidUI(x, y);
-  const wanted = overUI || stage.pointerOnAvatar;
+  const wanted = overUI || stage.pointerOnFlame;
   if (wanted) hud.touch();
 
   if (window.__petDebug) {
@@ -438,7 +361,7 @@ function updateClickThrough() {
       state.lastDebugLog = now;
       console.log(
         `[pet] cursor=(${Math.round(x)},${Math.round(y)}) alpha=${stage.lastAlpha?.toFixed(2)} ` +
-          `onAvatar=${stage.pointerOnAvatar} onUI=${overUI} -> interactive=${wanted}`,
+          `onFlame=${stage.pointerOnFlame} onUI=${overUI} -> interactive=${wanted}`,
       );
     }
   }
@@ -447,47 +370,6 @@ function updateClickThrough() {
   state.interactive = wanted;
   pet.setInteractive(wanted);
 }
-
-// ---------------------------------------------------------------------------
-// Loading the avatar
-// ---------------------------------------------------------------------------
-async function loadAvatar(url, label, { greet = true } = {}) {
-  ui.showOverlay(t('Loading {name}…', { name: label }));
-  try {
-    await stage.load(url, (progress) => ui.showOverlay(t('Loading {name}… {percent}%', { name: label, percent: Math.round(progress * 100) })));
-    state.avatarLoaded = true;
-    ui.hideOverlay();
-    // As soon as she appears she greets: with her hand and her voice, fitting the hour.
-    if (greet) appear();
-    if (stage.mouthDriver.kind === 'none') {
-      ui.toast(t("The model has no mouth blendshapes: no lip-sync."), true, 6000);
-    }
-    return true;
-  } catch (error) {
-    console.error(error);
-    ui.showOverlay(
-      t("I can't load the 3D model"),
-      t('{error}. Copy an avatar.vrm file into frontend/public/models/ or drop a .vrm here.', { error: error.message || error }),
-      true,
-    );
-    return false;
-  }
-}
-
-ui.onModelFile = async (file) => {
-  const url = URL.createObjectURL(file);
-  const ok = await loadAvatar(url, file.name);
-  // A model chosen on purpose: it means the body is wanted.
-  if (ok && state.body === 'none') {
-    state.body = 'vrm';
-    writeSetting(BODY_SETTING, 'vrm');
-    hud.setBodiless(false);
-    setForm('vrm');
-  }
-  // The blob stays referenced by the textures while the model is on stage:
-  // we revoke it only if loading failed.
-  if (!ok) URL.revokeObjectURL(url);
-};
 
 // ---------------------------------------------------------------------------
 // Interface -> backend
@@ -512,19 +394,35 @@ ui.onContextMenu = () => toggleMenu();
 hud.onIslandShape = (open) => pet?.setIslandWide?.(open) ?? null;
 hud.locate = () => stage.hudFrame();
 pet?.onFrameShift?.(({ shift }) => stage.setFrameShift(shift));
+// Grabbing the island's black moves her with it; let go, she stays there while it's open.
+hud.onIslandDrag = (phase, at) => {
+  if (!pet) return null;
+  if (phase === 'start') return pet.islandDragStart();
+  if (phase === 'move') return pet.dragMove(at.x, at.y);
+  return pet.islandDragEnd();
+};
 
-/** The right-click menu: it starts from where she is now (the island grows from her centre). */
+/**
+ * The right-click menu: it starts from where she is now (the island grows
+ * from her centre). In the dashboard there's no island: its corner is hers
+ * to stand in, and the dashboard has the controls.
+ */
 function toggleMenu(open = !hud.visible) {
   if (!open) {
+    if (hud.visible) sfx.play('close');
     hud.hide();
     return;
   }
-  if (stage.morphing) return;
+  if (state.docked) {
+    if (stage.play('flare')) sfx.play('pat');
+    return;
+  }
   hud.setFrame(stage.hudFrame());
   hud.show();
+  sfx.play('open');
 }
 
-/** The flame's colour: her, and her card's halo in the island. */
+/** Her colour: her, and her card's halo in the island. */
 function setFlameColor(name) {
   stage.setFlamePalette(name);
   hud.setTint(stage.flame.colors.accent);
@@ -552,6 +450,29 @@ function setMuted(muted) {
   if (state.muted) stopSpeaking(false);
 }
 
+/**
+ * The island's small Spotify player. Spotify's own API if it's connected
+ * (backend/music.py), otherwise Windows' media keys: any account works.
+ */
+async function controlMusic(button) {
+  const action = button === 'toggle' ? (hud.music.playing ? 'pause' : 'resume') : button;
+  sfx.play('tick');
+  try {
+    const response = await fetch(apiUrl('/api/music/control'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    if (!response.ok) {
+      const answer = await response.json().catch(() => null);
+      ui.toast(tx(answer?.error ?? answer?.detail) || t("Spotify isn't answering."), true, 4000);
+      sfx.play('error');
+    }
+  } catch {
+    ui.toast(t("Spotify isn't answering."), true, 4000);
+  }
+}
+
 // The menu: what each button does.
 hud.onAction = async (id, detail) => {
   switch (id) {
@@ -562,6 +483,7 @@ hud.onAction = async (id, detail) => {
       setMuted(!state.muted);
       socket.send({ type: 'settings', muted: state.muted });
       ui.toast(state.muted ? t('Voice off: she answers only in writing.') : t('Voice on.'));
+      sfx.play('tick');
       break;
     case 'mic':
       if (!state.voiceAvailable) {
@@ -569,15 +491,16 @@ hud.onAction = async (id, detail) => {
         ui.toast(t('Choose a listening engine first.'));
         break;
       }
+      sfx.play('tick');
       await pushToggle();
       break;
     case 'music':
       setDancing(!state.dancing);
+      sfx.play('tick');
       ui.toast(state.dancing ? t('Dancing to Spotify.') : t('No dancing.'));
       break;
-    case 'form':
-      if (state.body === 'none') setBody('vrm');
-      else setForm(stage.form === 'flame' ? 'vrm' : 'flame');
+    case 'player':
+      controlMusic(detail);
       break;
     case 'usage':
       openPanel({ tab: 'work' });
@@ -586,10 +509,12 @@ hud.onAction = async (id, detail) => {
     case 'outfit':
       writeSetting(OUTFIT_SETTING, detail);
       setFlameOutfit();
+      sfx.play('outfit');
       break;
     // A click on her inside the island: a pat.
     case 'flame':
       stage.play('pat');
+      sfx.play('pat');
       vocals.say('pat');
       break;
     case 'dashboard':
@@ -623,8 +548,7 @@ function openPanel(focus) {
 /**
  * The state shown depends on TWO things: what the backend is doing and
  * whether there's still audio in the queue. The backend says "idle" as soon
- * as it has finished synthesizing, but the character keeps speaking for a
- * few seconds.
+ * as it has finished synthesizing, but she keeps speaking for a few seconds.
  */
 function refreshStatus() {
   if (!socket.connected) {
@@ -637,7 +561,7 @@ function refreshStatus() {
 
 socket.on('open', () => {
   refreshStatus();
-  // Only the character's window in Electron can take screenshots.
+  // Only her window in Electron can take screenshots.
   if (pet?.captureScreen) socket.send({ type: 'capabilities', screen: true });
 });
 
@@ -646,7 +570,7 @@ async function lookAtScreen(text = '') {
   if (!pet?.captureScreen) return;
   try {
     const file = await pet.captureScreen();
-    stage.play('lookAround');
+    stage.play('look');
     socket.send({ type: 'chat', text, files: [file], screen: true });
   } catch (error) {
     ui.toast(t("I can't see the screen: {error}", { error: error.message }), true, 4000);
@@ -663,17 +587,13 @@ socket.on('close', () => {
   // Without the backend we know nothing about the engines any more: better
   // the grey "don't know" than leaving a lying green on.
   hud.setEngines(null);
-  if (!state.avatarLoaded) ui.showOverlay(t('Waiting for the backend…'), t("I'll retry by myself, nothing to do."));
+  if (!state.greeted) ui.showOverlay(t('Waiting for the backend…'), t("I'll retry by myself, nothing to do."));
 });
 
 socket.on('hello', (message) => {
   refreshStatus();
   const config = message.config ?? {};
   if (message.context) state.activity = message.context.activity ?? null;
-  // .vrma clips from the animations folder (see clips.js).
-  stage.setClipList(message.animations ?? []).then((loaded) => {
-    if (loaded?.length) console.info(`[clips] ${loaded.length} animations:`, loaded.map((clip) => clip.name).join(', '));
-  });
   hud.setEngines(message.engines);
   state.usage = message.usage ?? null;
   hud.setUsage(state.usage, message.engines?.llm?.id);
@@ -682,34 +602,17 @@ socket.on('hello', (message) => {
   voice.mode = config.voiceMode ?? 'push';
   // The microphone doesn't open by itself: it needs a user gesture, both for
   // the browser's permission and because turning on the microphone behind
-  // your back would be unpleasant. The docks, the panel and push-to-talk turn
-  // it on.
+  // your back would be unpleasant. The island, the panel and push-to-talk
+  // turn it on.
   state.voiceAvailable = (config.sttEngine ?? 'none') !== 'none';
   reportVoice();
 
   // The mute chosen here holds after a backend restart too.
   if (Boolean(config.muted) !== state.muted) socket.send({ type: 'settings', muted: state.muted });
 
-  if (message.blendshapes) {
-    stage.blendshapes = { ...DEFAULT_BLENDSHAPES, ...message.blendshapes };
-  }
-  const avatar = message.avatar?.default;
-  if (avatar) state.avatarUrl = apiUrl(avatar);
-  if (state.body === 'none') {
-    // Without a body there's nothing to load: she appears as soon as the backend answers.
-    ui.hideOverlay();
-    if (!state.greeted) appear();
-  } else if (!state.avatarLoaded) {
-    if (avatar) {
-      loadAvatar(apiUrl(avatar), avatar.split('/').pop());
-    } else {
-      ui.showOverlay(
-        t('The 3D model is missing'),
-        t('Copy an avatar.vrm file into frontend/public/models/, or drop a .vrm on this window. You can create one for free with VRoid Studio.'),
-        true,
-      );
-    }
-  }
+  // Nothing to load: she appears as soon as the backend answers.
+  ui.hideOverlay();
+  if (!state.greeted) appear();
 });
 
 // The gesture that goes with a spontaneous comment (yawn, shivers, fanning herself...).
@@ -719,17 +622,20 @@ socket.on('gesture', (message) => {
 
 /**
  * She calls you: chime, Windows notification and a gesture. If it's a
- * finished job the flame celebrates (jump with a twirl and stars); if it's
- * waiting for you, or with the body, she knocks on the glass (the flame hops
- * with the "!").
+ * finished job she celebrates (jump with a twirl and stars); if it's waiting
+ * for you, she hops with the "!".
  */
-function callUser(title, body, { done = false } = {}) {
+function callUser(title, body, { done = false, waiting = false } = {}) {
   presence.touch();
-  sfx.chime();
-  const celebrated = done && stage.form === 'flame' && stage.play('cheer');
+  if (done) sfx.play('finish');
+  else if (waiting) sfx.play('question');
+  else sfx.play('chime');
+  const celebrated = done && stage.play('cheer');
   if (!celebrated) {
-    if (stage.play('knock')) setTimeout(() => sfx.knock(), 520);
-    else stage.play('wave');
+    // The knock-knock comes when her "!" hits the glass; an agent's call has its own sound.
+    if (stage.play('knock')) {
+      if (!done && !waiting) setTimeout(() => sfx.play('knock'), 520);
+    } else stage.play('greet');
   }
   pet?.notify?.(title, body);
 }
@@ -742,9 +648,10 @@ socket.on('notify', (message) => {
     pet?.notify?.(title, message.message ?? '');
   } else if (message.quiet) {
     ui.showBubble(`${title} ✓`, 3000);
+    sfx.play('tick');
     if (!waiting) stage.play('hop');
   } else {
-    callUser(title, message.message ?? '', { done: !waiting });
+    callUser(title, message.message ?? '', { done: !waiting, waiting });
   }
 });
 
@@ -767,7 +674,7 @@ socket.on('speech', (message) => {
 // A reminder or a timer went off: chime, knock on the glass, notification.
 socket.on('reminder', (message) => {
   if (message.event !== 'fired') return;
-  // The knock-knock comes when the fist touches the glass (see the knock action).
+  // The knock-knock comes when her "!" hits the glass (see the knock reaction).
   callUser('Tsukumo', message.reminder?.label ?? t('Reminder'));
 });
 
@@ -783,7 +690,7 @@ socket.on('engines', (message) => {
   hud.setUsage(state.usage, message?.llm?.id);
 });
 
-// How much Claude Code and Codex have used (backend/usage.py): the ring in the left dock.
+// How much Claude Code and Codex have used (backend/usage.py): the bar in the island.
 socket.on('usage', (message) => {
   state.usage = message;
   hud.setUsage(message, hud.engines?.llm?.id);
@@ -801,10 +708,10 @@ socket.on('state', (message) => {
 });
 
 /**
- * The microphone must know when the character speaks, or it hears itself.
- * What counts is the audio playing, not just the backend's state: the
- * backend goes back to "idle" as soon as it has synthesized the last
- * sentence, while she's still saying it.
+ * The microphone must know when she speaks, or it hears her. What counts is
+ * the audio playing, not just the backend's state: the backend goes back to
+ * "idle" as soon as it has synthesized the last sentence, while she's still
+ * saying it.
  */
 function syncVoiceState() {
   voice.setCompanionState(player.playing || state.backendState === 'speaking' ? 'speaking' : state.backendState);
@@ -820,10 +727,12 @@ socket.on('transcript', (message) => {
   if (!message.echo) ui.showBubble(`« ${text} »`, 2500);
 });
 
-// You thank her: a small bow (if there's a bow/inchino clip).
+// Your message reached her (from the panel, the dashboard or the phone): a breath of air;
+// you thank her: a happy pat.
 const THANKS = /\b(grazie|thanks|thank you|thx|arigat[oō]|merci|danke|gracias|obrigad[oa])\b/i;
 socket.on('user', (message) => {
-  if (THANKS.test(message.text ?? '')) stage.playClipRole('bow');
+  sfx.play('send');
+  if (THANKS.test(message.text ?? '')) stage.play('pat');
 });
 
 // A sentence ready to be spoken: WAV + viseme timeline.
@@ -833,7 +742,7 @@ socket.on('speech', (message) => {
   if (!state.muted) player.enqueue(message);
 });
 
-// The agent is using a tool: work pose and, while it's quiet, the bubble with the step.
+// The agent is using a tool: work props and, while it's quiet, the bubble with the step.
 socket.on('working', (message) => {
   stage.setWorking(message.kind);
   const label = tx(message.label) ?? '';
@@ -850,13 +759,18 @@ socket.on('caption', (message) => {
 socket.on('reply', (message) => {
   // The bubble already shows the single sentences while she speaks them:
   // here it's only needed for replies that aren't read (e.g. if audio is blocked).
-  if (message.text && !player.playing && !message.failed) ui.showBubble(message.text, 6000);
+  if (message.failed) sfx.play('error');
+  else if (message.text && !player.playing) {
+    ui.showBubble(message.text, 6000);
+    sfx.play('reply');
+  }
 });
 
 socket.on('notice', (message) => ui.toast(message?.message ?? ''));
 
 socket.on('error', (message) => {
   ui.toast(message?.message ?? t('Unknown error'), true, 7000);
+  sfx.play('error');
   refreshStatus();
 });
 
@@ -870,7 +784,6 @@ socket.on('cancel', () => {
 // ---------------------------------------------------------------------------
 let musicStopTimer = null;
 function syncMusic() {
-  hud.setMusic(state.musicPlaying);
   const wanted = state.musicPlaying && state.dancing;
   if (wanted) {
     clearTimeout(musicStopTimer);
@@ -961,41 +874,45 @@ window.addEventListener('keyup', (event) => {
 if (pet) {
   window.__petDebug = new URLSearchParams(location.search).has('petdebug');
   document.body.classList.add('pet-mode');
-  // Full figure: the right look for a desktop mascot.
-  stage.setFraming('full');
-  // Dragging moves the window, it doesn't rotate the camera.
-  stage.dragEnabled = false;
   stage.setSpontaneous(readSetting('dc:spontaneous', true));
-  stage.setStance(readSetting('dc:stance', 'standard'));
   stage.setDancing(state.dancing);
 
-  pet.onMusic((status) => {
+  const applyMusic = (status) => {
     state.musicPlaying = Boolean(status?.playing);
+    hud.setMusic(status);
     syncMusic();
-  });
+  };
+  /** In the dashboard's corner or back on the desktop. */
+  const applyDocked = (docked) => {
+    if (docked === state.docked) return;
+    state.docked = docked;
+    if (docked) hud.hide();
+  };
+  pet.onMusic(applyMusic);
   pet.getState().then((initial) => {
-    state.musicPlaying = Boolean(initial?.music?.playing);
-    syncMusic();
+    applyMusic(initial?.music);
+    applyDocked(Boolean(initial?.dashboard));
     hud.setActiveTab(initial?.panelVisible ? initial.panelTab : null);
   });
-  pet.onPetState((current) => hud.setActiveTab(current?.panelVisible ? current.panelTab : null));
+  pet.onPetState((current) => {
+    applyDocked(Boolean(current?.dashboard));
+    hud.setActiveTab(current?.panelVisible ? current.panelTab : null);
+  });
 
-  // Chat and settings live in the panel, detached from the character.
+  // Chat and settings live in the panel, detached from her.
   // Double click (or starting to type) opens the chat.
   ui.onOpenChat = (text) => pet.openPanel({ tab: 'chat', text });
 
   // The wheel makes her bigger: it changes the window, not the camera.
   stage.onWheelScale = (factor) => pet.scaleBy(factor);
-  // Where feet and seat are in the window: needed to set her down.
+  // Where she rests in the window: needed to set her down.
   stage.onAnchors = (anchors) => pet.setAnchors(anchors);
-  // Now and then she sits or lies down on the taskbar: Electron moves the window.
-  stage.onPostureRequest = (posture) => pet.requestPosture(posture);
 
-  // Grab her with the mouse: she's lifted by the scruff and dangles. A click
-  // without dragging is a touch (pat on the head, poke on the body).
+  // Grab her with the mouse: she's lifted by the bulb and dangles. A click
+  // without dragging is a touch (pat on the tip, poke lower down).
   let drag = null;
   ui.elements.stage.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || !stage.pointerOnAvatar) return;
+    if (event.button !== 0 || !stage.pointerOnFlame) return;
     drag = {
       origin: null,
       screenX: event.screenX,
@@ -1014,7 +931,7 @@ if (pet) {
   });
 
   /**
-   * The window's speed in the last 100 ms (px/s), to throw the flame. Below a
+   * The window's speed in the last 100 ms (px/s), to throw her. Below a
    * certain speed it's just letting her go: null.
    */
   function releaseVelocity(samples) {
@@ -1034,15 +951,18 @@ if (pet) {
     drag.dx = event.screenX - drag.screenX;
     drag.dy = event.screenY - drag.screenY;
     if (drag.moved || Math.abs(drag.dx) + Math.abs(drag.dy) <= 4) return;
+    // In the dashboard she stays in her corner.
+    if (state.docked) return;
 
     // The grab starts only when the mouse really moves: a simple click must not
-    // make anyone fall or stand up.
+    // make anyone fall.
     const current = drag;
     current.moved = true;
     current.startedAt = performance.now();
     current.offset = stage.beginHold(current.clientX, current.clientY);
     document.body.classList.add('dragging');
     presence.touch();
+    sfx.play('lift');
     vocals.say('lift');
     hud.hide();
     pet.dragStart().then((origin) => {
@@ -1052,7 +972,7 @@ if (pet) {
   });
 
   // The window follows the cursor every frame; in the first moments it slides
-  // until the scruff is under the pointer ("picked up with tongs").
+  // until the bulb is under the pointer ("picked up with tongs").
   function dragFrame(current) {
     if (drag !== current) return;
     const snap = Math.min(1, (performance.now() - current.startedAt) / 180);
@@ -1060,7 +980,7 @@ if (pet) {
     const x = Math.round(current.origin.x + current.dx + current.offset.x * k);
     const y = Math.round(current.origin.y + current.dy + current.offset.y * k);
     pet.dragMove(x, y);
-    stage.moveHold(x, y);
+    stage.moveHold(x);
     current.samples.push({ x, y, at: performance.now() });
     if (current.samples.length > 12) current.samples.shift();
     requestAnimationFrame(() => dragFrame(current));
@@ -1072,8 +992,10 @@ if (pet) {
     drag = null;
     document.body.classList.remove('dragging');
     if (finished.moved) {
-      // The flame is thrown (like Blobby): she flies, hits the edges, lands. The body just falls.
-      pet.dragEnd(stage.form === 'flame' && !stage.morphing ? releaseVelocity(finished.samples) : null);
+      // Thrown (like Blobby): she flies, hits the edges, lands.
+      const velocity = releaseVelocity(finished.samples);
+      if (velocity) sfx.play('whoosh', Math.min(1, Math.hypot(velocity.vx, velocity.vy) / 3200));
+      pet.dragEnd(velocity);
       stage.endHold();
       state.droppedAt = performance.now();
     } else {
@@ -1081,17 +1003,20 @@ if (pet) {
       const streak = pokeStreak();
       if (streak && stage.play(streak)) {
         pokes.length = 0;
-        if (streak === 'dizzy') sfx.blip(false);
+        sfx.play(TOUCH_SOUNDS[streak]);
         vocals.say(streak);
         return;
       }
       const reaction = stage.poke(event.clientX, event.clientY);
-      if (reaction) vocals.say(HAPPY_POKES.has(reaction) ? 'pat' : 'poke');
+      if (reaction) {
+        sfx.play(TOUCH_SOUNDS[reaction] ?? 'poke');
+        vocals.say(HAPPY_POKES.has(reaction) ? 'pat' : 'poke');
+      }
     }
   });
 
   // The main process decides where she is: falls, lands on the taskbar or on
-  // a window, sits, clings to the edge, travels with the window.
+  // a window, flies when thrown, sprints.
   pet.onMotion((motion) => {
     switch (motion.state) {
       case 'falling':
@@ -1106,28 +1031,20 @@ if (pet) {
         break;
       case 'bonk':
         stage.bonk(motion.side, motion.impact);
-        sfx.thud(Math.min(1, motion.impact * 0.7));
+        sfx.play('thud', Math.min(1, motion.impact * 0.7));
         break;
       case 'landed':
-        stage.landed(motion.impact, motion.posture);
-        if (motion.impact > 0.15) sfx.thud(motion.impact);
+        stage.landed(motion.impact);
+        if (motion.impact > 0.15) sfx.play('thud', motion.impact);
         break;
-      case 'posture':
-        stage.setPosture(motion.posture);
-        break;
-      case 'edge':
-        stage.setEdge(motion.side, motion.edge);
-        break;
-      case 'carried':
-        stage.carried(motion.x, motion.y);
-        break;
-      // The flame's sprint: the phases and, while she runs, where the window got to.
+      // The sprint: the phases and, while she runs, where the window got to.
       case 'sprint':
         stage.setSprint(motion.phase, motion.dir);
         if (motion.phase === 'ready') {
           presence.touch();
           hud.hide();
         }
+        if (motion.phase === 'go') sfx.play('zoom');
         break;
       case 'sprint-move':
         stage.sprintMove(motion.x, motion.speed);
@@ -1172,11 +1089,13 @@ if (pet) {
       case 'sfx':
         sfx.setEnabled(command.value);
         break;
+      case 'sfx-volume':
+        sfx.setVolume(command.value);
+        // A sample at the new volume.
+        sfx.play('pat');
+        break;
       case 'look-screen':
         lookAtScreen();
-        break;
-      case 'play-clip':
-        stage.playClip(command.name);
         break;
       case 'sleep':
         presence.setEnabled(command.value);
@@ -1185,25 +1104,15 @@ if (pet) {
         presence.setTimes(command.drowsy, command.asleep);
         break;
       case 'play':
-        stage.play(command.name, { sign: command.sign });
-        break;
-      case 'form':
-        // 'spirit' = without a body (from the introduction or from Character -> Look).
-        if (command.value === 'spirit') setBody('none');
-        else if (state.body === 'none') setBody('vrm', command.value);
-        // Still changing: she stays as she is, and the panel goes back to telling the truth.
-        else if (!setForm(command.value) && command.value !== stage.form) writeSetting(FORM_SETTING, stage.form);
+        if (stage.play(command.name)) sfx.play(TOUCH_SOUNDS[command.name] ?? (command.name === 'cheer' ? 'finish' : 'tick'));
         break;
       case 'sprint':
-        // From the panel: right away, if she's the flame and standing on the taskbar.
-        if (stage.form !== 'flame') ui.toast(t('Sprints are done by the flame: change form from the panel.'));
-        else pet.sprint(command.kind).then((ok) => ok || ui.toast(t('She can only sprint when she is down on the taskbar.')));
+        // From the panel: right away, if she's standing on the taskbar.
+        pet.sprint(command.kind).then((ok) => ok || ui.toast(t('She can only sprint when she is down on the taskbar.')));
         break;
       case 'greet':
         stage.greet();
-        break;
-      case 'posture':
-        pet.requestPosture(command.value);
+        sfx.play('greet');
         break;
       case 'mic':
         pushToggle();
@@ -1217,14 +1126,10 @@ if (pet) {
       case 'barge-in':
         voice.setBargeIn(command.value);
         break;
-      case 'stance':
-        writeSetting('dc:stance', command.value);
-        stage.setStance(command.value);
-        break;
       case 'flame-color':
         writeSetting(COLOR_SETTING, command.value);
         setFlameColor(command.value);
-        if (stage.form === 'flame') stage.play('flare');
+        stage.play('flare');
         break;
       // Writing in the panel's or the dashboard's chat: she watches you, attentive.
       case 'typing':
@@ -1233,6 +1138,7 @@ if (pet) {
       case 'flame-outfit':
         writeSetting(OUTFIT_SETTING, command.value);
         setFlameOutfit();
+        sfx.play('outfit');
         break;
       case 'hud':
         toggleMenu(true);
@@ -1244,11 +1150,6 @@ if (pet) {
         break;
     }
   });
-
-  // A model chosen from the panel arrives as binary data.
-  pet.onModel(({ name, data }) => {
-    ui.onModelFile(new File([data], name));
-  });
 } else {
   // In the browser the background is given by the page, not the canvas: the
   // canvas stays transparent because under it there's the menu island, which
@@ -1257,8 +1158,8 @@ if (pet) {
   stage.setDancing(state.dancing);
 }
 
-// A file dragged onto her: the flame opens her mouth, then eats it (like
-// Mochi swallowing it) and passes it to the brain.
+// A file dragged onto her: she opens her mouth, then eats it (like Mochi
+// swallowing it) and passes it to the brain.
 if (pet) {
   let hungryTimer = null;
   const stopHungry = () => {
@@ -1282,7 +1183,8 @@ if (pet) {
     const files = [...(event.dataTransfer?.files ?? [])].map((file) => pet.pathForFile?.(file)).filter(Boolean);
     if (!files.length) return;
     presence.touch();
-    if (!stage.play('gulp')) stage.play('pat');
+    if (stage.play('gulp')) sfx.play('gulp');
+    else stage.play('pat');
     vocals.say('pat');
     socket.send({ type: 'chat', text: '', files });
   });
@@ -1302,11 +1204,11 @@ socket.connect();
 
 // First start: a hint, then silence.
 setTimeout(() => {
-  if (state.avatarLoaded && !readSetting('dc:hint-seen', false)) {
+  if (state.greeted && !readSetting('dc:hint-seen', false)) {
     writeSetting('dc:hint-seen', true);
     ui.toast(pet ? t('Right-click on her for the commands, double click to write to her.') : t('Right-click for the commands.'), false, 6000);
   }
 }, 2500);
 
 // Handy to inspect the state from the console.
-window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle, vocals, presence, sfx, setForm, setBody };
+window.deskCompanion = { stage, player, lipSync, socket, ui, hud, state, pet, voice, pushToggle, vocals, presence, sfx };

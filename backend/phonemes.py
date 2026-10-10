@@ -1,14 +1,14 @@
-"""From phonemes (or from raw text) to the VRM model's five mouths.
+"""From phonemes (or from raw text) to the five shapes of her mouth.
 
-The VRoid/VRM model exposes five blendshapes for the mouth:
-``fcl_mth_a``, ``fcl_mth_i``, ``fcl_mth_u``, ``fcl_mth_e``, ``fcl_mth_o``
-(in VRM 1.0 they become the preset expressions ``aa``, ``ih``, ``ou``,
-``ee``, ``oh``). Here we map the IPA phonemes produced by espeak-ng/Kokoro
-onto these five visemes, plus a sixth state ``sil`` (mouth closed).
+The flame opens her mouth with the voice's volume and shapes it with the
+vowel being spoken: ``a``, ``i``, ``u``, ``e``, ``o`` (round on "o" and "u",
+wide on "i" and "e"). Here we map the IPA phonemes produced by
+espeak-ng/Kokoro onto these five visemes, plus a sixth state ``sil`` (mouth
+closed).
 
 Every phoneme carries:
 
-* ``viseme``   - which blendshape to open;
+* ``viseme``   - which mouth shape;
 * ``duration`` - relative duration weight (rescaled on the real audio);
 * ``openness`` - how much the mouth opens for that sound (0..1).
 """
@@ -21,16 +21,6 @@ from dataclasses import dataclass
 
 #: The mouth's six possible states.
 VISEMES: tuple[str, ...] = ("sil", "a", "i", "u", "e", "o")
-
-#: Mapping viseme -> VRoid blendshape / VRM 1.0 preset. The frontend uses the
-#: same table; here it's for documentation and for the /api/config endpoint.
-VISEME_BLENDSHAPES: dict[str, dict[str, str]] = {
-    "a": {"vrm0": "fcl_mth_a", "vrm1": "aa"},
-    "i": {"vrm0": "fcl_mth_i", "vrm1": "ih"},
-    "u": {"vrm0": "fcl_mth_u", "vrm1": "ou"},
-    "e": {"vrm0": "fcl_mth_e", "vrm1": "ee"},
-    "o": {"vrm0": "fcl_mth_o", "vrm1": "oh"},
-}
 
 
 @dataclass(frozen=True)

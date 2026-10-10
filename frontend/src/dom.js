@@ -51,17 +51,7 @@ export function iconButton(name, { label, title, className = 'icon-btn', size = 
   );
 }
 
-/** A saved preference (localStorage shared by the character and the panel). */
-/**
- * With the 3D body ('vrm') or without ('none'), from `dc:body`. The flame is
- * Tsukumo and the VRM an optional body: newcomers start without one; whoever
- * had already done the introduction when the body came by default keeps it.
- */
-export function readBody() {
-  const fallback = readSetting('dc:onboarded', false) ? 'vrm' : 'none';
-  return readSetting('dc:body', fallback) === 'none' ? 'none' : 'vrm';
-}
-
+/** A saved preference (localStorage shared by her window, the panel and the dashboard). */
 export function readSetting(key, fallback) {
   try {
     const raw = window.localStorage.getItem(key);

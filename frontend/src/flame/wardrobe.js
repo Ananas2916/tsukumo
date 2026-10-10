@@ -6,13 +6,33 @@
  * Her own things, tied to her name (tsukumogami are Japanese objects that
  * come to life): the hachimaki headband when she works hard, the festival
  * fox mask, the sakura hair clip, a chochin lantern floating beside her...
- * and pointed hats, which suit a flame perfectly.
+ * pointed hats, which suit a flame perfectly, and for every mood a bow tie,
+ * a crown, an angel's halo or a little devil's horns, headphones for the
+ * music, cat ears, a top hat.
  */
 
 import { t } from '../i18n.js';
 
 /** Everything she can wear, in the panel's order. */
-export const OUTFITS = ['hachimaki', 'kitsune', 'sakura', 'lantern', 'glasses', 'scarf', 'kasa', 'witch', 'santa', 'party'];
+export const OUTFITS = [
+  'bowtie',
+  'crown',
+  'angel',
+  'devil',
+  'headphones',
+  'catears',
+  'tophat',
+  'hachimaki',
+  'kitsune',
+  'sakura',
+  'lantern',
+  'glasses',
+  'scarf',
+  'kasa',
+  'witch',
+  'santa',
+  'party',
+];
 
 /** The possible choices: "auto" follows the seasons, "none" nothing. */
 export const SELECTIONS = ['auto', 'none', ...OUTFITS];
@@ -21,6 +41,13 @@ export const DEFAULT_OUTFIT = 'auto';
 export const OUTFIT_LABELS = {
   auto: t('Automatic'),
   none: t('Nothing'),
+  bowtie: t('Bow tie'),
+  crown: t('Crown'),
+  angel: t('Angel halo and wings'),
+  devil: t('Little devil'),
+  headphones: t('Headphones'),
+  catears: t('Cat ears'),
+  tophat: t('Top hat'),
   hachimaki: t('Hachimaki'),
   kitsune: t('Kitsune mask'),
   sakura: t('Sakura hair clip'),

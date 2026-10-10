@@ -262,9 +262,6 @@ class Settings:
 
     # --- Frontend -----------------------------------------------------------
     frontend_dist: Path = ROOT / "frontend" / "dist"
-    avatar_dir: Path = ROOT / "frontend" / "public" / "models"
-    #: .vrma clips (greet*, idle*, dance*, others on request): see frontend/src/clips.js.
-    animations_dir: Path = ROOT / "frontend" / "public" / "animations"
 
     # --- Providers ----------------------------------------------------------
     # Raw values of the fields declared in provider_specs, read from the
@@ -321,8 +318,6 @@ class Settings:
             viseme_silence_threshold=_env_float("VISEME_SILENCE", 0.07),
             viseme_hop=_env_float("VISEME_HOP", 0.01),
             frontend_dist=_env_path("FRONTEND_DIST", ROOT / "frontend" / "dist"),
-            avatar_dir=_env_path("AVATAR_DIR", ROOT / "frontend" / "public" / "models"),
-            animations_dir=_env_path("ANIMATIONS_DIR", ROOT / "frontend" / "public" / "animations"),
             provider_options=_collect_provider_options(),
         )
 

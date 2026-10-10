@@ -134,3 +134,30 @@ def test_swatches_are_hex_colours(result):
 
 def test_every_preview_draws(result):
     assert all(p["ok"] for p in result["previews"]), [p for p in result["previews"] if not p["ok"]]
+
+
+def _block(text, start):
+    """The object literal that opens at `start` (`const NAME = {`), up to its closing brace."""
+    begin = text.index(start)
+    depth = 0
+    for i in range(text.index("{", begin), len(text)):
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        if depth == 0:
+            return text[begin : i + 1]
+    raise AssertionError(start)
+
+
+def test_every_outfit_is_made_and_drawn(result):
+    """Each outfit has its 3D (outfits.js, BUILD) and its preview (wardrobe-art.js, ART)."""
+    import re
+
+    build = _block((FLAME / "outfits.js").read_text(encoding="utf-8"), "const BUILD = {")
+    art = _block((PANEL / "wardrobe-art.js").read_text(encoding="utf-8"), "const ART = {")
+    made = set(re.findall(r"^  (\w+)\(", build, re.M))
+    drawn = set(re.findall(r"^  (\w+): \{", art, re.M))
+    assert set(result["outfits"]) <= made, set(result["outfits"]) - made
+    assert set(result["outfits"]) <= drawn, set(result["outfits"]) - drawn
+
+
+def test_the_new_outfits_are_there(result):
+    assert {"bowtie", "crown", "angel", "devil", "headphones", "catears", "tophat"} <= set(result["outfits"])

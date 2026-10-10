@@ -16,8 +16,6 @@ const PATHS = {
   character: '<circle cx="12" cy="7.5" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
   // The flame (flame.js): a drop with two eyes.
   flame: '<path d="M12 2.5c3.6 4.2 6.5 7.7 6.5 11.5a6.5 6.5 0 0 1-13 0c0-3.8 2.9-7.3 6.5-11.5z"/><path d="M10 14.5v.5M14 14.5v.5"/>',
-  // The 3D body with the flame in its chest: entering it, or giving her one.
-  body: '<circle cx="12" cy="5.5" r="3"/><path d="M4.5 21.5v-3a7.5 7.5 0 0 1 15 0v3"/><path d="M12 12.5c1.2 1.4 2 2.5 2 3.6a2 2 0 0 1-4 0c0-1.1.8-2.2 2-3.6z"/>',
   bolt: '<path d="M13 2.5 4.5 13.5H11l-1 8 8.5-11H12z"/>',
   // How much the agents have used: a rev counter.
   gauge: '<path d="M4.2 17.5a9 9 0 1 1 15.6 0"/><path d="m12 14 4-5"/><circle cx="12" cy="14" r="1.4"/>',
@@ -38,6 +36,9 @@ const PATHS = {
   chevronDown: '<path d="m6 9 6 6 6-6"/>',
   chevronRight: '<path d="m9 18 6-6-6-6"/>',
   play: '<path d="M7 4.5v15l12-7.5z"/>',
+  pause: '<rect x="6.5" y="5" width="3.5" height="14" rx="1"/><rect x="14" y="5" width="3.5" height="14" rx="1"/>',
+  skipBack: '<path d="M18 5v14L8 12z"/><path d="M5.5 5v14"/>',
+  skipForward: '<path d="M6 5v14l10-7z"/><path d="M18.5 5v14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
   key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8M16 7l3 3M19 4l2 2"/>',
   external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',

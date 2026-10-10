@@ -42,14 +42,5 @@ export function apiUrl(path) {
   return `${httpBase}${clean}`;
 }
 
-/** Blendshape/expression name for each viseme (VRoid/VRM defaults). */
-export const DEFAULT_BLENDSHAPES = {
-  a: { vrm0: 'fcl_mth_a', vrm1: 'aa' },
-  i: { vrm0: 'fcl_mth_i', vrm1: 'ih' },
-  u: { vrm0: 'fcl_mth_u', vrm1: 'ou' },
-  e: { vrm0: 'fcl_mth_e', vrm1: 'ee' },
-  o: { vrm0: 'fcl_mth_o', vrm1: 'oh' },
-};
-
 /** The five "open" visemes, in the order used by the debug UI. */
 export const VISEME_KEYS = ['a', 'i', 'u', 'e', 'o'];

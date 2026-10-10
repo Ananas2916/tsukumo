@@ -3,10 +3,8 @@ models/*.onnx
 models/*.bin
 models/*.part
 
-# The user's VRM avatar and .vrma clips (they have their own licences)
-frontend/public/models/*.vrm
-frontend/public/animations/*.vrma
-frontend/public/animations/CREDITS-*.txt
+# Personal files older versions kept here (they have their own licences)
+frontend/public/
 # Motion capture downloaded by hand (BVH with their own licences)
 models/mocap/
 

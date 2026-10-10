@@ -8,8 +8,9 @@ Claude Code, Codex, Gemini CLI, OpenClaw, Antigravity, a local model in LM
 Studio or Ollama, or a cloud API. She talks with lip-synced local
 text-to-speech, listens when you speak, works alongside your agents (a tiny
 terminal when they write, a page when they read) and taps you on the shoulder
-when they finish. Want more? Give her a VRM body: she steps into it, and out
-again.
+when they finish. Dress her up from a wardrobe of seventeen accessories, let
+her dance to your Spotify, and hear her little sounds as she lives on your
+desk.
 
 > *In Japanese folklore, **tsukumogami** are objects that come alive after a
 > hundred years. Tsukumo does the same to your desk, without the wait.*
@@ -33,12 +34,12 @@ once: *More info → Run anyway*.
 
 | | |
 |---|---|
-| **What** | Desktop companion: a spirit flame (optional VRM body) + voice + ears, driven by any LLM or agent |
+| **What** | Desktop companion: a spirit flame + voice + ears, driven by any LLM or agent |
 | **Brains** | 28 engines: 18 agents (Claude Code, Codex, Gemini CLI, OpenClaw, Antigravity, Cursor CLI, GitHub Copilot CLI, OpenCode, Qwen Code, Amp, Goose, Crush, Factory Droid, Continue CLI, Kiro CLI, Cline, Hermes Agent, any CLI command), 2 local servers (LM Studio / any OpenAI-compatible server, Ollama), 8 cloud brains (Claude, Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together, GPT4Free) |
 | **Voices** | 11 engines: Kokoro (default, local), Kokoro-FastAPI, Piper, Chatterbox (voice cloning), Windows voices, ElevenLabs, OpenAI, Azure, Google Cloud, Cartesia, Edge |
 | **Ears** | Faster-Whisper (local), whisper.cpp server, Whisper API, browser speech recognition |
 | **Privacy** | Everything runs locally by default. Cloud engines are an explicit choice in the panel, never a default |
-| **Stack** | Python 3.10+ (FastAPI, ONNX Runtime) · Three.js + @pixiv/three-vrm · Electron 44 |
+| **Stack** | Python 3.10+ (FastAPI, ONNX Runtime) · Three.js · Electron 44 |
 | **Interfaces** | WebSocket `ws://127.0.0.1:8770/ws` · REST `http://127.0.0.1:8770/api/*` · OpenAPI docs at `/docs` |
 | **Platforms** | Windows 10/11 (full desktop mascot); macOS/Linux run the backend and the browser UI |
 | **License** | AGPL-3.0 |
@@ -105,14 +106,14 @@ another language is a great first contribution: see
 Download `Tsukumo Setup <version>.exe` from
 [Releases](https://github.com/Ananas2916/tsukumo/releases/latest) and run it.
 It installs per-user, with no admin rights. It bundles an embedded Python with
-all dependencies, the backend, the UI, Kokoro (int8) and an optional CC0 VRM
-body (Sendagaya Shino from VRoid Studio). Settings, state, logs and your chosen
-avatar live in `%APPDATA%\Tsukumo`, so updates never touch them.
+all dependencies, the backend, the UI and Kokoro (int8). Tsukumo herself is
+all geometry: nothing else to download. Settings, state and logs live in
+`%APPDATA%\Tsukumo`, so updates never touch them.
 
 On first launch the panel opens a six-step welcome:
 
 1. how she works;
-2. her form: [the flame](#the-spirit-flame) (recommended) or the flame with a VRM body to step into;
+2. her colour, which changes on the desktop while you pick it;
 3. your name;
 4. the brain, picked from those found on your PC;
 5. **"Set everything up for me"**, which does the one-click setup: local
@@ -147,18 +148,10 @@ On first launch the panel opens a six-step welcome:
 `espeakng-loader`. Kokoro weights can also be fetched by hand with
 `python scripts/download_models.py [--variant fp16|int8]` (resumable).
 
-**A VRM body (optional).** Tsukumo is a flame and needs no model. To give her
-a body, put any `.vrm` in `frontend/public/models/` (the backend prefers
-`avatar.vrm`, otherwise it takes the first one), or drag a `.vrm` onto her. Make one for free in [VRoid Studio](https://vroid.com/en/studio) or
-download one from VRoid Hub / Booth, and check its license. The mouth needs
-the standard visemes: VRM 0.x morphs `fcl_mth_a/i/u/e/o` or VRM 1.0 expressions
-`aa/ih/ou/ee/oh`. Every VRoid model has them.
-
 **Build the installer:** `.\scripts\build_installer.ps1` produces
-`electron\dist\Tsukumo Setup <version>.exe`. The build is public by default: it
-fails if a bundled avatar does not allow redistribution (`scripts/package_audit.py`
-reads the license inside the `.vrm`) and ships `LICENSE` plus
-`THIRD-PARTY-NOTICES.txt`.
+`electron\dist\Tsukumo Setup <version>.exe`. It ships `LICENSE` plus
+`THIRD-PARTY-NOTICES.txt`, and `scripts/package_audit.py` stops the build if
+anything but the app's own files got in (settings, state, personal files).
 
 ---
 
@@ -245,7 +238,7 @@ goes through g4f.dev's credit-based service and fails after a minute.
 
 If the brain does not answer, the chat shows an error card with the reason and
 a button to the Engines tab. The offline responder (`DC_LLM_BACKEND=mock`) is
-there to test voice and animation.
+there to test voice and animations.
 
 ---
 
@@ -281,59 +274,57 @@ that are her own voice echoing back.
 
 ## The desktop mascot
 
-On Windows the character window is transparent, frameless and always on top,
-with **per-pixel click-through**: clicks pass through everywhere except where
-she is actually drawn. The physics live in `electron/pet-physics.js`, and
+On Windows her window is transparent, frameless and always on top, with
+**per-pixel click-through**: clicks pass through everywhere except where she
+is actually drawn. The physics live in `electron/pet-physics.js`, and
 other windows are read through Win32 via [koffi](https://koffi.dev).
 
 | | |
 |---|---|
-| **Pick her up** | by the scruff; she dangles, sways and kicks if shaken (shake the flame hard and she gets dizzy) |
-| **Throw** | flick the flame and she flies with a trail, bounces off the screen edges and lands |
-| **Gravity** | drop her mid-air and she falls, flailing, and lands with bent knees |
+| **Pick her up** | by the bulb; she wobbles as you carry her (shake her hard and she gets dizzy) |
+| **Throw** | flick her and she flies with a trail, tumbles, bounces off the screen edges and lands |
+| **Gravity** | drop her mid-air and she falls and lands with a squash |
 | **Windows** | drop her on a window and she sits on its edge and rides along when you move it |
-| **Taskbar** | she stands on it, sometimes sits, lies on her belly, or stretches out on her side |
-| **Screen edges** | she clings to the edge and peeks in |
-| **Touch** | a click on the head is a pat; on the flame's body it's a different surprise each time (a squish, heart eyes, sunglasses, a song, a speechless "...", a startled "!"); three quick clicks make her dizzy, five pokes and she pouts |
-| **Work** | while the agent works, the flame holds what it's doing: a tiny terminal when it writes or runs commands, a page when it reads or plans, a magnifier when it searches, a little helper flame when it delegates |
+| **Taskbar** | she rests on it, and once in a while sprints along it at full speed |
+| **Touch** | a click on her tip is a pat; lower down it's a different surprise each time (a squish, heart eyes, sunglasses, a song, a speechless "...", a startled "!"); three quick clicks make her dizzy, five pokes and she pouts; rest the cursor on her and she sends little hearts |
+| **Work** | while the agent works, she holds what it's doing: a tiny terminal when it writes or runs commands, a page when it reads or plans, a magnifier when it searches, a little helper flame when it delegates |
 | **Done** | when an agent finishes she celebrates (a jump with a spin and sparkles); when it needs you, she bounces with a "!" |
-| **Sleep** | drowsy after 2 idle minutes, asleep after 5 (the flame with a sleep bubble that pops when you're back); wakes up and greets you |
-| **Idle** | the flame stretches, hops, spins or flickers in a gust once in a while; under the cursor she widens her eyes |
+| **Sleep** | drowsy after 2 idle minutes, asleep after 5 (with a sleep bubble that pops when you're back); wakes up and greets you |
+| **Idle** | she stretches, hops, spins or flickers in a gust once in a while; under the cursor she widens her eyes |
 | **Gaze** | follows your cursor anywhere on screen |
-| **Music** | dances on the beat when Spotify plays (tempo detected from the actual audio) |
-| **Files** | drag a file over the flame and she opens her mouth; drop it and she eats it, then hands it to the brain |
+| **Sounds** | little sounds of her own, in the spirit of Coucou's: the menu opening and closing, a tink when the cursor arrives, pats and pokes, dizziness, a whoosh when thrown, a job done, a question, an error, a file eaten. Synthesized, never over her voice; volume in *Character → Behaviour*, quiet while her voice is off or you're in a meeting |
+| **Music** | dances on the beat when Spotify plays (tempo detected from the actual audio), with a small player in her menu |
+| **Files** | drag a file over her and she opens her mouth; drop it and she eats it, then hands it to the brain |
 | **Ghost mode** | clicks pass through everything, her included |
 
-**Controls:** right-click her to open the menu. For the flame it's a black
-**island** (in the spirit of [Coucou](https://github.com/Louis-CFM/coucou)'s
-notch) that grows out of her while she slides into its card: chat, dashboard
-and character on the top left, voice, mic and engines on the top right; in
-the card the brain and what it is doing step by step (done, in progress),
-plus the agent limit closest to running out; below, pills for the 3D body
-and the wardrobe (and dancing, while Spotify plays), and quit. In the VRM body
-it's the two glass docks beside her. Double-click
-opens the chat, scrolling resizes her, `Esc` closes or interrupts.
-
-**The VRM body** animates procedurally, with no clips required: weight shifts, breathing,
-IK-planted feet, idle actions, speech gestures, thinking poses and nine
-standing styles rebuilt by observation. Emoji in replies are never read aloud;
-they become her facial expression. Optional `.vrma` clips in
-`frontend/public/animations/` blend in by name (`greet*`, `idle*`, `dance*`).
-`node scripts/bvh2vrma.mjs clip.bvh clip.vrma --trim` converts motion capture.
+**Controls:** right-click her to open her menu, a black **island** (in the
+spirit of [Coucou](https://github.com/Louis-CFM/coucou)'s notch) that grows
+out of her while she slides into its card: chat, dashboard and character on
+the top left, voice, mic and engines on the top right; in the card the brain
+and what it is doing step by step (done, in progress), plus the agent limit
+closest to running out; below, the wardrobe, dancing and a small Spotify
+player (previous, play/pause, next) while Spotify is open, and quit. Grab the
+island's black to move it anywhere on the screen: she rides in it, and drops
+from there when it closes. Double-click opens the chat, scrolling resizes her,
+`Esc` closes or interrupts. Emoji in replies are never read aloud: they
+become her expression.
 
 ### The spirit flame
 
 Tsukumo *is* the flame: a small teardrop with eyes that sits on the taskbar,
 reacts to everything above, and once in a while sprints along it at full
 speed. Pick her colour in *Character → Look*: lilac, will-o'-wisp blue,
-jade, ember, sakura, moon or any colour you like. Her **wardrobe** has things
+jade, ember, sakura, moon or any colour you like. Her **wardrobe** has
+seventeen things to wear: a bow tie, a crown, an angel's halo and wings, a
+little devil's horns and tail, headphones, cat ears, a top hat, and things
 that suit a tsukumogami: a hachimaki headband, a kitsune festival mask, a
 sakura hairpin, a chochin lantern floating beside her, round glasses, a
 scarf, and pointed hats that bend with her tip (straw, witch, Santa, party).
-*Automatic* dresses her for the season. Change it from the panel or from the
-*Wardrobe* pill in her island, and watch the hat drop onto her head.
+Soft parts swing on springs: the wings flap, the devil's tail wags, the cat
+ears twitch. *Automatic* dresses her for the season. Change it from the panel
+or from the *Wardrobe* pill in her island, and watch it drop onto her head.
 
-![Her wardrobe: witch hat, kitsune mask, sakura hairpin, chochin lantern, hachimaki, scarf, straw hat, round glasses](docs/screenshots/wardrobe.png)
+![Her wardrobe: bow tie, crown, angel, little devil, headphones, cat ears, top hat, witch hat, kitsune mask, sakura hairpin](docs/screenshots/wardrobe.png)
 
 Every move has anticipation, a quick action, an overshoot and a hold; any
 landing squashes her by how fast she came down, and her tip trails behind.
@@ -341,17 +332,16 @@ Thrown, she tumbles and rights herself on the way down.
 
 ![The flame at work and at rest: a tiny terminal while the agent writes, a page while it reads, celebrating a finished task, heart eyes, asleep](docs/screenshots/flame.png)
 
-A **VRM body** is optional. Give her one (any `.vrm`) and she flies into its
-chest with a light show and the body appears from the feet up; she leaves it
-the same way. Without a body the VRM is never loaded, which is lighter on the
-PC, and new installs start that way.
+While she speaks, her mouth opens with the volume of her voice and takes the
+shape of the vowel: round on "o" and "u", wide on "i" and "e".
 
 ---
 
 ## The dashboard
 
 Open it from her island or the tray icon: one window for your day,
-with her docked in its corner above the chat.
+with her docked in its corner above the chat (no menu there: the dashboard
+has its own controls).
 
 - **Week and Today**: your reminders and timers, laid out by day.
 - **Weather**: now and the next days, from [Open-Meteo](https://open-meteo.com)
@@ -518,7 +508,7 @@ Client → server:
 Server → client (broadcast to every connected client):
 
 ```jsonc
-{ "type": "hello", "version": "2.9.0", "config": {...}, "voices": [...], "engines": {...}, ... }
+{ "type": "hello", "version": "3.0.0", "config": {...}, "voices": [...], "engines": {...}, ... }
 { "type": "state", "value": "thinking" | "speaking" | "idle" }
 { "type": "token", "text": "partial " }                    // streamed brain output
 { "type": "working", "kind": "read", "label": "reads main.js" }   // agent tool use
@@ -562,10 +552,11 @@ Viseme timeline: `t` start (s), `d` duration, `v` viseme (`a i u e o sil`),
 | `GET/POST` | `/api/integrations` | install or remove the Claude Code / Codex hooks |
 | `GET` | `/api/usage` | Claude Code / Codex / Antigravity limits and today's tokens |
 | `GET/POST` | `/api/preferences` | how chatty, about what, weather city |
+| `GET` · `POST` | `/api/music` · `/api/music/control` | Spotify status and taste; PC only: the player's `pause`, `resume`, `next`, `previous` |
 | `POST` | `/api/attachments?name=x.png` | upload a file (raw body), returns its path |
 | `GET` · `POST` | `/api/phone` · `/api/phone/serve` | PC only: Tailscale status and the QR for the phone; turn on `tailscale serve` |
 | `POST` | `/api/phone/session` | the phone swaps its token (`Authorization: Bearer`) for a cookie |
-| `GET` | `/api/context` · `/api/weather` · `/api/animations` · `/api/config` | what she sees |
+| `GET` | `/api/context` · `/api/weather` · `/api/config` | what she sees |
 
 Interactive OpenAPI docs: <http://127.0.0.1:8770/docs>.
 
@@ -608,7 +599,7 @@ file). Everything below can also be set from the panel.
 | `DC_STATE_DIR` | `state/` | sessions, reminders, memory, tokens |
 
 Engine status (online / degraded / offline) is checked every
-`DC_STATUS_INTERVAL` seconds without side effects and shown in the dock ring,
+`DC_STATUS_INTERVAL` seconds without side effects and shown in her island,
 the panel header and the Engines tab.
 
 ![Engines tab](docs/screenshots/engines.png)
@@ -633,7 +624,8 @@ or per-character timestamps (ElevenLabs), they are mapped straight to visemes.
 4. **In the browser**, every frame:
    `weight = timeline × (0.45 + 0.55 × live_rms) × gain`, with asymmetric
    smoothing and 50 ms coarticulation fades. Without a timeline the mouth
-   still follows the volume.
+   still follows the volume. The flame opens her mouth with the result and
+   rounds it on `o` and `u`.
 
 ---
 
@@ -649,11 +641,11 @@ backend/            FastAPI app (python -m backend)
   tts/  stt/        voice and listening engines
   reminders.py proactive.py context.py memory.py usage.py notify.py music.py
   transcript.py     the last chat lines, for clients that reconnect
-frontend/           Vite: index.html (the character), panel.html, dashboard.html, mobile.html
-  src/flame.js flame/ island.js hud.js vrm.js body.js lipsync.js panel/ dashboard/ ...
+frontend/           Vite: index.html (Tsukumo), panel.html, dashboard.html, mobile.html
+  src/flame.js flame/ stage.js island.js hud.js sfx.js lipsync.js panel/ dashboard/ ...
   src/i18n.js i18n/ interface text: English source, Italian catalog (i18n/it.js)
 electron/           main.js (windows, backend, IPC, hardening), pet-physics.js, desktop.js, i18n.js
-scripts/            build_installer.ps1, download_models.py, tsukumo_notify.py, bvh2vrma.mjs
+scripts/            build_installer.ps1, package_audit.py, download_models.py, tsukumo_notify.py
 tests/              pytest suite: no network, no models, no user .env
 docs/screenshots/   images for this page
 ```
@@ -670,9 +662,9 @@ docs/screenshots/   images for this page
 - **The brain doesn't answer.** The red card in the chat says why. **Check** in
   the Engines tab repeats the test: is the Gateway running, is the CLI
   installed and logged in, is the key valid?
-- **No 3D body.** She's a flame by default. To give her a body, copy a `.vrm`
-  into `frontend/public/models/` or drag one onto her, then pick it in
-  *Character → Look → Form*.
+- **No sounds.** Her sounds are off while her voice is muted or you're in a
+  meeting; otherwise check *Character → Behaviour → Sound effects* and its
+  volume.
 - **No sound in the browser.** Click the page once (autoplay policy). The
   desktop app doesn't need this.
 - **ONNX Runtime DLL errors on Windows.** Install the
@@ -688,7 +680,7 @@ docs/screenshots/   images for this page
 
 Issues and pull requests are welcome, especially new interface languages
 (a catalog like `frontend/src/i18n/it.js`, keyed by the English text), new
-engines and avatars' edge cases. Read [AGENTS.md](AGENTS.md) for the
+engines and new things for her wardrobe. Read [AGENTS.md](AGENTS.md) for the
 architecture, conventions and commands (it's written for humans and coding
 agents alike). Run the tests with `.\start.ps1 -Test` or
 `python -m pytest -q`: they need no network, models or `.env`.
@@ -703,7 +695,5 @@ modified version as a network service, you must publish your source under the
 same license. There is no warranty.
 
 Third-party parts keep their own licenses: **Kokoro** (Apache 2.0),
-**Sendagaya Shino**, the installer's sample avatar from VRoid Studio by pixiv
-(CC0), **three.js** and **@pixiv/three-vrm** (MIT), **Electron**, **FastAPI**,
-**ONNX Runtime** (MIT / Apache 2.0). **Your own VRM model** follows its
-author's license: check what it allows.
+**three.js** (MIT), **Electron**, **FastAPI**, **ONNX Runtime** (MIT /
+Apache 2.0). Her sounds are synthesized in code: no sound files from anyone.

@@ -230,3 +230,15 @@ def test_day_of_month_alone_and_add_first(phrase, due, text):
 @pytest.mark.parametrize("phrase", ["il 31% delle persone", "aggiungi il sale", "ho preso 28 il 31 maggio", "come aggiungo il 31 al calendario?"])
 def test_numbers_that_are_not_requests(phrase):
     assert parse_requests(phrase, NOW) == []
+
+
+def test_a_reminder_said_a_moment_later_keeps_round_numbers():
+    from datetime import datetime
+
+    from backend.reminders import speak_when
+
+    now = datetime(2026, 10, 10, 18, 0, 0)
+    due = now.timestamp()
+    assert speak_when(due + 1799.4, "en", now) == "in 30 minutes"
+    assert speak_when(due + 89.2, "en", now) == "in one minute and 30 seconds"
+    assert speak_when(due + 45.4, "it", now) == "tra 45 secondi"

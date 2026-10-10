@@ -1,5 +1,5 @@
 /**
- * The flame's effects: rings (like the docks), flashes, trail, speed lines
+ * The flame's effects: rings, flashes, trail, speed lines
  * and little figures flying away (hearts, notes, stars). They live in the
  * world, not on her: when the window runs (sprint, throw) `drift` pulls them
  * back, so they stay still on the desktop.

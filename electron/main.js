@@ -1,22 +1,21 @@
 /**
- * Tsukumo's Electron shell, Desktop Mate style.
+ * Tsukumo's Electron shell: the flame lives on the desktop.
  *
- * Two windows:
- *  - the character: frameless, transparent, always in front of everything,
- *    letting the mouse through everywhere except where something is really
- *    drawn;
- *  - the panel: chat and settings, detached from the character. It can stay
- *    docked at her side and follow her, or free wherever you put it.
+ * The windows:
+ *  - hers: frameless, transparent, always in front of everything, letting
+ *    the mouse through everywhere except where something is really drawn;
+ *  - the panel: chat and settings, detached from her. It can stay docked at
+ *    her side and follow her, or free wherever you put it;
+ *  - the dashboard, with her in its corner until you minimize it.
  *
  * And in between the mascot's life (see pet-physics.js): let go in mid-air
- * she falls, sits on window edges and travels with them, stands on the
- * taskbar, clings to the screen edges. The wheel makes her bigger: it
- * changes the window, not the camera.
+ * she falls, sits on window edges and travels with them, rests on the
+ * taskbar and sprints along it, flies when thrown. The wheel makes her
+ * bigger: it changes the window, not the camera.
  *
  * The click-through is "per pixel": the renderer reads the alpha of the
  * pixel under the cursor from the WebGL framebuffer and tells us whether
- * it's over the character; here we turn that boolean into
- * setIgnoreMouseEvents.
+ * it's over her; here we turn that boolean into setIgnoreMouseEvents.
  */
 
 const {
@@ -26,7 +25,6 @@ const {
   Notification,
   Tray,
   desktopCapturer,
-  dialog,
   globalShortcut,
   ipcMain,
   nativeImage,
@@ -140,16 +138,16 @@ function pythonExecutable() {
 }
 const PYTHON = pythonExecutable();
 
-// Size of the mascot window at scale 1: narrow and tall, like a standing figure.
+// Size of her window at scale 1: narrow and tall, room above her for the bubble and the island.
 const BASE_WIDTH = Number(process.env.DC_PET_WIDTH || 300);
 const BASE_HEIGHT = Number(process.env.DC_PET_HEIGHT || 460);
 const SCALE_RANGE = [0.5, 2.6];
-/** Lying on her side she's as long as she's tall standing: the window becomes square. */
-const SIDE_ASPECT = 1;
-/** Getting up she stays horizontal for a moment: the window narrows afterwards. */
-const SIDE_EXIT_MS = 1000;
-/** With the menu island open the window widens up to this (at scale 1), like Coucou's. */
-const ISLAND_WIDTH = 440;
+/** While she sprints the window becomes square: room for the trail. */
+const SPRINT_ASPECT = 1;
+/** After the sprint the trail fades for a moment: the window narrows afterwards. */
+const SPRINT_EXIT_MS = 1000;
+/** With the menu island open the window widens up to this (at scale 1): a wide, low strip like Coucou's. */
+const ISLAND_WIDTH = 460;
 const MUSIC_POLL_MS = 1500;
 /** How often to tell the character how long the PC has been idle (sleep and waking up). */
 const PRESENCE_POLL_MS = 5000;
@@ -184,7 +182,7 @@ let panelHandle = null;
 let windowsCache = [];
 let windowsCacheAt = 0;
 let lastPetBounds = null;
-/** Wide window for the lying-on-her-side pose. */
+/** Wide window while she sprints. */
 let petWide = false;
 let narrowSince = null;
 /** The island open: `{shift}` = how far right of the wide window's centre she is (px). */
@@ -333,35 +331,12 @@ const backendTail = [];
 /** The backend's exit code, if it's already dead (null = alive or never started). */
 let backendExit = null;
 
-/**
- * Installed, the avatar lives in the user's data: the one chosen from the
- * panel stays after a restart or an update. The first time the one included
- * in the installer is copied there.
- */
-const AVATAR_DIR = path.join(DATA_ROOT, 'avatars');
-
-function prepareAvatars() {
-  if (!PACKAGED) return;
-  try {
-    fs.mkdirSync(AVATAR_DIR, { recursive: true });
-    if (fs.readdirSync(AVATAR_DIR).some((name) => name.toLowerCase().endsWith('.vrm'))) return;
-    const bundled = path.join(PROJECT_ROOT, 'frontend', 'public', 'models');
-    for (const name of fs.readdirSync(bundled)) {
-      if (name.toLowerCase().endsWith('.vrm')) fs.copyFileSync(path.join(bundled, name), path.join(AVATAR_DIR, name));
-    }
-  } catch (error) {
-    console.error('[electron] avatars not prepared:', error.message);
-  }
-}
-
 /** Installed: the backend's state and settings in the user's data, not among the resources. */
 function packagedEnvironment() {
   if (!PACKAGED) return {};
-  prepareAvatars();
   return {
     DC_STATE_DIR: process.env.DC_STATE_DIR || path.join(DATA_ROOT, 'state'),
     DC_ENV_FILE: process.env.DC_ENV_FILE || path.join(DATA_ROOT, 'tsukumo.env'),
-    DC_AVATAR_DIR: process.env.DC_AVATAR_DIR || AVATAR_DIR,
     // The bundled Python must not read packages installed elsewhere on the PC.
     PYTHONNOUSERSITE: '1',
   };
@@ -519,13 +494,13 @@ async function ensureBackend() {
 }
 
 // ---------------------------------------------------------------------------
-// The character's window
+// Her window
 // ---------------------------------------------------------------------------
 const petSize = () => {
   // In the dashboard she has the size of her tile, not the one chosen for the desktop.
   const scale = petDock ? petDock.scale : settings.scale;
   const height = Math.round(BASE_HEIGHT * scale);
-  let width = petWide ? Math.round(height * SIDE_ASPECT) : Math.round(BASE_WIDTH * scale);
+  let width = petWide ? Math.round(height * SPRINT_ASPECT) : Math.round(BASE_WIDTH * scale);
   if (islandWide && !petDock) width = Math.max(width, Math.round(ISLAND_WIDTH * scale));
   // In the dashboard she takes her whole tile: she stays in the middle, but
   // the speech bubble and the island have room (narrow, the bubble became a column).
@@ -537,13 +512,13 @@ const petSize = () => {
  * The menu island opens (or closes): the window widens around her and goes
  * narrow again afterwards. Near the screen edge it widens only inwards: the
  * page shifts the framing by `shift` pixels so the flame stays exactly where
- * she was (VrmStage.setFrameShift).
+ * she was (Stage.setFrameShift).
  */
 function setIslandWide(open) {
   if (!open) return narrowIsland();
   if (!alive(petWindow)) return { wide: false, shift: 0 };
   if (islandWide) return { wide: true, shift: islandWide.shift };
-  // Docked in the dashboard, lying down, sprinting or held: she stays as she is.
+  // Docked in the dashboard, sprinting or held: she stays as she is.
   if (petDock || petWide || physics.state === 'sprint' || physics.state === 'held') return { wide: false, shift: 0 };
   const bounds = petWindow.getBounds();
   const area = screen.getDisplayMatching(bounds).workArea;
@@ -560,8 +535,10 @@ function setIslandWide(open) {
  * Back to her normal width around where she is now. Besides the island
  * closing, it runs when a drag starts, when the dashboard docks her and when
  * her page reloads: a window left wide would otherwise drift away from her.
+ * If the island had been moved into the air, she drops from there.
  */
 function narrowIsland() {
+  if (physics.state === 'parked') physics.release();
   if (!islandWide) return { wide: false, shift: 0 };
   const { shift } = islandWide;
   islandWide = null;
@@ -910,13 +887,12 @@ function applyPetSize() {
 }
 
 /**
- * Lying on her side the body is horizontal: the window widens right away
- * (same height, same body axis, so she doesn't move) and goes narrow again
- * only once she's already up, otherwise she would be cut. It also widens
- * during the flame's sprint, for the trail.
+ * While she sprints the window widens right away (same height, same axis,
+ * so she doesn't move) for the trail, and goes narrow again a moment after
+ * she has stopped, when the trail has faded.
  */
 function updatePetShape() {
-  if (physics.posture === 'side' || physics.state === 'sprint') {
+  if (physics.state === 'sprint') {
     narrowSince = null;
     if (!petWide) {
       petWide = true;
@@ -926,7 +902,7 @@ function updatePetShape() {
   }
   if (!petWide) return;
   narrowSince ??= Date.now();
-  if (Date.now() - narrowSince >= SIDE_EXIT_MS) {
+  if (Date.now() - narrowSince >= SPRINT_EXIT_MS) {
     petWide = false;
     narrowSince = null;
     applyPetSize();
@@ -979,7 +955,7 @@ function createPanelWindow() {
   panelHandle = desktop.handleOf(panelWindow);
   keepLoaded(panelWindow, 'panel');
   loadApp(panelWindow, `${BACKEND_URL}/panel.html`);
-  // The character's docks highlight the open tab: they must know it.
+  // The island highlights the open tab: it must know it.
   panelWindow.on('show', broadcastState);
   panelWindow.on('hide', broadcastState);
 
@@ -1433,6 +1409,24 @@ handleIpc('pet:drag-end', (_event, velocity) => {
 
 handleIpc('pet:island', (_event, open) => setIslandWide(Boolean(open)));
 
+// The open island grabbed by its black: the window goes with the cursor
+// (pet:drag-move) and, let go, stays there in the air while the island is
+// open (physics.park); narrowIsland drops her when it closes.
+handleIpc('pet:island-drag-start', () => {
+  if (!alive(petWindow) || petDock || !islandWide || physics.state === 'sprint') return null;
+  physics.grab();
+  const [x, y] = petWindow.getPosition();
+  return { x, y };
+});
+
+handleIpc('pet:island-drag-end', () => {
+  if (physics.state !== 'held') return false;
+  // Closed meanwhile: the island isn't there to hold her up any more.
+  if (!islandWide) physics.release();
+  else physics.park();
+  return true;
+});
+
 /** Where feet, seat and body axis are in the window (fractions). */
 onIpc('pet:anchors', (_event, anchors) => physics.setAnchors(anchors));
 
@@ -1445,8 +1439,7 @@ onIpc('app:language', (_event, value) => {
   updateTrayMenu();
 });
 
-handleIpc('pet:posture', (_event, posture) => (petDock ? false : physics.requestPosture(posture)));
-// The flame's sprint: the renderer decides when, physics does the run.
+// Her sprint: the renderer decides when, physics does the run.
 handleIpc('pet:sprint', (_event, kind) => (petDock ? false : physics.sprint(kind)));
 
 handleIpc('pet:scale-by', (_event, factor) => (petDock ? settings.scale : setScale(settings.scale * factor)));
@@ -1482,25 +1475,7 @@ handleIpc('pet:set-windows', (_event, value) => {
   return settings.windows;
 });
 
-/** Chooses another .vrm model and passes it to the character as binary data. */
-handleIpc('pet:pick-model', async () => {
-  const result = await dialog.showOpenDialog(alive(panelWindow) ? panelWindow : petWindow, {
-    title: t('Choose a VRM model'),
-    filters: [{ name: t('VRM models'), extensions: ['vrm'] }],
-    properties: ['openFile'],
-  });
-  if (result.canceled || !result.filePaths[0]) return false;
-  const file = result.filePaths[0];
-  const data = await fs.promises.readFile(file);
-  sendToPet('pet:model', { name: path.basename(file), data });
-  // Installed: it becomes the avatar of all the next starts (the backend prefers avatar.vrm).
-  if (PACKAGED) {
-    fs.promises.writeFile(path.join(AVATAR_DIR, 'avatar.vrm'), data).catch((error) => console.error('[electron] avatar not saved:', error.message));
-  }
-  return true;
-});
-
-/** Commands from the panel to the character (mouth gain, actions, debug...). */
+/** Commands from the panel to her (mouth gain, actions, debug...). */
 onIpc('pet:command', (_event, command) => sendToPet('pet:command', command));
 
 onIpc('panel:tab', (_event, tab) => {

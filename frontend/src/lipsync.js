@@ -31,7 +31,7 @@ export class LipSync {
      */
     this.levelInfluence = options.levelInfluence ?? 0.35;
     /**
-     * Perceptual curve applied to the final weight. VRM blendshapes below ~0.4
+     * Perceptual curve applied to the final weight. Mouth shapes below ~0.4
      * are barely visible, so we raise the middle values keeping the extremes:
      * 0 stays 0, 1 stays 1, but 0.4 becomes 0.53.
      */

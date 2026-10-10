@@ -1,6 +1,5 @@
-/* Tsukumo - the character's window. Almost everything invisible until it's
-   needed: her, the right-click menu (the flame's island, the body's arc
-   docks), a bubble when she speaks. */
+/* Tsukumo - the flame's window. Almost everything invisible until it's
+   needed: her, the right-click menu (the island), a bubble when she speaks. */
 
 @import './theme.css';
 
@@ -46,190 +45,10 @@ body.pet-mode.dragging #stage {
   cursor: grabbing;
 }
 
-/* ---------------------------------------------------------------- dock --- */
-.hud {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 5;
-}
-
-.hud-shapes {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  opacity: 0;
-  transform: scale(0.92);
-  transform-origin: var(--origin-x, 50%) var(--origin-y, 40%);
-  transition:
-    opacity 0.22s ease,
-    transform 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2);
-}
-
-.dock-border,
-.dock-fill {
-  fill: none;
-  stroke-linecap: round;
-}
-
-.dock-border {
-  stroke: rgba(255, 255, 255, 0.16);
-}
-
-.dock-fill {
-  stroke: rgba(22, 22, 27, 0.9);
-}
-
-.hud.visible .hud-shapes {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.hud.visible .dock-fill,
-.hud.visible .dock-border,
-.hud.visible .hud-btn {
-  pointer-events: stroke;
-}
-
-.hud.visible .hud-btn {
-  pointer-events: auto;
-}
-
-.hud-btn {
-  position: absolute;
-  width: var(--btn-size, 34px);
-  height: var(--btn-size, 34px);
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  cursor: pointer;
-  opacity: 0;
-  transform: scale(0.6);
-  transition:
-    opacity 0.2s ease,
-    transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.3),
-    background 0.15s ease,
-    color 0.15s ease;
-  pointer-events: none;
-}
-
-.hud.visible .hud-btn {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.hud-btn:hover {
-  background: rgba(255, 255, 255, 0.13);
-}
-
-.hud-btn:active {
-  transform: scale(0.92);
-}
-
-.hud-btn .glyph {
-  position: relative;
-  display: grid;
-  place-items: center;
-  z-index: 1;
-}
-
-.hud-btn.dim .glyph {
-  color: var(--muted);
-}
-
-/* Active button (the tab open in the panel): like "home" in the reference image. */
-.nav-btn.active {
-  background: rgba(255, 255, 255, 0.2);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-}
-
-.nav-btn[data-id='power']:hover,
-.nav-btn.confirm {
-  color: var(--danger);
-}
-
-.nav-btn.confirm {
-  background: rgba(255, 107, 129, 0.18);
-  animation: throb 0.9s ease-in-out infinite;
-}
-
-/* Status rings */
-.ring {
-  position: absolute;
-  inset: -3px;
-  width: calc(100% + 6px);
-  height: calc(100% + 6px);
-  transform: rotate(-90deg);
-}
-
-.ring-track,
-.ring-value {
-  fill: none;
-  stroke-width: 3;
-}
-
-.ring-track {
-  stroke: rgba(255, 255, 255, 0.1);
-}
-
-.ring-value {
-  stroke: var(--ring-color, var(--accent));
-  stroke-linecap: round;
-  transition:
-    stroke-dashoffset 0.12s linear,
-    stroke 0.3s ease;
-}
-
-.ring-btn.spinning .ring {
-  animation: spin 1.1s linear infinite;
-}
-
-.state-dot {
-  position: absolute;
-  top: -5px;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  margin-left: -3px;
-  border-radius: 50%;
-  background: var(--dot-color, transparent);
-  box-shadow: 0 0 6px var(--dot-color, transparent);
-}
-
-.hud-caption {
-  position: absolute;
-  transform: translate(-50%, 4px);
-  max-width: calc(100% - 16px);
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: rgba(20, 20, 25, 0.92);
-  border: 1px solid var(--line-strong);
-  color: var(--text);
-  font-size: 11.5px;
-  line-height: 1.3;
-  text-align: center;
-  white-space: normal;
-  opacity: 0;
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
-}
-
-.hud.visible .hud-caption.shown {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-/* ------------------------------------------------------ the flame's island --- */
+/* -------------------------------------------------------------- the island --- */
 /* Black like Coucou's, under the canvas: the flame is drawn on top, in the
-   slot left of the card. 288 px wide with the window at 300 px, and it
-   scales with her (--k). */
+   slot left of the card. A wide, low strip (about 448 x 210 with the window
+   widened to 460) that scales with her (--k). */
 #island {
   --tint: 165, 139, 255;
   position: fixed;
@@ -313,7 +132,7 @@ body.island-open #stage {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 2px 8px;
+  padding: 0 2px 6px;
 }
 
 .island-group {
@@ -323,12 +142,12 @@ body.island-open #stage {
 
 .island-icon {
   width: 34px;
-  height: 30px;
+  height: 28px;
   display: grid;
   place-items: center;
   padding: 0;
   border: none;
-  border-radius: 15px;
+  border-radius: 14px;
   background: transparent;
   color: #d4d4dc;
   cursor: pointer;
@@ -361,8 +180,8 @@ body.island-open #stage {
   position: relative;
   display: flex;
   gap: 8px;
-  height: 124px;
-  padding: 10px 12px 10px 2px;
+  height: 112px;
+  padding: 9px 12px 9px 2px;
   border-radius: 20px;
   background:
     radial-gradient(90px 80px at 50px 62%, rgba(var(--tint), 0.22), rgba(var(--tint), 0) 75%),
@@ -377,7 +196,7 @@ body.island-open #stage {
 
 .island-slot {
   flex: none;
-  width: 92px;
+  width: 84px;
   height: 100%;
   padding: 0;
   border: none;
@@ -390,7 +209,7 @@ body.island-open #stage {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .island-title {
@@ -440,26 +259,26 @@ body.island-open #stage {
 
 /* Wide (the window has widened): more room for her and for the words, like Coucou's island. */
 .island.wide {
-  padding: 10px;
-  border-radius: 28px;
+  padding: 8px 9px 9px;
+  border-radius: 26px;
 }
 
 .island.wide .island-card {
-  height: 136px;
-  gap: 12px;
-  padding: 12px 16px 12px 4px;
-  border-radius: 22px;
+  height: 122px;
+  gap: 10px;
+  padding: 9px 16px 9px 4px;
+  border-radius: 20px;
   background:
-    radial-gradient(110px 96px at 64px 62%, rgba(var(--tint), 0.24), rgba(var(--tint), 0) 75%),
+    radial-gradient(96px 84px at 54px 60%, rgba(var(--tint), 0.24), rgba(var(--tint), 0) 75%),
     #131317;
 }
 
 .island.wide .island-slot {
-  width: 118px;
+  width: 96px;
 }
 
 .island.wide .island-info {
-  gap: 8px;
+  gap: 5px;
 }
 
 .island.wide .island-title {
@@ -479,8 +298,22 @@ body.island-open #stage {
 }
 
 .island.wide .island-icon {
-  width: 38px;
-  height: 32px;
+  width: 36px;
+  height: 28px;
+}
+
+/* Grabbed by its black: it travels with her (island.js, _bindDrag). */
+.island.open:not(.dragging) .island-card,
+.island.open:not(.dragging) {
+  cursor: default;
+}
+
+.island.dragging {
+  cursor: grabbing;
+}
+
+.island.dragging .island-card {
+  cursor: grabbing;
 }
 
 /* The closet: instead of brain and steps, what she can wear. */
@@ -503,10 +336,23 @@ body.island-open #stage {
 
 .island-closet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
   gap: 4px;
   overflow-y: auto;
   scrollbar-width: none;
+}
+
+/* With the closet open the card grows upwards, the island with it. */
+.island-card.closet-open,
+.island.wide .island-card.closet-open {
+  height: auto;
+  min-height: 122px;
+}
+
+/* Her slot stretches with it (100% of an automatic height would be nothing). */
+.island-card.closet-open .island-slot {
+  height: auto;
+  align-self: stretch;
 }
 
 .island-outfit {
@@ -547,7 +393,7 @@ body.island-open #stage {
   border-color: rgba(var(--tint), 0.5);
 }
 
-/* Narrow (docked in the dashboard): the Wardrobe stays just an icon. */
+/* Narrow (the window couldn't widen): the Wardrobe stays just an icon. */
 .island:not(.wide) .island-pill[data-id='wardrobe'] {
   width: 30px;
   justify-content: center;
@@ -673,15 +519,15 @@ body.island-open #stage {
   background: var(--bar, var(--ok));
 }
 
-/* The pills: the body, the dance (only while music plays), quit. */
+/* The pills: the wardrobe, the dance and the player (while Spotify is open), quit. */
 .island-pills {
   display: flex;
   gap: 6px;
-  padding-top: 8px;
+  padding-top: 6px;
 }
 
 .island-pill {
-  height: 30px;
+  height: 28px;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -710,7 +556,7 @@ body.island-open #stage {
 
 .island-pill.power {
   margin-left: auto;
-  width: 30px;
+  width: 28px;
   justify-content: center;
   gap: 4px;
   padding: 0;
@@ -735,6 +581,56 @@ body.island-open #stage {
   width: auto;
   padding: 0 12px 0 9px;
   animation: throb 0.9s ease-in-out infinite;
+}
+
+/* The small Spotify player: previous, play/pause, next. */
+.island-player {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #131317;
+}
+
+.island-player.hidden {
+  display: none;
+}
+
+.island-player-btn {
+  width: 26px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  color: #c9c9d2;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.island-player-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.island-player-btn[data-id='toggle'] {
+  color: #fff;
+}
+
+.island-player.playing .island-player-btn[data-id='toggle'] {
+  color: #1ed760;
+}
+
+.island-player-btn .icon {
+  fill: currentColor;
+  stroke-width: 1.4;
 }
 
 /* Three dancing bars: she's dancing to Spotify. */
@@ -907,10 +803,11 @@ body.island-open #stage {
 }
 
 /* ------------------------------------------------------------- notices --- */
+/* She lives at the bottom of the window: notices go at the top, so they don't cover her. */
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 12px;
+  top: 12px;
   transform: translateX(-50%);
   max-width: calc(100% - 20px);
   padding: 7px 12px;
@@ -924,11 +821,6 @@ body.island-open #stage {
   animation: pop 0.2s ease;
 }
 
-/* The flame lives at the bottom of the window: notices go at the top, so they don't cover her. */
-body.flame-form .toast {
-  top: 12px;
-  bottom: auto;
-}
 
 .toast.error {
   border-color: rgba(255, 107, 129, 0.45);

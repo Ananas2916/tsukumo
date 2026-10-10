@@ -715,7 +715,11 @@ def speak_when(due: float, lang: str, now: datetime | None = None) -> str:
     delta = moment - now
     clock = moment.strftime("%H:%M")
     if delta <= timedelta(hours=2):
-        amount = speak_duration(max(1, delta.total_seconds()), lang)
+        seconds = max(1, delta.total_seconds())
+        # Said a moment after it was set: 1799.4 s is "30 minutes", not "29 minutes and 59 seconds".
+        if seconds >= 60:
+            seconds = 5 * round(seconds / 5)
+        amount = speak_duration(seconds, lang)
         return f"tra {amount}" if lang == "it" else f"in {amount}"
     days = (moment.date() - now.date()).days
     if lang == "it":

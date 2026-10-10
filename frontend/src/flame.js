@@ -2,13 +2,10 @@
  * The flame: Tsukumo.
  *
  * In tsukumogami a soul enters an object and brings it to life. Here the
- * flame is her, and the VRM a body she can wear if you like: entering and
- * leaving it is a choreography directed by VrmStage. A drop with two eyes,
- * all geometry: no files to download or license.
+ * flame is her: a drop with two eyes, all geometry, no files to download or
+ * license. The stage (stage.js) frames her and tells her what happens around.
  *
- * She lives in the same scene as the VRM, where its feet would be: window,
- * physics (falls, throws, edges, taskbar) and per-pixel click-through stay
- * the same. Here is how she moves: breathing, gaze, the agent's states
+ * Here is how she moves: breathing, gaze, the agent's states
  * (thinking, working with her little terminal, the page or the magnifying
  * glass), reactions to touches, dancing, sleep with the bubble, the file she
  * eats, the sprint and the flight when you throw her (the real run is done
@@ -29,7 +26,7 @@ import { Accessories, WorkProps } from './flame/props.js';
 
 export { PALETTES } from './flame/look.js';
 
-/** The flame's height relative to the VRM model's. */
+/** The flame's height relative to the framed figure's (stage.js, FRAME_HEIGHT). */
 export const FLAME_HEIGHT = 0.3;
 
 // The drop's measures in its own units: bulb of radius R, tip up to UNIT.
@@ -81,7 +78,7 @@ const REACTIONS = {
   gust: 1.4,
 };
 
-/** Names of the VRM's gestures (body.js) the flame can render her own way. */
+/** Gesture names the backend sends with a spontaneous comment (proactive.py), in her own way. */
 const GESTURES = {
   wave: 'greet',
   greetPop: 'greet',
@@ -144,12 +141,7 @@ export class Flame {
     this.home = new THREE.Vector3();
     /** Scene metres per drop unit. */
     this.size = 0.4;
-    /** 0..1: how much of her there is (during the form change she shrinks until she vanishes). */
-    this.presence = 1;
-    /** 0..1: how far she has moved towards `chest` (entering or leaving the body). */
-    this.travel = 0;
-    this.chest = new THREE.Vector3();
-    /** Spontaneous gestures when she does nothing (turned off from the panel, as for the VRM). */
+    /** Spontaneous gestures when she does nothing (they can be turned off from the panel). */
     this.spontaneous = true;
 
     this.t = 0;
@@ -201,7 +193,7 @@ export class Flame {
     this._menuWanted = false;
     this._menuAmount = 0;
     this._point = new THREE.Vector3();
-    /** Shadow for VrmStage: where and how big, in metres, and how dark. */
+    /** Shadow for the stage: where and how big, in metres, and how dark. */
     this.shadow = { x: 0, z: 0, size: 0, opacity: 0 };
   }
 
@@ -297,7 +289,7 @@ export class Flame {
     this.size = height / UNIT;
   }
 
-  /** Centre of the bulb, in the world: she's picked up from there and enters the body from there. */
+  /** Centre of the bulb, in the world: she's picked up from there. */
   centerWorld(target = new THREE.Vector3()) {
     return target.set(0, HOVER + R, 0).applyMatrix4(this.root.matrixWorld);
   }
@@ -328,7 +320,7 @@ export class Flame {
 
   /** Half width of the bulb, in metres: the menu goes around her at this distance. */
   get halfWidth() {
-    return R * this.size * this.presence;
+    return R * this.size;
   }
 
   /** The bottom of the drop at rest, in metres above the feet. */
@@ -346,8 +338,6 @@ export class Flame {
         this.flying ||
         this.fx.active ||
         this.props.active ||
-        this.travel > 0 ||
-        this.presence < 1 ||
         this.squash.busy ||
         this.wardrobe.busy ||
         !this.eyeScale.settled ||
@@ -358,7 +348,7 @@ export class Flame {
   }
 
   // ----------------------------------------------------------------- events
-  /** A gesture or a reaction. VRM gesture names are accepted too; false if she can't do it. */
+  /** A reaction, or a gesture name from the backend (GESTURES); false if she can't do it now. */
   react(name, detail = 0) {
     const key = REACTIONS[name] ? name : GESTURES[name];
     if (!key || this.run) return false;
@@ -620,7 +610,10 @@ export class Flame {
 
     // What she's doing (or what the agent is doing for her).
     if (mood === 'speak') {
-      mouth = clamp((input.level ?? 0) * 2.4, 0, 1);
+      // The volume opens the mouth, the vowel shapes it: round on "o" and "u".
+      const vowels = input.vowels ?? {};
+      mouth = clamp(Math.max((input.level ?? 0) * 2.4, (vowels.a ?? 0) * 0.8), 0, 1);
+      round = clamp((vowels.o ?? 0) + (vowels.u ?? 0) - 0.4 * ((vowels.i ?? 0) + (vowels.e ?? 0)), 0, 1);
       sy += mouth * 0.05;
       glow = 0.4 + mouth * 0.7;
       flicker = 1.3;
@@ -1070,18 +1063,12 @@ export class Flame {
     this.swayPhase += dt * flicker;
     this.uniforms.uTime.value = this.swayPhase;
     this.uniforms.uSway.value = damp(this.uniforms.uSway.value, swayAmount * MOTION + mouth * 0.6, 8, dt);
-    glow += this.travel * 0.8;
     this.glow.material.opacity = damp(this.glow.material.opacity, clamp(glow * 0.75, 0, 1), 18, dt);
 
-    // Position: at home (floating), or travelling towards the VRM's chest.
-    const scale = this.size * this.presence;
+    // Position: at home, floating.
+    const scale = this.size;
     const float = (Math.sin(t * 1.6) * 0.04 * bob * MOTION + jump) * this.size;
-    const toChest = this.chest.y - (HOVER + R) * scale;
-    this.root.position.set(
-      lerp(this.home.x + shake * this.size, this.chest.x, this.travel),
-      lerp(this.home.y + float, toChest, this.travel),
-      lerp(this.home.z, this.chest.z, this.travel),
-    );
+    this.root.position.set(this.home.x + shake * this.size, this.home.y + float, this.home.z);
     this.root.scale.setScalar(Math.max(0.0001, scale));
 
     // In the menu island: she slides into the slot left of the card, smaller.
@@ -1129,7 +1116,7 @@ export class Flame {
       0.02,
     );
 
-    this.dotsAmount = damp(this.dotsAmount, dots && !run && this.travel === 0 && !this._menuWanted ? 1 : 0, 10, dt);
+    this.dotsAmount = damp(this.dotsAmount, dots && !run && !this._menuWanted ? 1 : 0, 10, dt);
     this.dots.visible = this.dotsAmount > 0.01;
     this.dots.scale.setScalar(Math.max(0.001, this.dotsAmount));
     const dotSpeed = mood === 'work' ? 6 : 3;
@@ -1148,12 +1135,12 @@ export class Flame {
     this.acc.bang.position.y = HOVER + UNIT + 0.24 + this.wardrobe.top;
     this.wardrobe.update(dt, { yaw: this.pivot.rotation.y, lean: this._lean, y: hopY, glasses: this._acc.glasses });
 
-    // The shadow: it shrinks when she jumps, vanishes while she enters the body or flies.
+    // The shadow: it shrinks when she jumps, fades while she falls or sits in the island.
     const lift = float / Math.max(1e-6, this.size);
     this.shadow.x = this.root.position.x;
     this.shadow.z = this.home.z;
-    this.shadow.size = 0.9 * this.size * this.presence * (1 - lift * 0.6) * (1 + (sx - 1) * 0.8);
-    this.shadow.opacity = this.root.visible ? 0.9 * (1 - this.travel) * (this.falling ? 0.25 : 1) * (1 - inMenu) : 0;
+    this.shadow.size = 0.9 * this.size * (1 - lift * 0.6) * (1 + (sx - 1) * 0.8);
+    this.shadow.opacity = this.root.visible ? 0.9 * (this.falling ? 0.25 : 1) * (1 - inMenu) : 0;
 
     this.fx.update(dt);
   }

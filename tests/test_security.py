@@ -258,6 +258,8 @@ def test_local_only_paths():
     assert local_only("POST", "/api/providers/check")
     assert local_only("POST", "/api/providers/options")
     assert not local_only("POST", "/api/attachments")
+    # The island's player presses keys on the PC: only from it.
+    assert local_only("POST", "/api/music/control")
     # The QR with the token and the button that launches tailscale serve: only from the PC.
     assert local_only("GET", "/api/phone")
     assert local_only("POST", "/api/phone/serve")
@@ -274,7 +276,7 @@ def test_public_shell_rules():
     assert not public_shell("GET", "/assets/sub/file.js")
     assert not public_shell("GET", "/assets\\..\\panel.html")
     assert not public_shell("GET", "/panel.html")
-    assert not public_shell("GET", "/models/avatar.vrm")
+    assert not public_shell("GET", "/dashboard.html")
 
 
 def test_clean_env_value():

@@ -33,9 +33,9 @@ contextBridge.exposeInMainWorld('companion', {
   /** Screenshot of the screen the cursor is on: returns the PNG's path. */
   captureScreen: () => ipcRenderer.invoke('pet:capture-screen'),
 
-  // --- character -------------------------------------------------------------
+  // --- Tsukumo ---------------------------------------------------------------
   /**
-   * Says whether the cursor is over an opaque pixel of the character: the
+   * Says whether the cursor is over an opaque pixel of her: the
    * main process turns it into per-pixel click-through. Call it only when the
    * value changes (the renderer takes care of it).
    */
@@ -44,14 +44,19 @@ contextBridge.exposeInMainWorld('companion', {
   /** @returns {Promise<{x: number, y: number}>} position of the window */
   dragStart: () => ipcRenderer.invoke('pet:drag-start'),
   dragMove: (x, y) => ipcRenderer.send('pet:drag-move', { x, y }),
-  /** `velocity` `{vx, vy}` in px/s if you threw her (flame only), otherwise null. */
+  /** `velocity` `{vx, vy}` in px/s if you threw her, otherwise null. */
   dragEnd: (velocity = null) => ipcRenderer.invoke('pet:drag-end', velocity),
+  /**
+   * Moving the open island (by its black): the window goes with the cursor
+   * through dragMove and, let go, stays there while the island is open.
+   * @returns {Promise<{x: number, y: number} | null>} position of the window
+   */
+  islandDragStart: () => ipcRenderer.invoke('pet:island-drag-start'),
+  islandDragEnd: () => ipcRenderer.invoke('pet:island-drag-end'),
 
-  /** Where feet, seat and body axis are, as fractions of the window. */
+  /** Where she rests and her axis, as fractions of the window. */
   setAnchors: (anchors) => ipcRenderer.send('pet:anchors', anchors),
-  /** Sit, stand up or lie down on the taskbar: `'sit' | 'stand' | 'lie' | 'side'`. */
-  requestPosture: (posture) => ipcRenderer.invoke('pet:posture', posture),
-  /** The flame's sprint along the taskbar: `'dash' | 'lap'` or nothing (random). False if she can't. */
+  /** Her sprint along the taskbar: `'dash' | 'lap'` or nothing (random). False if she can't. */
   sprint: (kind) => ipcRenderer.invoke('pet:sprint', kind),
   /** The menu island open or closed: the window widens around her. `{wide, shift}`. */
   setIslandWide: (open) => ipcRenderer.invoke('pet:island', Boolean(open)),
@@ -59,22 +64,20 @@ contextBridge.exposeInMainWorld('companion', {
   onFrameShift: (callback) => listen('pet:frame-shift', callback),
   /** The interface's language ('en' or 'it'): the tray menu and the dialogs follow it. */
   setLanguage: (language) => ipcRenderer.send('app:language', String(language)),
-  /** Wheel: multiplies the character's scale. */
+  /** Wheel: multiplies her scale. */
   scaleBy: (factor) => ipcRenderer.invoke('pet:scale-by', factor),
 
-  /** Falls, landings, windows she sits on, edges she clings to, sprints. */
+  /** Falls, landings, throws, windows she sits on, sprints. */
   onMotion: (callback) => listen('pet:motion', callback),
   /**
    * Cursor position relative to the window, measured by the main process.
    * Needed because in click-through the page receives no mouse events:
    * without this channel it couldn't notice when the cursor comes back over
-   * the character.
+   * her.
    */
   onCursor: (callback) => listen('pet:cursor', callback),
   /** Commands sent by the panel (mouth, actions, debug...). */
   onCommand: (callback) => listen('pet:command', callback),
-  /** A .vrm model chosen from the panel: `{name, data}`. */
-  onModel: (callback) => listen('pet:model', callback),
   /** Spotify: `{open, playing, artist, title}`, only when it changes. */
   onMusic: (callback) => listen('pet:music', callback),
   /**
@@ -102,7 +105,7 @@ contextBridge.exposeInMainWorld('companion', {
   togglePanel: (focus) => ipcRenderer.invoke('panel:toggle', focus),
   openPanel: (focus) => ipcRenderer.invoke('panel:open', focus),
   hidePanel: () => ipcRenderer.invoke('panel:hide'),
-  /** The panel says which tab it shows: the docks highlight that one. */
+  /** The panel says which tab it shows: the island highlights that one. */
   setPanelTab: (tab) => ipcRenderer.send('panel:tab', tab),
   /** @returns {Promise<object>} scale, always on top, ghost, docking... */
   getState: () => ipcRenderer.invoke('panel:state'),
@@ -118,7 +121,6 @@ contextBridge.exposeInMainWorld('companion', {
   setWindows: (value) => ipcRenderer.invoke('pet:set-windows', value),
   setDocked: (value) => ipcRenderer.invoke('panel:set-docked', value),
   setPanelPinned: (value) => ipcRenderer.invoke('panel:set-pinned', value),
-  pickModel: () => ipcRenderer.invoke('pet:pick-model'),
 
   // --- dashboard -------------------------------------------------------------
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),

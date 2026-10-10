@@ -74,6 +74,49 @@ const ART = {
       <path d="M28.6 13.5L35.4 13.5M25.6 21 38.4 21" stroke="#fff" stroke-width="2.6"/>
       <circle cx="32" cy="4.5" r="3" fill="#ffd166" stroke="${INK}" stroke-width="1.3"/>`,
   },
+  bowtie: {
+    front: `<g fill="#d63846" stroke="${INK}" stroke-width="1.3" stroke-linejoin="round">
+      <path d="M32 50.6C29.4 49.2 26.6 46.4 24.3 47.4Q22.9 50.6 24.3 53.8C26.6 54.8 29.4 52 32 50.6Z"/>
+      <path d="M32 50.6C34.6 49.2 37.4 46.4 39.7 47.4Q41.1 50.6 39.7 53.8C37.4 54.8 34.6 52 32 50.6Z"/></g>
+      <ellipse cx="32" cy="50.6" rx="1.7" ry="2.1" fill="#b02a3a" stroke="${INK}" stroke-width="1.1"/>`,
+  },
+  crown: {
+    front: `<path d="M19.8 32.4L19.8 27.4 23.2 21.6 26.6 27 32 19.8 37.4 27 40.8 21.6 44.2 27.4 44.2 32.4Q32 34.8 19.8 32.4Z" fill="#f2c14e" stroke="${INK}" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M20 29.2Q32 31.4 44 29.2" stroke="#d9a43a" stroke-width="1" fill="none"/>
+      <g stroke="${INK}" stroke-width=".9"><circle cx="23.2" cy="20.8" r="1.5" fill="#f2c14e"/><circle cx="32" cy="19" r="1.6" fill="#f2c14e"/><circle cx="40.8" cy="20.8" r="1.5" fill="#f2c14e"/>
+      <circle cx="32" cy="30.6" r="1.8" fill="#e0404a"/><circle cx="24.6" cy="30.2" r="1.2" fill="#5ec8ff"/><circle cx="39.4" cy="30.2" r="1.2" fill="#5ec8ff"/></g>`,
+  },
+  angel: {
+    back: `<g fill="#fdfcff" stroke="${INK}" stroke-width="1.3" stroke-linejoin="round">
+      <path d="M19 41C14 33 8 31 4.5 33.5Q8 35.5 9 37.6Q5.8 39.6 9.3 41.8Q8 44.6 12.8 44Q16 45.4 19 43.4Z"/>
+      <path d="M45 41C50 33 56 31 59.5 33.5Q56 35.5 55 37.6Q58.2 39.6 54.7 41.8Q56 44.6 51.2 44Q48 45.4 45 43.4Z"/></g>`,
+    front: `<ellipse cx="32" cy="7.5" rx="7.5" ry="4.5" fill="#ffe9a8" opacity=".35"/>
+      <ellipse cx="32" cy="7.5" rx="6.4" ry="2.3" fill="none" stroke="${INK}" stroke-width="3.2"/>
+      <ellipse cx="32" cy="7.5" rx="6.4" ry="2.3" fill="none" stroke="#ffd166" stroke-width="1.7"/>`,
+  },
+  devil: {
+    back: `<path d="M43 51Q53 56.5 55.5 49.5Q57 45 54.4 40.6" fill="none" stroke="${INK}" stroke-width="3.4" stroke-linecap="round"/>
+      <path d="M43 51Q53 56.5 55.5 49.5Q57 45 54.4 40.6" fill="none" stroke="#c92a3e" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M54 35.4L57.8 40.8 54.3 40.2 50.9 41.2Z" fill="#c92a3e" stroke="${INK}" stroke-width="1.2" stroke-linejoin="round"/>`,
+    front: `<g fill="#c92a3e" stroke="${INK}" stroke-width="1.3" stroke-linejoin="round">
+      <path d="M24.6 31.2Q21.6 25.4 18.6 21.6Q25.4 23.6 28.6 29.6Z"/><path d="M39.4 31.2Q42.4 25.4 45.4 21.6Q38.6 23.6 35.4 29.6Z"/></g>`,
+  },
+  headphones: {
+    back: `<path d="M15.6 38C15.6 20.5 48.4 20.5 48.4 38" fill="none" stroke="${INK}" stroke-width="4.4"/>
+      <path d="M15.6 38C15.6 20.5 48.4 20.5 48.4 38" fill="none" stroke="#2b2533" stroke-width="2.6"/>`,
+    front: `<g stroke="${INK}" stroke-width="1.4"><rect x="11.2" y="35" width="7.4" height="13" rx="3.2" fill="#2b2533"/><rect x="45.4" y="35" width="7.4" height="13" rx="3.2" fill="#2b2533"/></g>
+      <circle cx="14.9" cy="41.5" r="1.6" fill="#ff7eb6"/><circle cx="49.1" cy="41.5" r="1.6" fill="#ff7eb6"/>`,
+  },
+  catears: {
+    front: `<g stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"><path d="M22.8 31.2L19 17.8 29.8 26Z" fill="#2b2533"/><path d="M41.2 31.2L45 17.8 34.2 26Z" fill="#2b2533"/></g>
+      <path d="M23.4 28.4L21.4 21.2 27.2 25.8ZM40.6 28.4L42.6 21.2 36.8 25.8Z" fill="#ff9ec7"/>`,
+  },
+  tophat: {
+    front: `<ellipse cx="32" cy="32.6" rx="19.5" ry="3.4" fill="#262130" stroke="${INK}" stroke-width="1.5"/>
+      <path d="M20.2 32.4L20.6 11.4Q32 9.6 43.4 11.4L43.8 32.4Q32 34.6 20.2 32.4Z" fill="#262130" stroke="${INK}" stroke-width="1.5" stroke-linejoin="round"/>
+      <ellipse cx="32" cy="11.3" rx="11.4" ry="1.9" fill="#3a3344" stroke="${INK}" stroke-width="1.2"/>
+      <path d="M20.3 31.6L20.4 27.6Q32 29.4 43.6 27.6L43.7 31.6Q32 33.6 20.3 31.6Z" fill="#c8324a"/>`,
+  },
 };
 
 /**

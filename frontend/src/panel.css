@@ -1464,40 +1464,15 @@ textarea.field-input {
   gap: 4px;
 }
 
-/* -------------------------------------------- introduction: form and setup --- */
-.welcome-forms {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 8px;
+/* ------------------------------------------ introduction: colour and setup --- */
+.welcome-swatches {
+  justify-content: center;
+  margin: 4px 0 2px;
 }
 
-.welcome-form {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 10px 12px;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-  color: var(--text);
+.welcome-swatches + .hint {
+  margin: 0 0 8px;
   text-align: center;
-  cursor: pointer;
-}
-
-.welcome-form svg {
-  color: var(--accent);
-}
-
-.welcome-form small {
-  color: var(--muted);
-  line-height: 1.35;
-}
-
-.welcome-form.on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
 }
 
 .setup-list {

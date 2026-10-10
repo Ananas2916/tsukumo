@@ -5,21 +5,17 @@
 .DESCRIPTION
     Whoever installs it needs neither Python nor Node: the installer carries
     an official "embeddable" Python with the dependencies already installed,
-    the backend, the built interface, an optional avatar and the Kokoro weights.
+    the backend, the built interface and the Kokoro weights. Tsukumo herself
+    is all geometry: no models or images to ship.
 
     Steps:
       1. build the frontend (npm run build)
       2. prepare build\python: embeddable Python + pip + requirements.txt
-      3. prepare build\app: backend, built frontend, avatar, Kokoro,
-         LICENSE and THIRD-PARTY-NOTICES.txt (scripts\package_audit.py)
+      3. prepare build\app: backend, built frontend, Kokoro, LICENSE and
+         THIRD-PARTY-NOTICES.txt; scripts\package_audit.py checks that
+         nothing else got in (settings, state, personal files)
       4. electron-builder packs everything into a per-user NSIS setup
          (no administrator rights)
-
-    By default the installer is PUBLIC: instead of your avatar there's Sendagaya
-    Shino, a VRoid sample model released as CC0, no clips, and the build stops
-    if an included avatar can't be redistributed (the licence metadata inside
-    the .vrm says so). With -IncludeLocalAssets the avatars and clips of
-    frontend\public go in instead: a PERSONAL installer, not to be published.
 
     It downloads from python.org, pypi.org, github.com and npmjs.com; the cache
     lives in build\cache and later builds are much faster.
@@ -30,10 +26,6 @@
 .PARAMETER SkipInstaller
     Stops at electron\dist\win-unpacked (to try it without installing).
 
-.PARAMETER IncludeLocalAssets
-    Personal installer with your avatar and your clips (frontend\public).
-    The file is called "... (personal).exe": don't publish it.
-
 .EXAMPLE
     .\scripts\build_installer.ps1
 #>
@@ -42,8 +34,7 @@
 param(
     [ValidateSet('int8', 'fp16', 'full')]
     [string]$KokoroVariant = 'int8',
-    [switch]$SkipInstaller,
-    [switch]$IncludeLocalAssets
+    [switch]$SkipInstaller
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,10 +49,6 @@ $PythonVersion = '3.11.9'
 $PythonZip = "python-$PythonVersion-embed-amd64.zip"
 $KokoroRelease = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0'
 $KokoroFiles = @{ int8 = 'kokoro-v1.0.int8.onnx'; fp16 = 'kokoro-v1.0.fp16.onnx'; full = 'kokoro-v1.0.onnx' }
-# The public installer's default avatar: a VRoid Studio sample model (beta),
-# CC0 licence written in its metadata. Pinned commit: always the same file.
-$DefaultAvatar = 'Sendagaya_Shino.vrm'
-$DefaultAvatarUrl = "https://raw.githubusercontent.com/madjin/vrm-samples/e16eb187100149a315ad92c3c9968f1d5baa6c7d/vroid/beta/$DefaultAvatar"
 
 function Write-Step([string]$message) {
     Write-Host ''
@@ -116,7 +103,7 @@ Invoke-Checked $python @('-m', 'pip', 'install', '--no-warn-script-location', '-
 Get-ChildItem $pythonDir -Recurse -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force
 
 # --------------------------------------------------------------------- app --
-Write-Step 'Preparing backend, interface, avatar and voice'
+Write-Step 'Preparing backend, interface and voice'
 if (Test-Path $appDir) { Remove-Item -Recurse -Force $appDir }
 New-Item -ItemType Directory -Force $appDir | Out-Null
 robocopy (Join-Path $root 'backend') (Join-Path $appDir 'backend') /E /XD __pycache__ /NFL /NDL /NJH /NJS | Out-Null
@@ -125,20 +112,8 @@ New-Item -ItemType Directory -Force (Join-Path $appDir 'scripts') | Out-Null
 foreach ($script in 'tsukumo_notify.py', 'tsukumo_statusline.py') {
     Copy-Item (Join-Path $root "scripts\$script") (Join-Path $appDir 'scripts')
 }
-# models and animations in dist would be copies of frontend\public: never in the installer.
+# Only the built pages: a folder an older version left in dist stays out (package_audit checks it).
 robocopy (Join-Path $root 'frontend\dist') (Join-Path $appDir 'frontend\dist') /E /XD models animations /NFL /NDL /NJH /NJS | Out-Null
-$avatarDir = Join-Path $appDir 'frontend\public\models'
-$clipDir = Join-Path $appDir 'frontend\public\animations'
-if ($IncludeLocalAssets) {
-    robocopy (Join-Path $root 'frontend\public\models') $avatarDir /E /NFL /NDL /NJH /NJS | Out-Null
-    robocopy (Join-Path $root 'frontend\public\animations') $clipDir /E /NFL /NDL /NJH /NJS | Out-Null
-    Write-Warning 'PERSONAL installer: it contains your avatar and your clips. Do not publish it.'
-} else {
-    New-Item -ItemType Directory -Force $avatarDir, $clipDir | Out-Null
-    Copy-Item (Get-Cached $DefaultAvatarUrl $DefaultAvatar) $avatarDir
-    Copy-Item (Join-Path $root 'frontend\public\models\README.md') $avatarDir -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $root 'frontend\public\animations\README.md') $clipDir -ErrorAction SilentlyContinue
-}
 Copy-Item (Join-Path $root 'LICENSE') $appDir
 Copy-Item (Join-Path $root '.env.example') $appDir -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force (Join-Path $appDir 'models') | Out-Null
@@ -147,13 +122,11 @@ $kokoro = Get-Cached "$KokoroRelease/$($KokoroFiles[$KokoroVariant])" $KokoroFil
 Copy-Item $kokoro (Join-Path $appDir 'models\kokoro-v1.0.onnx')
 Copy-Item (Get-Cached "$KokoroRelease/voices-v1.0.bin" 'voices-v1.0.bin') (Join-Path $appDir 'models')
 
-Write-Step 'Checking the licences'
+Write-Step 'Licences and contents'
 $audit = Join-Path $root 'scripts\package_audit.py'
-$auditArgs = @($audit, 'avatars', $avatarDir)
-if (-not $IncludeLocalAssets) { $auditArgs += '--public' }
-Invoke-Checked $python $auditArgs
 # With the installer's Python: it lists exactly the packages that end up inside.
 Invoke-Checked $python @($audit, 'notices', $appDir, (Join-Path $appDir 'THIRD-PARTY-NOTICES.txt'))
+Invoke-Checked $python @($audit, 'contents', $appDir)
 
 # ---------------------------------------------------------------- electron --
 Write-Step 'Packing with electron-builder'
@@ -172,8 +145,6 @@ if (-not (Test-Path (Join-Path $signTools 'rcedit-x64.exe'))) {
 }
 $target = if ($SkipInstaller) { 'dir' } else { 'nsis' }
 $builderArgs = @('electron-builder', '--win', $target, '--x64', '--publish', 'never')
-# A different name: the personal installer isn't confused with the one to publish.
-if ($IncludeLocalAssets) { $builderArgs += '-c.nsis.artifactName=${productName} Setup ${version} (personal).${ext}' }
 Invoke-Checked 'npx.cmd' $builderArgs $electron
 
 $output = Join-Path $electron 'dist'

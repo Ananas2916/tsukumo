@@ -2,9 +2,7 @@
  * First start: a six-step introduction inside the panel.
  *
  * 1. who she is and how to use her (right-click, double click, dragging her);
- * 2. how you want her: the flame (recommended: the VRM isn't even loaded) or
- *    the flame with a 3D body to enter. It shows right away on the
- *    character: she leaves the body, or enters it;
+ * 2. her colour: she changes right away, on the desktop;
  * 3. your name (it becomes a memory, see backend/memory.py) and hers;
  * 4. the brain, among those found on the PC (backend/llm/detect.py): it
  *    waits for the detection to finish, right after install it's still there;
@@ -21,8 +19,8 @@
 import { apiUrl } from '../config.js';
 import { el, readSetting, writeSetting } from '../dom.js';
 import { t, tx } from '../i18n.js';
+import { paletteKey, PALETTE_LABELS, swatchColor } from '../flame/palettes.js';
 import { icon } from '../icons.js';
-import { applyForm, currentForm } from './character.js';
 
 export const ONBOARDED = 'dc:onboarded';
 
@@ -33,20 +31,8 @@ const TIPS = [
   { icon: 'clip', text: t('Drop a file on her: she eats it and passes it to her brain.') },
 ];
 
-const FORMS = [
-  {
-    value: 'spirit',
-    icon: 'flame',
-    title: t('The flame'),
-    text: t('Me, just as I am: light on the PC. A 3D body can be added whenever you like.'),
-  },
-  {
-    value: 'vrm',
-    icon: 'body',
-    title: t('With a 3D body'),
-    text: t('I enter a VRM character, and leave it whenever you like.'),
-  },
-];
+/** Her named colours (flame/palettes.js), with the swatch colour. */
+const COLORS = Object.entries(PALETTE_LABELS).map(([value, label]) => ({ value, label, swatch: swatchColor(value) }));
 
 const GREETING = {
   it: (user, name) => (user ? `Piacere, ${user}! Io sono ${name}. Quando hai bisogno, sono qui.` : `Eccomi! Io sono ${name}. Quando hai bisogno, sono qui.`),
@@ -103,7 +89,7 @@ export class Welcome {
   }
 
   _steps() {
-    return [() => this._intro(), () => this._form(), () => this._names(), () => this._brain(), () => this._setup(), () => this._done()];
+    return [() => this._intro(), () => this._look(), () => this._names(), () => this._brain(), () => this._setup(), () => this._done()];
   }
 
   async _render() {
@@ -156,31 +142,31 @@ export class Welcome {
     );
   }
 
-  /** With the body or just the flame: it shows right away on the character. */
-  async _form() {
-    let chosen = currentForm() === 'spirit' ? 'spirit' : 'vrm';
-    const list = el('div', { class: 'welcome-forms' });
+  /** Her colour: it shows right away on her, with a flare. */
+  async _look() {
+    let chosen = paletteKey(readSetting('dc:flame-color', 'lilac')) ?? 'lilac';
+    const list = el('div', { class: 'swatch-row welcome-swatches', role: 'radiogroup', 'aria-label': t('Flame colour') });
+    const name = el('p', { class: 'hint' });
     const render = () => {
+      name.textContent = PALETTE_LABELS[chosen] ?? t('Free colour ({color})', { color: chosen });
       list.replaceChildren(
-        ...FORMS.map((form) =>
-          el(
-            'button',
-            {
-              type: 'button',
-              class: `welcome-form${form.value === chosen ? ' on' : ''}`,
-              'aria-pressed': String(form.value === chosen),
-              onClick: () => {
-                if (form.value === chosen) return;
-                chosen = form.value;
-                applyForm(chosen);
-                this.app.companion?.sendToPet({ type: 'form', value: chosen });
-                render();
-              },
+        ...COLORS.map((color) =>
+          el('button', {
+            type: 'button',
+            class: `swatch${color.value === chosen ? ' on' : ''}`,
+            role: 'radio',
+            'aria-checked': String(color.value === chosen),
+            'aria-label': color.label,
+            title: color.label,
+            style: { background: color.swatch },
+            onClick: () => {
+              if (color.value === chosen) return;
+              chosen = color.value;
+              writeSetting('dc:flame-color', chosen);
+              this.app.companion?.sendToPet({ type: 'flame-color', value: chosen });
+              render();
             },
-            icon(form.icon, 30),
-            el('strong', {}, form.title),
-            el('small', {}, form.text),
-          ),
+          }),
         ),
       );
     };
@@ -188,9 +174,10 @@ export class Welcome {
     return el(
       'div',
       { class: 'welcome-step' },
-      el('h2', {}, t('How do you want me?')),
-      el('p', {}, t('Choose and watch me: I change right away. You can redo it whenever you like from Character → Look.')),
+      el('h2', {}, t('What colour shall I be?')),
+      el('p', {}, t('Choose and watch me: I change right away. My wardrobe is in my menu (right-click on me), and everything is in Character → Look.')),
       list,
+      name,
       this._footer(() => this._go(1)),
     );
   }

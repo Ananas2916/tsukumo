@@ -269,3 +269,31 @@ def test_music_tags_are_executed_and_not_scheduled_as_reminders(client):
     finally:
         instance.music = original
     assert seen == ["[[music: pause]]"]
+
+
+def test_the_island_player_controls_spotify(client, monkeypatch):
+    from backend import server
+
+    actions = []
+
+    async def control(action):
+        actions.append(action)
+
+    monkeypatch.setattr(server.MUSIC, "control", control)
+    for action in ("pause", "resume", "next", "previous"):
+        assert client.post("/api/music/control", json={"action": action}).json() == {"ok": True}
+    assert actions == ["pause", "resume", "next", "previous"]
+    # Anything else isn't a player button.
+    assert client.post("/api/music/control", json={"action": "play spotify:track:x"}).status_code == 422
+
+
+def test_the_island_player_explains_a_refusal(client, monkeypatch):
+    from backend import server
+
+    async def control(action):
+        raise SpotifyError("I can't press the media keys here.", "NO_KEYS")
+
+    monkeypatch.setattr(server.MUSIC, "control", control)
+    response = client.post("/api/music/control", json={"action": "next"})
+    assert response.status_code == 409
+    assert "media keys" in response.json()["error"]

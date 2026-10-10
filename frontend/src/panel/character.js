@@ -7,7 +7,7 @@
  */
 
 import { apiUrl } from '../config.js';
-import { el, iconButton, languageLabel, readBody, readSetting, writeSetting } from '../dom.js';
+import { el, iconButton, languageLabel, readSetting, writeSetting } from '../dom.js';
 import { LANG, savedLanguage, setLanguage, t, tx, UI_LANGUAGES } from '../i18n.js';
 import { icon } from '../icons.js';
 import { paletteKey, PALETTE_LABELS, swatchColor } from '../flame/palettes.js';
@@ -40,19 +40,6 @@ const REPLY_LANGUAGES = [
   { value: 'English', label: t('Always in English') },
 ];
 
-/** The ways of standing (frontend/src/body/stances.js), with their labels. */
-const STANCES = [
-  { value: 'standard', label: t('Normal') },
-  { value: 'innocent', label: t('Innocent') },
-  { value: 'cool', label: 'Cool' },
-  { value: 'ladylike', label: t('Elegant') },
-  { value: 'shy', label: t('Shy') },
-  { value: 'energetic', label: t('Energetic') },
-  { value: 'flamboyant', label: 'Diva' },
-  { value: 'gentleman', label: t('Gentleman') },
-  { value: 'powerful', label: t('Powerful') },
-];
-
 const WEATHER_WORDS = {
   clear: t('clear'),
   cloudy: t('cloudy'),
@@ -62,44 +49,29 @@ const WEATHER_WORDS = {
   storm: t('storm'),
 };
 
+/** Her reactions (flame.js), to see them right away. */
 const ACTIONS = [
-  // Born for the flame; the body renders them with the closest gesture (vrm.js, VRM_STAND_IN).
   { play: 'cheer', label: t('Celebrate'), icon: 'star' },
   { play: 'hearts', label: t('Little hearts'), icon: 'smile' },
   { play: 'cool', label: t('Sunglasses'), icon: 'sun' },
   { play: 'surprise', label: t('Surprise'), icon: 'alert' },
   { play: 'speechless', label: t('Speechless'), icon: 'dots' },
   { play: 'dizzy', label: t('Dizzy'), icon: 'refresh' },
-  { play: 'wave', label: t('Wave'), icon: 'hand' },
+  { play: 'greet', label: t('Wave'), icon: 'hand' },
   { play: 'stretch', label: t('Stretch'), icon: 'resize' },
-  { play: 'lookAround', label: t('Look around'), icon: 'search' },
-  { play: 'hum', label: t('Hum'), icon: 'music' },
+  { play: 'look', label: t('Look around'), icon: 'search' },
+  { play: 'sing', label: t('Hum'), icon: 'music' },
   { play: 'yawn', label: t('Yawn'), icon: 'moon' },
-  { play: 'knock', label: t('Knock'), icon: 'hand' },
-  { play: 'fanSelf', label: t('So hot'), icon: 'wave' },
-  { play: 'shiver', label: t('So cold'), icon: 'ghost' },
+  { play: 'call', label: t('Knock'), icon: 'hand' },
+  { play: 'gust', label: t('So cold'), icon: 'ghost' },
   { play: 'pout', label: t('Pout'), icon: 'smile' },
-  { play: 'greetPop', label: t('Peek-a-boo hello'), icon: 'hand' },
-  { play: 'peace', label: t('Make a V'), icon: 'smile' },
-  { play: 'shoot', label: 'Bang!', icon: 'hand' },
-  { play: 'showOff', label: t('Show off'), icon: 'character' },
   { play: 'spin', label: t('Twirl'), icon: 'refresh' },
-  { play: 'model', label: t('Model pose'), icon: 'star' },
-  { play: 'squat', label: 'Squat', icon: 'sit' },
-  // Flame only: a dash along the taskbar, right away.
+  { play: 'hop', label: t('Hop'), icon: 'top' },
+  // A dash along the taskbar, right away.
   { sprint: true, label: 'Sprint', icon: 'bolt' },
-  { posture: 'sit', label: t('Sit down'), icon: 'sit' },
-  { posture: 'lie', label: t('Lie down'), icon: 'window' },
-  { posture: 'side', label: t('On her side'), icon: 'window' },
-  { posture: 'stand', label: t('Stand up'), icon: 'character' },
 ];
 
 const GENDER = { female: 'donna', male: 'uomo' };
-
-/** 'spirit' (just the flame), 'flame' or 'vrm' (with the body), from `dc:body` and `dc:form` (the character reads them too). */
-export function currentForm() {
-  return readBody() === 'none' ? 'spirit' : readSetting('dc:form', 'vrm');
-}
 
 /** The flame's colours (frontend/src/flame/palettes.js), with the swatch colour. */
 const FLAME_COLORS = Object.entries(PALETTE_LABELS).map(([value, label]) => ({ value, label, swatch: swatchColor(value) }));
@@ -108,6 +80,13 @@ const FLAME_COLORS = Object.entries(PALETTE_LABELS).map(([value, label]) => ({ v
 const OUTFIT_SHORT = {
   auto: 'Auto',
   none: t('Nothing'),
+  bowtie: t('Bow tie'),
+  crown: t('Crown'),
+  angel: t('Angel'),
+  devil: t('Devil'),
+  headphones: t('Headphones'),
+  catears: t('Neko'),
+  tophat: t('Top hat'),
   hachimaki: 'Hachimaki',
   kitsune: 'Kitsune',
   sakura: 'Sakura',
@@ -119,12 +98,6 @@ const OUTFIT_SHORT = {
   santa: t('Christmas'),
   party: t('Party'),
 };
-
-/** Saves the chosen form; whoever calls sends it to the character (`{type: 'form', value}`). */
-export function applyForm(value) {
-  writeSetting('dc:body', value === 'spirit' ? 'none' : 'vrm');
-  writeSetting('dc:form', value === 'vrm' ? 'vrm' : 'flame');
-}
 
 /** The languages a cloned voice can speak (those of Chatterbox the panel can name). */
 const CLONE_LANGUAGES = ['it', 'en', 'es', 'fr', 'de', 'pt', 'ja', 'zh', 'hi'];
@@ -175,8 +148,6 @@ export class CharacterView {
     this._loadMicrophones();
     this.memory.load();
     this._showWeather?.();
-    // Chosen from the introduction, in the same window: the "storage" event doesn't arrive.
-    this.form.value = currentForm();
   }
 
   // ------------------------------------------------------------------- DOM
@@ -269,25 +240,6 @@ export class CharacterView {
       this.companion?.sendToPet({ type: 'gain', value: this.gain.value() });
     });
 
-    const model = el('button', { class: 'btn', type: 'button', onClick: () => this.companion?.pickModel() }, icon('body', 16), el('span', {}, t('Choose a 3D body (VRM)…')));
-    // The flame is her (frontend/src/flame.js); the 3D body is optional:
-    // without it the VRM isn't even loaded; with it, she enters and leaves it when you like.
-    this.form = el(
-      'select',
-      { class: 'field-input' },
-      el('option', { value: 'spirit' }, t('Flame')),
-      el('option', { value: 'flame' }, t('Flame, with a 3D body ready')),
-      el('option', { value: 'vrm' }, t('Inside the 3D body')),
-    );
-    this.form.value = currentForm();
-    this.form.addEventListener('change', () => {
-      applyForm(this.form.value);
-      this.companion?.sendToPet({ type: 'form', value: this.form.value });
-    });
-    // Changed from the dock on the character: the panel lines up (same localStorage).
-    window.addEventListener('storage', (event) => {
-      if (event.key === 'dc:form' || event.key === 'dc:body') this.form.value = currentForm();
-    });
     // The flame's colour: it shows right away, with a flare. Besides the six
     // named ones there's the free one (the rainbow swatch opens the picker).
     let flameColor = paletteKey(readSetting('dc:flame-color', 'lilac')) ?? 'lilac';
@@ -379,32 +331,26 @@ export class CharacterView {
     const lookCard = this._card(
       'flame',
       t('Look'),
-      this._row(
-        t('Form'),
-        this.form,
-        t("Tsukumo is the flame. The 3D body is optional: without it the model isn't loaded and she's lighter on the PC."),
-      ),
       el('div', { class: 'row' }, el('span', { class: 'row-label' }, t('Colour')), swatches),
       el('div', { class: 'wardrobe-block' }, el('div', { class: 'wardrobe-head' }, el('span', { class: 'row-label' }, t('Wardrobe')), wardrobeNow), wardrobe),
       this._row(t('Size'), this.scale.node),
       this._row(t('Mouth'), this.gain.node, t('How wide she opens her mouth while speaking.')),
-      model,
     );
 
     // Behaviour ---------------------------------------------------------------
     this.onTop = this._switch(t('Always in front of windows'));
     this.windows = this._switch(t('Sits on windows'), t('If you drop her on a window she stays on it and travels with it.'));
-    this.spontaneous = this._switch(t('Spontaneous gestures and poses'));
-    this.stance = el('select', { class: 'field-input' }, ...STANCES.map((item) => el('option', { value: item.value }, item.label)));
-    this.stance.value = readSetting('dc:stance', 'standard');
-    this.stance.addEventListener('change', () => {
-      writeSetting('dc:stance', this.stance.value);
-      this.companion?.sendToPet({ type: 'stance', value: this.stance.value });
-    });
+    this.spontaneous = this._switch(t('Spontaneous gestures'));
     this.dance = this._switch(t('Dance to Spotify'), t("When Spotify plays she listens to the PC's audio and moves in time."));
     this.vocals = this._switch(t('Vocals in her voice'), t('A "Hi!" when she greets, a giggle when petted: in the chosen voice.'));
     this.sleep = this._switch(t("Falls asleep if you don't use the PC"), t("First she's drowsy, then she sleeps; when you come back she wakes up and greets you."));
-    this.sfx = this._switch(t('Sound effects'), t('A "pop" when she appears, a thud when she lands, a chime for reminders.'));
+    this.sfx = this._switch(t('Sound effects'), t('Little sounds when she appears, when you touch her, when the menu opens, when an agent is done or waiting: never over her voice.'));
+    this.sfxVolume = this._slider(0.05, 1, 0.05, (value) => `${Math.round(value * 100)}%`);
+    this.sfxVolume.set(readSetting('dc:sfx-volume', 0.6));
+    this.sfxVolume.input.addEventListener('change', () => {
+      writeSetting('dc:sfx-volume', this.sfxVolume.value());
+      this.companion?.sendToPet({ type: 'sfx-volume', value: this.sfxVolume.value() });
+    });
     this.drowsyAfter = this._slider(1, 30, 1, (value) => `${value} min`);
     this.asleepAfter = this._slider(2, 60, 1, (value) => `${value} min`);
     this.drowsyAfter.set(readSetting('dc:sleep-drowsy', 2));
@@ -455,10 +401,10 @@ export class CharacterView {
       t('Behaviour'),
       this.onTop.node,
       this.windows.node,
-      this._row(t('How she stands'), this.stance, t('Her way of standing still: shy, cool, elegant, energetic...')),
       this.spontaneous.node,
       this.vocals.node,
       this.sfx.node,
+      this._row(t('Effects volume'), this.sfxVolume.node),
       this.sleep.node,
       this._row(t('Drowsy after'), this.drowsyAfter.node),
       this._row(t('Asleep after'), this.asleepAfter.node),
@@ -475,27 +421,17 @@ export class CharacterView {
           class: 'action-chip',
           type: 'button',
           onClick: () =>
-            this.companion?.sendToPet(
-              action.sprint
-                ? { type: 'sprint' }
-                : action.play
-                  ? { type: 'play', name: action.play }
-                  : { type: 'posture', value: action.posture },
-            ),
+            this.companion?.sendToPet(action.sprint ? { type: 'sprint' } : { type: 'play', name: action.play }),
         },
         icon(action.icon, 15),
         el('span', {}, action.label),
       ),
     );
-    // The "on request" .vrma clips (see clips.js) are added here when they arrive.
-    this.clipChips = el('div', { class: 'action-grid' });
-    this.app.on('hello', (message) => this._renderClipChips(message.animations ?? []));
     const actionsCard = this._card(
       'hand',
       t('Make her do something'),
       el('div', { class: 'action-grid' }, chips),
-      this.clipChips,
-      el('p', { class: 'hint' }, t("The sprint is the flame's; sitting and lying down are the 3D body's, when it's on the taskbar.")),
+      el('p', { class: 'hint' }, t('She sprints only when she is down on the taskbar.')),
     );
 
     // More --------------------------------------------------------------------
@@ -531,21 +467,6 @@ export class CharacterView {
     this.music = new MusicCard(this.app, (...args) => this._card(...args));
     // First her (the flame and her colour), then the voice and the rest.
     this.root.append(lookCard, voiceCard, this.memory.node, this.music.node, micCard, chatterCard, behaviourCard, actionsCard, languageCard, moreCard);
-  }
-
-  _renderClipChips(animations) {
-    const onDemand = animations.filter((item) => !/^(greet|wave|hello|idle|dance)/i.test(item.name));
-    this.clipChips.replaceChildren(
-      ...onDemand.map((item) => {
-        const name = item.name.replace(/\.vrma$/i, '');
-        return el(
-          'button',
-          { class: 'action-chip', type: 'button', onClick: () => this.companion?.sendToPet({ type: 'play-clip', name }) },
-          icon('play', 15),
-          el('span', {}, name),
-        );
-      }),
-    );
   }
 
   /**
