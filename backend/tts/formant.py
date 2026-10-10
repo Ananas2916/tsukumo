@@ -1,15 +1,15 @@
-"""Sintetizzatore di vocali a formanti: voce di servizio, zero dipendenze.
+"""Formant vowel synthesizer: a service voice, zero dependencies.
 
-Non sostituisce Kokoro (non e' intelligibile come una vera voce neurale), ma
-produce audio con formanti corrette per A/E/I/O/U e consonanti approssimate.
-Serve a due cose molto concrete:
+It doesn't replace Kokoro (it isn't intelligible like a real neural voice),
+but it produces audio with correct formants for A/E/I/O/U and approximate
+consonants. It serves two very concrete purposes:
 
-* provare l'intera catena (WebSocket -> audio -> visemi -> blendshape) senza
-  aver ancora scaricato i ~350 MB di pesi Kokoro;
-* avere un fallback funzionante se ONNX Runtime non parte sulla macchina.
+* trying the whole chain (WebSocket -> audio -> visemes -> blendshapes)
+  before downloading Kokoro's ~350 MB of weights;
+* having a working fallback if ONNX Runtime doesn't start on the machine.
 
-Si attiva con ``DC_TTS_ENGINE=formant`` o automaticamente quando Kokoro non e'
-disponibile e ``DC_TTS_FALLBACK=1``.
+It's turned on with ``DC_TTS_ENGINE=formant`` or automatically when Kokoro
+isn't available and ``DC_TTS_FALLBACK=1``.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from .base import Speech, TTSEngine
 
 SAMPLE_RATE = 24000
 
-#: Frequenze delle prime tre formanti (Hz) per ciascun viseme vocalico.
+#: Frequencies of the first three formants (Hz) for each vowel viseme.
 _FORMANTS: dict[str, tuple[float, float, float]] = {
     "a": (730.0, 1090.0, 2440.0),
     "e": (530.0, 1840.0, 2480.0),
@@ -30,15 +30,15 @@ _FORMANTS: dict[str, tuple[float, float, float]] = {
     "u": (300.0, 870.0, 2240.0),
 }
 
-#: Ampiezze relative delle tre formanti.
+#: Relative amplitudes of the three formants.
 _FORMANT_GAINS = (1.0, 0.55, 0.25)
-#: Larghezza di banda di ciascuna formante (Hz).
+#: Bandwidth of each formant (Hz).
 _FORMANT_BANDWIDTHS = (110.0, 160.0, 220.0)
 
-#: Durata "di riferimento" di un fonema con duration == 1.0.
+#: "Reference" length of a phoneme with duration == 1.0.
 _UNIT_DURATION = 0.115
 
-#: Profili di voce disponibili: (f0 media in Hz, vibrato in semitoni).
+#: Available voice profiles: (mean f0 in Hz, vibrato in semitones).
 _VOICE_PROFILES: dict[str, tuple[float, float]] = {
     "formant_female": (196.0, 0.22),
     "formant_male": (112.0, 0.18),
@@ -47,7 +47,7 @@ _VOICE_PROFILES: dict[str, tuple[float, float]] = {
 
 
 class FormantTTS(TTSEngine):
-    """Genera una voce sintetica 'robotica' ma con visemi perfettamente allineati."""
+    """Generates a "robotic" synthetic voice but with perfectly aligned visemes."""
 
     name = "formant"
 
@@ -92,7 +92,7 @@ class FormantTTS(TTSEngine):
 
         phones = phones_from_text(clean)
         chunks: list[np.ndarray] = []
-        phase = 0.0  # continuita' di fase tra fonemi: evita i "click"
+        phase = 0.0  # phase continuity between phonemes: avoids "clicks"
 
         for index, phone in enumerate(phones):
             duration = phone.duration * _UNIT_DURATION / rate
@@ -102,7 +102,7 @@ class FormantTTS(TTSEngine):
                 chunks.append(np.zeros(length, dtype=np.float32))
                 continue
 
-            # Leggera intonazione discendente sulla frase + vibrato.
+            # Slight falling intonation over the sentence + vibrato.
             progress = index / max(1, len(phones) - 1)
             f0 = base_f0 * (1.0 - 0.18 * progress)
             chunk, phase = self._render_phone(phone, length, f0, vibrato_depth, phase)
@@ -130,11 +130,11 @@ class FormantTTS(TTSEngine):
         vibrato_depth: float,
         phase: float,
     ) -> tuple[np.ndarray, float]:
-        """Sintesi additiva: armoniche pesate dall'inviluppo delle formanti."""
+        """Additive synthesis: harmonics weighted by the formants' envelope."""
         t = np.arange(length, dtype=np.float32) / self.sample_rate
         formants = _FORMANTS.get(phone.viseme, _FORMANTS["e"])
 
-        # Frequenza istantanea con vibrato, integrata per ottenere la fase.
+        # Instantaneous frequency with vibrato, integrated to get the phase.
         vibrato = 1.0 + vibrato_depth * 0.06 * np.sin(2.0 * np.pi * 5.2 * t)
         instantaneous = f0 * vibrato
         phases = phase + 2.0 * np.pi * np.cumsum(instantaneous) / self.sample_rate
@@ -146,11 +146,11 @@ class FormantTTS(TTSEngine):
             amplitude = 0.0
             for formant, gain, bandwidth in zip(formants, _FORMANT_GAINS, _FORMANT_BANDWIDTHS):
                 amplitude += gain * float(np.exp(-(((frequency - formant) / bandwidth) ** 2)))
-            amplitude /= k**0.7  # rolloff naturale della sorgente glottidale
+            amplitude /= k**0.7  # natural rolloff of the glottal source
             if amplitude > 1e-3:
                 wave += amplitude * np.sin(k * phases).astype(np.float32)
 
-        # Le consonanti (openness bassa) ricevono una componente di rumore.
+        # Consonants (low openness) get a noise component.
         if phone.openness < 0.45:
             noise = self._rng.standard_normal(length).astype(np.float32)
             noise_mix = float(np.clip(0.9 - phone.openness * 1.6, 0.05, 0.9))
@@ -163,7 +163,7 @@ class FormantTTS(TTSEngine):
 
 
 def _adsr(length: int) -> np.ndarray:
-    """Inviluppo attack/decay/sustain/release proporzionale alla durata."""
+    """Attack/decay/sustain/release envelope proportional to the length."""
     if length <= 1:
         return np.ones(length, dtype=np.float32)
     attack = max(1, int(length * 0.15))

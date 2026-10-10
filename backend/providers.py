@@ -1,12 +1,15 @@
-"""Registro dei provider (LLM, TTS, STT) e dei loro schemi di configurazione.
+"""Registry of the providers (LLM, TTS, STT) and their configuration schemas.
 
-Ogni provider si descrive da solo: come si chiama, cosa gli serve per
-funzionare, quanto costa e che tipo e' ogni campo. Il frontend legge questi
-schemi da ``GET /api/providers`` e **disegna il pannello da solo**, quindi
-aggiungere un motore nuovo non richiede di toccare una riga di interfaccia.
+Every provider describes itself: what it's called, what it needs to work,
+how much it costs and what type each field is. The frontend reads these
+schemas from ``GET /api/providers`` and **draws the panel by itself**, so
+adding a new engine doesn't require touching a line of interface.
 
-E' anche l'unico posto dove sta scritto quale variabile d'ambiente corrisponde
-a quale campo, cosi' ``.env`` e pannello non possono divergere.
+It's also the only place where it says which environment variable matches
+which field, so ``.env`` and panel can't diverge.
+
+Texts (labels, help, descriptions) are English; the frontend's catalog
+translates them (frontend/src/i18n/it.js).
 """
 
 from __future__ import annotations
@@ -16,41 +19,41 @@ from typing import Any, Literal
 
 Kind = Literal["llm", "tts", "stt"]
 
-#: Tipi di campo che il pannello sa disegnare.
+#: Field types the panel can draw.
 FieldType = Literal["text", "password", "url", "number", "bool", "select", "textarea"]
 
-#: Famiglie in cui il pannello raggruppa i motori.
-#:  - ``agent``: un agente vero, con memoria e strumenti suoi (OpenClaw,
-#:    Claude Code, Codex, Hermes...). Il companion ne e' la voce e la faccia.
-#:  - ``local``: un modello o una voce che gira sul tuo computer.
-#:  - ``cloud``: un servizio in rete, di solito con una chiave API.
-#:  - ``test``: motori di servizio per provare la catena senza installare nulla.
+#: Families the panel groups the engines into.
+#:  - ``agent``: a real agent, with memory and tools of its own (OpenClaw,
+#:    Claude Code, Codex, Hermes...). The companion is its voice and face.
+#:  - ``local``: a model or a voice running on your computer.
+#:  - ``cloud``: an online service, usually with an API key.
+#:  - ``test``: service engines to try the chain without installing anything.
 Category = Literal["agent", "local", "cloud", "test"]
 
-#: Quanto costa usarlo: ``free`` (gratis), ``freemium`` (piano gratuito, poi a
-#: consumo), ``paid`` (a consumo), ``subscription`` (incluso in un abbonamento).
+#: How much it costs to use: ``free``, ``freemium`` (free plan, then pay per
+#: use), ``paid`` (pay per use), ``subscription`` (included in a subscription).
 Pricing = Literal["free", "freemium", "paid", "subscription"]
 
 
 @dataclass(frozen=True)
 class ProviderField:
-    """Un singolo parametro di configurazione di un provider."""
+    """A single configuration parameter of a provider."""
 
-    #: Suffisso della variabile d'ambiente, senza ``DC_`` (es. ``OLLAMA_MODEL``).
+    #: Suffix of the environment variable, without ``DC_`` (e.g. ``OLLAMA_MODEL``).
     env: str
     label: str
     type: FieldType = "text"
     default: Any = ""
     placeholder: str = ""
     help: str = ""
-    #: Se vero, il pannello lo maschera e l'API non ne restituisce mai il valore.
+    #: If true, the panel masks it and the API never returns its value.
     secret: bool = False
-    #: Solo per ``type="select"``: ``[{"value": ..., "label": ...}, ...]``.
+    #: Only for ``type="select"``: ``[{"value": ..., "label": ...}, ...]``.
     options: tuple[dict[str, str], ...] = ()
-    #: Le opzioni arrivano dal motore stesso dopo una verifica (es. ``voices``:
-    #: le voci del tuo account ElevenLabs). Il campo resta scrivibile a mano.
+    #: The options come from the engine itself after a check (e.g. ``voices``:
+    #: the voices of your ElevenLabs account). The field stays writable by hand.
     source: str = ""
-    #: Campo per chi sa cosa sta facendo: il pannello lo nasconde sotto "Avanzate".
+    #: A field for those who know what they're doing: the panel hides it under "Advanced".
     advanced: bool = False
 
     def as_dict(self) -> dict[str, Any]:
@@ -61,28 +64,28 @@ class ProviderField:
 
 @dataclass(frozen=True)
 class ProviderSpec:
-    """Descrive un motore selezionabile, con tutto cio' che serve a configurarlo."""
+    """Describes a selectable engine, with everything needed to configure it."""
 
     id: str
     label: str
     kind: Kind
     description: str = ""
-    #: Una riga sola, per la scheda chiusa nel pannello.
+    #: A single line, for the closed card in the panel.
     tagline: str = ""
-    #: Gira interamente in locale, senza chiavi ne' rete verso terzi.
+    #: Runs entirely locally, with no keys or network to third parties.
     local: bool = True
     category: Category = "local"
     pricing: Pricing = "free"
-    #: Da proporre per primo a chi non sa cosa scegliere.
+    #: To offer first to whoever doesn't know what to choose.
     recommended: bool = False
-    #: Nomi alternativi accettati in ``DC_*_BACKEND`` per retrocompatibilita'.
+    #: Alternative names accepted in ``DC_*_BACKEND`` for backward compatibility.
     aliases: tuple[str, ...] = ()
     fields: tuple[ProviderField, ...] = ()
-    #: Requisiti non ovvi (pacchetti pip, pesi da scaricare, server da avviare).
+    #: Non-obvious requirements (pip packages, weights to download, servers to start).
     requires: tuple[str, ...] = ()
-    #: L'engine espone un elenco di voci selezionabili (solo TTS).
+    #: The engine exposes a list of selectable voices (TTS only).
     has_voices: bool = False
-    #: Dove si crea la chiave o si scarica il programma.
+    #: Where the key is created or the program downloaded.
     docs: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -104,7 +107,7 @@ class ProviderSpec:
 
 
 class Registry:
-    """Raccolta di ``ProviderSpec`` interrogabile per id o alias."""
+    """A collection of ``ProviderSpec`` that can be queried by id or alias."""
 
     def __init__(self, kind: Kind) -> None:
         self.kind = kind
@@ -113,14 +116,14 @@ class Registry:
 
     def register(self, spec: ProviderSpec) -> ProviderSpec:
         if spec.kind != self.kind:
-            raise ValueError(f"{spec.id!r} e' di tipo {spec.kind!r}, atteso {self.kind!r}")
+            raise ValueError(f"{spec.id!r} is of kind {spec.kind!r}, expected {self.kind!r}")
         self._specs[spec.id] = spec
         for alias in spec.aliases:
             self._aliases[alias] = spec.id
         return spec
 
     def resolve(self, name: str | None) -> str | None:
-        """Normalizza un id o alias nell'id canonico, o ``None`` se sconosciuto."""
+        """Normalizes an id or alias into the canonical id, or ``None`` if unknown."""
         if not name:
             return None
         key = name.strip().lower()
@@ -151,5 +154,5 @@ REGISTRIES: dict[str, Registry] = {
 
 
 def describe_all() -> dict[str, list[dict[str, Any]]]:
-    """Tutti gli schemi, raggruppati per tipo: e' il payload di /api/providers."""
+    """All the schemas, grouped by kind: it's the /api/providers payload."""
     return {kind: registry.as_list() for kind, registry in REGISTRIES.items()}

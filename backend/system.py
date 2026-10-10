@@ -1,8 +1,8 @@
-"""Stato del PC che il backend puo' leggere da solo: per ora la batteria.
+"""PC state the backend can read by itself: for now the battery.
 
-Niente dipendenze: su Windows ``GetSystemPowerStatus`` via ctypes, su Linux i
-file di ``/sys/class/power_supply``. Un fisso senza batteria, o un sistema che
-non sappiamo leggere, restituisce ``None``.
+No dependencies: on Windows ``GetSystemPowerStatus`` via ctypes, on Linux the
+``/sys/class/power_supply`` files. A desktop without a battery, or a system
+we can't read, returns ``None``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Battery:
     percent: int
-    #: Attaccato alla corrente (in carica o carico).
+    #: Plugged in (charging or charged).
     plugged: bool
 
 
@@ -47,15 +47,15 @@ def _windows_battery() -> Battery | None:
             return None
         flag = status.BatteryFlag & 0xFF
         percent = status.BatteryLifePercent & 0xFF
-        # 128 = nessuna batteria, 255 = stato sconosciuto.
+        # 128 = no battery, 255 = unknown state.
         if flag & 128 or flag == 255 or percent == 255:
             return None
         return Battery(percent=percent, plugged=(status.ACLineStatus & 0xFF) == 1)
-    except Exception:  # pragma: no cover - dipende dall'hardware
+    except Exception:  # pragma: no cover - depends on the hardware
         return None
 
 
-def _linux_battery() -> Battery | None:  # pragma: no cover - non gira sui PC di sviluppo
+def _linux_battery() -> Battery | None:  # pragma: no cover - doesn't run on the development PCs
     for supply in Path("/sys/class/power_supply").glob("BAT*"):
         try:
             percent = int((supply / "capacity").read_text().strip())

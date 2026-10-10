@@ -1,11 +1,11 @@
 /**
- * Markdown minimo e sicuro per le risposte in chat.
+ * Minimal, safe Markdown for chat replies.
  *
- * Gli agenti rispondono spesso in markdown ("**frieren** = ..."): letto ad
- * alta voce viene ripulito dal backend, ma in chat e' giusto vederlo
- * formattato. Supporta paragrafi, elenchi, blocchi di codice, `codice`,
- * **grassetto**, *corsivo* e [link](https://...). Costruisce nodi DOM: niente
- * innerHTML, quindi nessun HTML dell'agente viene mai interpretato.
+ * Agents often reply in markdown ("**frieren** = ..."): read aloud it is
+ * cleaned up by the backend, but in the chat it should look formatted.
+ * Supports paragraphs, lists, code blocks, `code`, **bold**, *italic* and
+ * [links](https://...). It builds DOM nodes: no innerHTML, so no HTML from
+ * the agent is ever interpreted.
  */
 
 const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_|\[[^\]]+\]\([^)\s]+\))/g;
@@ -47,7 +47,7 @@ function node(tag, text) {
   return element;
 }
 
-/** Testo markdown -> frammento DOM. */
+/** Markdown text -> DOM fragment. */
 export function renderMarkdown(source) {
   const root = document.createDocumentFragment();
   const lines = String(source ?? '').replace(/\r/g, '').split('\n');

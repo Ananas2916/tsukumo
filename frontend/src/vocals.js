@@ -1,23 +1,23 @@
 /**
- * Versetti: brevi esclamazioni con la voce scelta ("Hii!" quando saluta,
- * "Ehehe!" a una carezza, "Waah!" se cade).
+ * Vocals: short exclamations in the chosen voice ("Hii!" when she greets,
+ * "Ehehe!" when petted, "Waah!" when she falls).
  *
- * Il backend li sintetizza con il motore e la voce in uso, nella lingua della
- * voce, e li tiene in cache (`POST /api/vocal`). Qui si decide *quando*: mai
- * sopra una risposta, mai da muta, e non a ogni singolo click, altrimenti da
- * carini diventano fastidiosi.
+ * The backend synthesizes them with the engine and voice in use, in the
+ * voice's language, and caches them (`POST /api/vocal`). Here we decide
+ * *when*: never over a reply, never when muted, and not on every single
+ * click, or they go from cute to annoying.
  */
 
 import { apiUrl } from './config.js';
 import { readSetting, writeSetting } from './dom.js';
 
-/** Pausa minima fra due versetti qualsiasi, e fra due uguali (ms). */
+/** Minimum pause between any two vocals, and between two identical ones (ms). */
 const MIN_GAP_MS = 1200;
 const SAME_GAP_MS = 4000;
-/** Le reazioni ai tocchi non parlano sempre: sembrerebbe un giocattolo. */
+/** Reactions to touches don't always speak: it would feel like a toy. */
 const CHANCE = { pat: 0.75, poke: 0.6, lift: 0.7, fall: 0.8, pout: 1, dizzy: 1 };
 
-/** Saluto adatto all'ora: "Buongiorno!" la mattina, "Buonasera!" la sera. */
+/** A greeting that fits the hour: "Good morning!" in the morning, "Good evening!" at night. */
 export function greetingForNow(date = new Date()) {
   const hour = date.getHours();
   if (hour >= 5 && hour < 11) return 'morning';
@@ -30,7 +30,7 @@ export class Vocals {
   /**
    * @param {object} options
    * @param {{enqueue: Function, playing: boolean}} options.player
-   * @param {() => boolean} options.isQuiet vero se deve tacere (muta, pensa, parla)
+   * @param {() => boolean} options.isQuiet true if she must keep quiet (muted, thinking, speaking)
    */
   constructor({ player, isQuiet }) {
     this.player = player;
@@ -47,8 +47,8 @@ export class Vocals {
   }
 
   /**
-   * Chiede e suona un versetto. Non solleva mai: un versetto mancato non e'
-   * un problema, al massimo resta il gesto senza voce.
+   * Asks for a vocal and plays it. Never throws: a missed vocal is not a
+   * problem, at worst the gesture stays without a voice.
    * @param {string} event greet, morning, evening, night, welcome, pat, poke, lift, fall, pout, dizzy
    */
   async say(event) {
@@ -67,7 +67,7 @@ export class Vocals {
       });
       if (!response.ok) return false;
       const data = await response.json();
-      // Nel frattempo e' partita una risposta vera: il versetto non serve piu'.
+      // A real reply started in the meantime: the vocal is no longer needed.
       if (!data.ok || this.isQuiet()) return false;
       await this.player.enqueue(data.speech);
       return true;

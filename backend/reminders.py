@@ -1,23 +1,25 @@
-"""Timer, promemoria, sveglie e azioni programmate: la parte "Alexa" del companion.
+"""Timers, reminders, alarms and scheduled actions: the companion's "Alexa" part.
 
 "Timer di 5 minuti", "ricordami di chiamare Marco tra mezz'ora", "il 29/12
 alle 12 ricordami del dentista", "ogni giorno alle 9 ricordami di bere",
-"remind me to stretch in 20 minutes": le richieste piu' comuni (in italiano e
-in inglese) si capiscono qui, senza il cervello. Sono immediate e funzionano
-anche col risponditore offline.
+"remind me to stretch in 20 minutes": the most common requests (in Italian
+and in English) are understood here, without the brain. They're immediate
+and work with the offline answerer too.
 
-Tutto il resto lo capisce il cervello: gli si chiede (``action_directive``) di
-aggiungere in fondo alla risposta un'etichetta ``[[remind {...}]]``, che il
-pipeline toglie dal testo prima di leggerlo (``TagFilter``) e trasforma in un
-promemoria (``from_tag``). Con ``"do"`` al posto di ``"text"`` e' un'azione:
-all'ora giusta il testo va al cervello come un compito da svolgere.
+Everything else is understood by the brain: it's asked
+(``action_directive``) to add a ``[[remind {...}]]`` tag at the end of the
+reply, which the pipeline removes from the text before reading it
+(``TagFilter``) and turns into a reminder (``from_tag``). With ``"do"``
+instead of ``"text"`` it's an action: at the right time the text goes to
+the brain as a task to carry out.
 
-I promemoria stanno in ``state/reminders.json``: sopravvivono ai riavvii, e
-quelli scaduti mentre il PC era spento vengono detti al ritorno.
+Reminders live in ``state/reminders.json``: they survive restarts, and those
+that came due while the PC was off are said on return.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -34,25 +36,25 @@ logger = logging.getLogger(__name__)
 
 KINDS = ("timer", "reminder", "alarm", "task")
 
-#: Oltre questo ritardo un promemoria perso (PC spento) non si dice piu'.
+#: Beyond this delay a missed reminder (PC off) isn't said any more.
 MAX_LATE = 12 * 3600
 
 
 # ---------------------------------------------------------------------------
-# Modello e archivio
+# Model and store
 # ---------------------------------------------------------------------------
 @dataclass
 class Reminder:
     kind: str
-    #: Istante in cui scatta (``time.time()``).
+    #: When it goes off (``time.time()``).
     due: float
-    #: Cosa ricordare ("chiamare Marco"), cosa fare (``task``), o a cosa serve il timer.
+    #: What to remember ("chiamare Marco"), what to do (``task``), or what the timer is for.
     text: str = ""
-    #: "" oppure "daily".
+    #: "" or "daily".
     repeat: str = ""
-    #: Timer: durata totale in secondi ("il timer di 5 minuti e' finito").
+    #: Timer: total length in seconds ("the 5-minute timer is over").
     duration: float = 0.0
-    #: Lingua in cui e' stato chiesto: in quella si conferma e si avvisa.
+    #: The language it was asked in: it's confirmed and announced in that language.
     language: str = "it"
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     created: float = field(default_factory=time.time)
@@ -65,7 +67,7 @@ class Reminder:
 
 
 class ReminderStore:
-    """I promemoria in attesa, salvati su disco a ogni modifica."""
+    """The pending reminders, saved to disk at every change."""
 
     def __init__(self, path: Path | None) -> None:
         self.path = path
@@ -83,7 +85,7 @@ class ReminderStore:
                 if reminder.kind in KINDS:
                     self._items[reminder.id] = reminder
         except Exception as exc:
-            logger.warning("Promemoria non leggibili da %s: %s", self.path, exc)
+            logger.warning("Reminders unreadable from %s: %s", self.path, exc)
 
     def _save(self) -> None:
         if not self.path:
@@ -95,7 +97,7 @@ class ReminderStore:
             temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
             os.replace(temporary, self.path)
         except OSError as exc:
-            logger.warning("Promemoria non salvati in %s: %s", self.path, exc)
+            logger.warning("Reminders not saved in %s: %s", self.path, exc)
 
     def all(self) -> list[Reminder]:
         with self._lock:
@@ -126,11 +128,11 @@ class ReminderStore:
         return items[0].due if items else None
 
     def done(self, reminder: Reminder, now: float | None = None) -> None:
-        """E' scattato: si toglie, o si sposta al giorno dopo se si ripete."""
+        """It went off: it's removed, or moved to the next day if it repeats."""
         now = time.time() if now is None else now
         if reminder.repeat == "daily":
-            # Stessa ora *sul tuo orologio*, non 86400 secondi dopo: col cambio
-            # dell'ora una sveglia delle 7 scatterebbe alle 6 (o alle 8).
+            # The same time *on your clock*, not 86400 seconds later: with the
+            # daylight-saving change a 7 o'clock alarm would go off at 6 (or 8).
             moment = datetime.fromtimestamp(reminder.due)
             while moment.timestamp() <= now:
                 moment += timedelta(days=1)
@@ -142,22 +144,22 @@ class ReminderStore:
             self.remove(reminder.id)
 
     def latest(self, kinds: tuple[str, ...]) -> Reminder | None:
-        """L'ultimo creato fra quelli di questi tipi ("annulla il timer")."""
+        """The last one created among those of these kinds ("cancel the timer")."""
         items = [item for item in self.all() if item.kind in kinds]
         return max(items, key=lambda item: item.created) if items else None
 
 
 # ---------------------------------------------------------------------------
-# Numeri e durate
+# Numbers and durations
 # ---------------------------------------------------------------------------
 _NUMBERS = {
-    # italiano
+    # Italian
     "un": 1, "uno": 1, "una": 1, "un'": 1, "due": 2, "tre": 3, "quattro": 4, "cinque": 5, "sei": 6,
     "sette": 7, "otto": 8, "nove": 9, "dieci": 10, "undici": 11, "dodici": 12, "tredici": 13,
     "quattordici": 14, "quindici": 15, "sedici": 16, "diciassette": 17, "diciotto": 18,
     "diciannove": 19, "venti": 20, "venticinque": 25, "trenta": 30, "quaranta": 40,
     "quarantacinque": 45, "cinquanta": 50, "sessanta": 60, "novanta": 90,
-    # inglese
+    # English
     "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
     "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20,
     "twenty-five": 25, "thirty": 30, "forty": 40, "forty-five": 45, "fifty": 50, "sixty": 60, "ninety": 90,
@@ -168,6 +170,7 @@ _UNITS = {
     "m": 60, "min": 60, "mins": 60, "minuto": 60, "minuti": 60, "minute": 60, "minutes": 60,
     "h": 3600, "ora": 3600, "ore": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
     "giorno": 86400, "giorni": 86400, "day": 86400, "days": 86400,
+    "settimana": 604800, "settimane": 604800, "week": 604800, "weeks": 604800,
 }
 _UNIT = r"(?:" + "|".join(sorted(_UNITS, key=len, reverse=True)) + r")"
 _SPECIAL = (
@@ -176,7 +179,7 @@ _SPECIAL = (
     (r"un quarto d'?\s?ora|a quarter of an hour|quarter of an hour|quarter hour", 900),
 )
 _AMOUNT = r"(?<![\w'])" + _NUMBER + r"\s*" + _UNIT + r"\b"
-#: Una durata: "5 minuti", "un'ora e mezza", "2 ore e 10 minuti", "1h 30m".
+#: A duration: "5 minuti", "un'ora e mezza", "2 ore e 10 minuti", "1h 30m".
 _DURATION_CORE = (
     r"(?:" + "|".join(p for p, _ in _SPECIAL) + r"|"
     + _AMOUNT + r"(?:\s*(?:e|and|,)?\s*(?:mezz[ao]\b|" + _AMOUNT + r"))*)"
@@ -193,7 +196,7 @@ def _number(token: str) -> float:
 
 
 def parse_duration(text: str) -> float | None:
-    """Secondi di una durata scritta a parole o in cifre, ``None`` se non c'e'."""
+    """Seconds of a duration written in words or digits, ``None`` if there isn't one."""
     lowered = " ".join(text.lower().split())
     for pattern, seconds in _SPECIAL:
         if re.fullmatch(pattern, lowered):
@@ -209,7 +212,7 @@ def parse_duration(text: str) -> float | None:
 
 
 # ---------------------------------------------------------------------------
-# Orari e date
+# Times and dates
 # ---------------------------------------------------------------------------
 _MONTHS = {
     "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4, "maggio": 5, "giugno": 6, "luglio": 7,
@@ -231,7 +234,9 @@ _DATE = re.compile(
     r"|(?:\b(?:il|del|per il|on)\s+)?\b(?P<iso>\d{4}-\d{2}-\d{2})\b"
     r"|(?:\b(?:il|del|per il|on|on the|the)\s+)?\b(?P<d2>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?P<m2>" + _MONTH + r")\b(?:,?\s+(?P<y2>\d{4}))?"
     r"|(?:\bon\s+)?\b(?P<m3>" + _MONTH + r")\s+(?P<d3>\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(?P<y3>\d{4}))?"
-    r"|(?:\b(?:next|prossimo|this|questo|on)\s+)?\b(?P<wd>" + _WEEKDAY + r")\b(?:\s+prossimo)?",
+    r"|(?:\b(?:next|prossimo|this|questo|on)\s+)?\b(?P<wd>" + _WEEKDAY + r")\b(?:\s+prossimo)?"
+    # "il 31", "entro il 5": only the day of the month (after all the others, which have the month too).
+    r"|\b(?:il|del|per il|entro il|on the)\s+(?P<d4>\d{1,2})(?:st|nd|rd|th)?\b(?![/.:,]\d|\s*(?:%|°|ore\b|minut|second))",
     re.IGNORECASE,
 )
 
@@ -287,6 +292,16 @@ def _resolve_date(match: re.Match, today: date, lang: str) -> date | None:
         target = _WEEKDAYS[match.group("wd").lower()]
         ahead = (target - today.weekday()) % 7 or 7
         return today + timedelta(days=ahead)
+    if match.group("d4"):
+        # The next month that has that day: "il 31" at the end of September is 31 October.
+        day = int(match.group("d4"))
+        for ahead in range(13):
+            month, year = (today.month - 1 + ahead) % 12 + 1, today.year + (today.month - 1 + ahead) // 12
+            with contextlib.suppress(ValueError):
+                candidate = date(year, month, day)
+                if candidate >= today:
+                    return candidate
+        return None
     return None
 
 
@@ -324,7 +339,7 @@ def _resolve_time(match: re.Match, text: str) -> tuple[int, int] | None:
 
 
 def _first(pattern: re.Pattern, text: str, resolve) -> tuple[Any, re.Match] | tuple[None, None]:
-    """La prima occorrenza che ha davvero senso (non "12.30" come data)."""
+    """The first occurrence that really makes sense (not "12.30" as a date)."""
     for match in pattern.finditer(text):
         value = resolve(match)
         if value is not None:
@@ -333,7 +348,7 @@ def _first(pattern: re.Pattern, text: str, resolve) -> tuple[Any, re.Match] | tu
 
 
 # ---------------------------------------------------------------------------
-# Richieste in linguaggio naturale
+# Natural-language requests
 # ---------------------------------------------------------------------------
 @dataclass
 class Request:
@@ -357,11 +372,27 @@ class Request:
 
 _TIMER = re.compile(r"\btimer\b|\bcronometro\b|\bcountdown\b|\bconto alla rovescia\b", re.IGNORECASE)
 _ALARM = re.compile(r"\b(?:sveglia|svegliami|wake me(?: up)?|alarm)\b", re.IGNORECASE)
-#: Chiedono esplicitamente un promemoria: basta una data ("domani" = alle 9).
+#: They explicitly ask for a reminder: a date is enough ("domani" = at 9).
 _REMIND_STRONG = re.compile(
     r"\b(?:ricordami|ricordarmi|rammentami|avvisami|promemoria|remind me|reminder)\b", re.IGNORECASE
 )
-#: Lo lasciano intendere: serve un orario o un "tra quanto" preciso.
+#: "Aggiungi al calendario...", "mettimi in agenda...": the Agenda is these
+#: reminders, so it counts as much as a "ricordami".
+_AGENDA_ADD = re.compile(
+    r"\b(?:aggiung(?:i|ere|imi|ilo|ila|ili|ile)|mett(?:i|ere|imi|ilo|ila|ili|ile)|segn(?:a|are|ami|alo|ala|ali|ale)|"
+    r"inserisc(?:i|ilo|ila)|inserire|add|put|schedule)\b[^.?!\n]{0,60}?\b(?:agenda|calendario|calendar)\b",
+    re.IGNORECASE,
+)
+#: "Aggiungi il 31 cinema con Giulia", "segna giovedì dentista": at the start of the sentence it's an order.
+_ADD_FIRST = re.compile(
+    r"^\s*(?:(?:ehi|tsukumo|per favore|puoi|potresti|mi)[\s,]+)*"
+    r"(?:aggiungi|aggiungimi|segna|segnami|segnati|annota|annotami|appunta|appuntami|aggiungere|segnare|annotare|"
+    r"appuntare|add|note down|put)\b",
+    re.IGNORECASE,
+)
+#: ...but "come aggiungo un evento al calendario domani?" is a question, not a request.
+_QUESTION = re.compile(r"^\s*(?:come|perch[eé]|dove|how|why|where)\b", re.IGNORECASE)
+#: They imply it: a precise time or "in how long" is needed.
 _REMIND_WEAK = re.compile(
     r"\b(?:dimmi|fammi sapere|devo|dovrò|dovro|ho da|let me know|tell me)\b|\bI (?:have to|need to|must|gotta)\b",
     re.IGNORECASE,
@@ -372,7 +403,8 @@ _ENGLISH_HINTS = re.compile(
     re.IGNORECASE,
 )
 _ITALIAN_HINTS = re.compile(
-    r"\b(?:ricordami|tra|fra|minut[oi]|or[ae]|second[oi]|domani|alle|sveglia|devo|dimmi|di|ogni giorno|oggi|stasera)\b",
+    r"\b(?:ricordami|tra|fra|minut[oi]|or[ae]|second[oi]|domani|alle|sveglia|devo|dimmi|di|ogni giorno|oggi|stasera|"
+    r"calendario|aggiungi)\b",
     re.IGNORECASE,
 )
 _DAILY = re.compile(
@@ -382,14 +414,17 @@ _DAILY = re.compile(
 _COMMAND_WORDS_IT = re.compile(
     r"\b(?:ricordami|ricordarmi|rammentami|avvisami|promemoria|dimmi|fammi sapere|timer|cronometro|sveglia|svegliami|"
     r"conto alla rovescia|per favore|perfavore|grazie|puoi|potresti|metti|mettimi|imposta|impostami|fai partire|avvia|"
-    r"crea|segna|segnati)\b",
+    r"crea|segna|segnati|segnalo|segnala|segnami|aggiungi|aggiungimi|aggiungilo|aggiungila|mettilo|mettila|inserisci|"
+    r"annota|annotami|appunta|appuntami|aggiungere|segnare|annotare|appuntare|un evento|(?:all'|in |nell'|sull')agenda|(?:al|nel|in|sul) calendario)\b",
     re.IGNORECASE,
 )
 _COMMAND_WORDS_EN = re.compile(
     r"\b(?:please|can you|could you|would you|set(?: me)?(?: up)?|start|create|add|remind me|reminder|let me know|tell me|"
-    r"timer|alarm|wake me(?: up)?|countdown)\b",
+    r"timer|alarm|wake me(?: up)?|countdown|put|schedule|an event|(?:to|in|on) (?:my|the) (?:agenda|calendar))\b",
     re.IGNORECASE,
 )
+#: Between two days of a list: "giovedì, venerdì e sabato", "domani and Friday".
+_LIST_GAP = re.compile(r"[\s,/&]*(?:(?:e|ed|and|poi)\b[\s,]*)?", re.IGNORECASE)
 _LEADING_IT = re.compile(r"^(?:(?:di|a|ad|per|un|uno|una|e|poi|,|:|-)\s+)+", re.IGNORECASE)
 _LEADING_EN = re.compile(r"^(?:(?:to|me|for|of|and|then|a|an|,|:|-)\s+)+", re.IGNORECASE)
 _TRAILING = re.compile(r"\s+(?:di|per|a|alle|e|to|for|at|and|the|il|la)$", re.IGNORECASE)
@@ -401,22 +436,39 @@ def detect_language(text: str) -> str:
     return "en" if english > italian else "it"
 
 
-def parse_request(text: str, now: datetime | None = None) -> Request | None:
-    """Una richiesta di timer, promemoria o sveglia, se il testo lo e'."""
+def _part_of_day_span(raw: str, time_match: re.Match) -> list[tuple[int, int]]:
+    """ "alle 9 di sera": the words after the time belong to the time, not to the reminder text."""
+    part = _PART_OF_DAY.search(raw[time_match.end() : time_match.end() + 30])
+    return [(time_match.end() + part.start(), time_match.end() + part.end())] if part else []
+
+
+def parse_request(text: str, now: datetime | None = None, explicit: bool = False) -> Request | None:
+    """A timer, reminder or alarm request, if the text is one (the first, if there are several days)."""
+    requests = parse_requests(text, now, explicit)
+    return requests[0] if requests else None
+
+
+def parse_requests(text: str, now: datetime | None = None, explicit: bool = False) -> list[Request]:
+    """Like ``parse_request``, but "giovedì, venerdì e sabato alle 9" makes three reminders.
+
+    ``explicit``: the text is already a request (the Agenda's field), so a date
+    is enough, as after a "ricordami".
+    """
     now = (now or datetime.now()).replace(microsecond=0)
     raw = " ".join(text.strip().split())
     if not raw or len(raw) > 300:
-        return None
+        return []
     lang = detect_language(raw)
     is_timer = bool(_TIMER.search(raw))
     is_alarm = bool(_ALARM.search(raw)) and not is_timer
-    strong = bool(_REMIND_STRONG.search(raw))
+    asked = bool(_AGENDA_ADD.search(raw) or _ADD_FIRST.match(raw)) and not _QUESTION.match(raw)
+    strong = explicit or bool(_REMIND_STRONG.search(raw)) or asked
     weak = bool(_REMIND_WEAK.search(raw))
     if not (is_timer or is_alarm or strong or weak):
-        return None
+        return []
 
     spans: list[tuple[int, int]] = []
-    due: datetime | None = None
+    dues: list[datetime] = []
     duration = 0.0
 
     relative = _RELATIVE.search(raw)
@@ -424,15 +476,23 @@ def parse_request(text: str, now: datetime | None = None) -> Request | None:
         duration = seconds
         due = now + timedelta(seconds=seconds)
         spans.append(relative.span())
-    if is_timer and due is None:
+        # "tra 2 giorni alle 10": the "tra" gives the day, the time gives the hour.
+        if not is_timer and seconds % 86400 == 0:
+            clock, time_match = _first(_TIME, raw, lambda match: _resolve_time(match, raw))
+            if clock is not None and (time_match.start() >= relative.end() or time_match.end() <= relative.start()):
+                due = due.replace(hour=clock[0], minute=clock[1], second=0, microsecond=0)
+                spans.append(time_match.span())
+                spans.extend(_part_of_day_span(raw, time_match))
+        dues = [due]
+    if is_timer and not dues:
         # "timer di 5 minuti", "set a timer for 10 minutes", "timer 25 min"
         found = _DURATION.search(raw)
         if found and (seconds := parse_duration(found.group("dur"))):
             duration = seconds
-            due = now + timedelta(seconds=seconds)
+            dues = [now + timedelta(seconds=seconds)]
             spans.append(found.span())
-    if is_timer and due is None:
-        return None
+    if is_timer and not dues:
+        return []
 
     repeat = ""
     daily = _DAILY.search(raw)
@@ -440,37 +500,56 @@ def parse_request(text: str, now: datetime | None = None) -> Request | None:
         repeat = "daily"
         spans.append(daily.span())
 
-    if due is None:
+    if not dues:
         clock, time_match = _first(_TIME, raw, lambda match: _resolve_time(match, raw))
-        day, date_match = _first(_DATE, raw, lambda match: _resolve_date(match, now.date(), lang))
-        if clock is None and (day is None or not (strong or is_alarm)):
-            return None
+        days = _date_list(raw, now.date(), lang)
+        if clock is None and (not days or not (strong or is_alarm)):
+            return []
         if time_match:
             spans.append(time_match.span())
-            part = _PART_OF_DAY.search(raw[time_match.end() : time_match.end() + 30])
-            if part:
-                spans.append((time_match.end() + part.start(), time_match.end() + part.end()))
-        if date_match:
-            spans.append(date_match.span())
+            spans.extend(_part_of_day_span(raw, time_match))
+        spans.extend(match.span() for _, match in days)
         hour, minute = clock if clock else (9, 0)
-        if date_match and re.fullmatch(r"stasera|tonight", date_match.group(0).strip(), re.IGNORECASE) and hour < 12:
+        if days and re.fullmatch(r"stasera|tonight", days[0][1].group(0).strip(), re.IGNORECASE) and hour < 12:
             hour += 12
-        if day is None:
+        if not days:
             due = now.replace(hour=hour, minute=minute, second=0)
-            if due <= now:
-                due += timedelta(days=1)
+            dues = [due + timedelta(days=1) if due <= now else due]
         else:
-            due = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute)
-            if due <= now:
-                return None
+            # Every day already repeats by itself: the first is enough.
+            listed = days[:1] if repeat else days
+            moments = {datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute) for day, _ in listed}
+            dues = sorted(moment for moment in moments if moment > now)
+            if not dues:
+                return []
 
     kind = "timer" if is_timer else "alarm" if is_alarm else "reminder"
     left = _leftover(raw, spans, lang)
-    return Request(kind=kind, due=due, text=left, repeat=repeat, duration=duration if kind == "timer" else 0.0, language=lang)
+    return [
+        Request(kind=kind, due=due, text=left, repeat=repeat, duration=duration if kind == "timer" else 0.0, language=lang)
+        for due in dues
+    ]
+
+
+def _date_list(raw: str, today: date, lang: str) -> list[tuple[date, re.Match]]:
+    """The first valid date, plus those listed right after ("giovedì, venerdì e sabato").
+
+    A date further on in the sentence is part of the thing to remember
+    ("domani ricordami di preparare la riunione di lunedì"), not of the list.
+    """
+    found: list[tuple[date, re.Match]] = []
+    for match in _DATE.finditer(raw):
+        value = _resolve_date(match, today, lang)
+        if value is None:
+            continue
+        if found and not _LIST_GAP.fullmatch(raw[found[-1][1].end() : match.start()]):
+            break
+        found.append((value, match))
+    return found
 
 
 def _leftover(raw: str, spans: list[tuple[int, int]], lang: str) -> str:
-    """Quello che resta tolti orari, date e parole di comando: la cosa da ricordare."""
+    """What's left once times, dates and command words are removed: the thing to remember."""
     chars = list(raw)
     for start, end in spans:
         for index in range(start, end):
@@ -478,7 +557,7 @@ def _leftover(raw: str, spans: list[tuple[int, int]], lang: str) -> str:
     text = "".join(chars)
     text = (_COMMAND_WORDS_EN if lang == "en" else _COMMAND_WORDS_IT).sub(" ", text)
     if lang == "it":
-        # "mi" di "ricordami"/"mettimi" gia' tolto; qui quello isolato ("mi ricordi di...").
+        # "mi" of "ricordami"/"mettimi" already removed; here the standalone one ("mi ricordi di...").
         text = re.sub(r"^\s*mi\s+", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"[?!.;]+", " ", text)
     text = " ".join(text.split()).strip(" ,:-")
@@ -490,16 +569,16 @@ def _leftover(raw: str, spans: list[tuple[int, int]], lang: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Etichette del cervello: [[remind {...}]]
+# The brain's tags: [[remind {...}]]
 # ---------------------------------------------------------------------------
 _TAG = re.compile(r"\[\[\s*remind\s+(\{.*?\})\s*\]\]", re.DOTALL)
 
 
 class TagFilter:
-    """Toglie le etichette ``[[...]]`` dal testo che arriva a pezzi.
+    """Removes the ``[[...]]`` tags from text that arrives in pieces.
 
-    Il cervello puo' spezzarle fra un frammento e l'altro: quello che potrebbe
-    essere l'inizio di un'etichetta resta da parte finche' non si capisce.
+    The brain may split them between one chunk and the next: whatever could be
+    the start of a tag is kept aside until it's clear.
     """
 
     def __init__(self) -> None:
@@ -529,13 +608,13 @@ class TagFilter:
         return "".join(visible)
 
     def flush(self) -> str:
-        """Fine della risposta: un'etichetta mai chiusa si butta, un "[" isolato no."""
+        """End of the reply: a tag never closed is dropped, a lone "[" isn't."""
         rest, self._pending = self._pending, ""
         return rest if rest == "[" else ""
 
 
 def from_tag(tag: str, now: datetime | None = None, language: str = "it") -> Reminder | None:
-    """``[[remind {"at": "...", "text": "..."}]]`` -> promemoria (o ``None`` se non vale)."""
+    """``[[remind {"at": "...", "text": "..."}]]`` -> reminder (or ``None`` if it isn't valid)."""
     now = now or datetime.now()
     found = _TAG.search(tag)
     if not found:
@@ -572,20 +651,27 @@ def from_tag(tag: str, now: datetime | None = None, language: str = "it") -> Rem
 
 
 def action_directive(now: datetime | None = None) -> str:
-    """Cosa dire al cervello perche' possa programmare promemoria e azioni."""
+    """What to tell the brain so it can schedule reminders and actions."""
     now = now or datetime.now()
     stamp = now.strftime("%A %Y-%m-%d %H:%M")
+    example = now + timedelta(days=1)
     return (
-        f"Local time: {stamp}. If the user asks you to remind them of something, to set a timer or an alarm, "
-        "or to do something at a later time, confirm in one short sentence and append at the very end "
-        '[[remind {"at": "YYYY-MM-DDTHH:MM", "text": "what to remind"}]] '
-        '(use "in": seconds instead of "at" for relative times, "do": "the task" instead of "text" for '
-        'something you must do yourself then, "repeat": "daily" if it repeats). Never read or mention the tag.'
+        f"Local time: {stamp}. The user's agenda (the calendar in Tsukumo's panel, also on their phone) is made "
+        "of these reminders, and this tag is how you add to it: never say you have no access to their calendar, "
+        "and don't look for another calendar tool. If the user asks you to remind them of something, to set a "
+        "timer or an alarm, to put an event, appointment or deadline in their agenda or calendar, or to do "
+        "something at a later time, confirm in one short sentence and append at the very end "
+        '[[remind {"at": "YYYY-MM-DDTHH:MM", "text": "what to remind"}]], one tag per day when it spans several days '
+        '(no time given: 09:00; use "in": seconds instead of "at" for relative times, "do": "the task" instead of "text" for '
+        'something you must do yourself then, "repeat": "daily" if it repeats). Never read or mention the tag. '
+        f'Example: "aggiungi domani cinema con Giulia" -> reply "Segnato per domani!" and append '
+        f'[[remind {{"at": "{example:%Y-%m-%d}T09:00", "text": "cinema con Giulia"}}]]. Writing the tag IS adding it to '
+        "their calendar: it appears on the PC and on the phone at once, so never say you can't."
     )
 
 
 # ---------------------------------------------------------------------------
-# Frasi: conferme, avvisi, comandi
+# Phrases: confirmations, notices, commands
 # ---------------------------------------------------------------------------
 _MONTH_NAMES = {
     "it": ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
@@ -598,7 +684,7 @@ _UNIT_WORDS = {
 
 
 def _lang(language: str | None) -> str:
-    """Le frasi ci sono in italiano e in inglese: le altre lingue usano l'inglese."""
+    """The phrases exist in Italian and English: the other languages use English."""
     return "it" if language == "it" else "en"
 
 
@@ -622,7 +708,7 @@ def speak_duration(seconds: float, lang: str) -> str:
 
 
 def speak_when(due: float, lang: str, now: datetime | None = None) -> str:
-    """Quando scatta, detto a voce: "tra 20 minuti", "domani alle 9:00", "il 29 dicembre alle 12:00"."""
+    """When it goes off, said aloud: "in 20 minutes", "tomorrow at 9:00", "on 29 December at 12:00"."""
     lang = _lang(lang)
     now = now or datetime.now()
     moment = datetime.fromtimestamp(due)
@@ -652,7 +738,7 @@ _SWAP = {
 
 
 def second_person(text: str, lang: str) -> str:
-    """"devo chiamare mia madre" -> "devi chiamare tua madre" (il promemoria lo dice lei a te)."""
+    """"devo chiamare mia madre" -> "devi chiamare tua madre" (she says the reminder to you)."""
     table = _SWAP[_lang(lang)]
 
     def swap(match: re.Match) -> str:
@@ -664,7 +750,7 @@ def second_person(text: str, lang: str) -> str:
 
 
 def _about(text: str, lang: str) -> str:
-    """Come si attacca la cosa da ricordare: "di chiamare", "del dentista", "che devi..."."""
+    """How the thing to remember is attached: "di chiamare", "del dentista", "che devi..."."""
     if not text:
         return ""
     if lang == "en":
@@ -679,7 +765,7 @@ def _about(text: str, lang: str) -> str:
 
 
 def describe(reminder: Reminder) -> str:
-    """Una riga per il pannello: "Timer 5 minuti", "Promemoria: chiamare Marco"."""
+    """A line for the panel: "Timer 5 minutes", "Reminder: call Marco"."""
     lang = _lang(reminder.language)
     text = reminder.text
     if reminder.kind == "timer":
@@ -694,7 +780,7 @@ def describe(reminder: Reminder) -> str:
 
 
 def confirmation(reminder: Reminder, now: datetime | None = None) -> str:
-    """Cosa risponde quando ha preso nota."""
+    """What she answers when she has taken note."""
     lang = _lang(reminder.language)
     when = speak_when(reminder.due, lang, now)
     about = _about(second_person(reminder.text, lang), lang)
@@ -721,8 +807,37 @@ def confirmation(reminder: Reminder, now: datetime | None = None) -> str:
     return f"Va bene, {when} ti ricordo{about}."
 
 
+_WEEKDAY_NAMES = {
+    "it": ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"],
+    "en": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+}
+
+
+def confirmations(reminders: list[Reminder], now: datetime | None = None) -> str:
+    """A single confirmation for several days: "Okay, Thursday 8, Friday 9 and Saturday 10 at 09:00 I'll remind you...".
+
+    They all come from the same sentence: same time, same thing to remember.
+    """
+    if len(reminders) == 1:
+        return confirmation(reminders[0], now)
+    first = reminders[0]
+    lang = _lang(first.language)
+    moments = [datetime.fromtimestamp(item.due) for item in reminders]
+    days = [f"{_WEEKDAY_NAMES[lang][moment.weekday()]} {moment.day}" for moment in moments]
+    joined = ", ".join(days[:-1]) + _UNIT_WORDS[lang][4] + days[-1]
+    clock = moments[0].strftime("%H:%M")
+    about = _about(second_person(first.text, lang), lang)
+    if lang == "en":
+        if first.kind == "alarm":
+            return f"Alarms set for {joined} at {clock}."
+        return f"Sure, I'll remind you{about} on {joined} at {clock}."
+    if first.kind == "alarm":
+        return f"Sveglie impostate {joined} alle {clock}."
+    return f"Va bene, {joined} alle {clock} ti ricordo{about}."
+
+
 def announcement(reminder: Reminder, late: float = 0.0) -> str:
-    """Cosa dice quando scatta."""
+    """What she says when it goes off."""
     lang = _lang(reminder.language)
     about = _about(second_person(reminder.text, lang), lang)
     clock = datetime.fromtimestamp(reminder.due).strftime("%H:%M")
@@ -745,7 +860,7 @@ def announcement(reminder: Reminder, late: float = 0.0) -> str:
 
 
 def task_prompt(reminder: Reminder) -> str:
-    """Il compito programmato, come messaggio per il cervello."""
+    """The scheduled task, as a message for the brain."""
     if reminder.language == "en":
         return f"(Scheduled task, it's time now) {reminder.text}. Do it and tell me briefly how it went."
     return f"(Azione programmata, è il momento) {reminder.text}. Falla e dimmi in breve com'è andata."
@@ -766,7 +881,7 @@ _LIST = re.compile(
 
 
 def command_reply(text: str, store: ReminderStore, now: datetime | None = None) -> tuple[str, bool] | None:
-    """Annulla, "quanto manca", elenco. ``(risposta, cambiato)`` o ``None`` se non e' un comando."""
+    """Cancel, "how long left", list. ``(reply, changed)`` or ``None`` if it isn't a command."""
     now = now or datetime.now()
     lang = detect_language(text)
     cancel = _CANCEL.search(text)

@@ -1,14 +1,14 @@
-# Fine riga normalizzati a LF nel repository: il progetto gira su Windows,
-# macOS e Linux, e senza questo ogni sistema riscriverebbe i file dell'altro
-# facendo apparire modificate righe che nessuno ha toccato.
+# Line endings normalized to LF in the repository: the project runs on Windows,
+# macOS and Linux, and without this each system would rewrite the other's files,
+# making lines nobody touched look modified.
 * text=auto eol=lf
 
-# Gli script di Windows vogliono CRLF per funzionare davvero.
+# Windows scripts want CRLF to really work.
 *.ps1 text eol=crlf
 *.vbs text eol=crlf
 *.bat text eol=crlf
 
-# Binari: mai toccare.
+# Binaries: never touch.
 *.onnx binary
 *.bin  binary
 *.vrm  binary

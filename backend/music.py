@@ -1,23 +1,24 @@
-"""Musica: Spotify collegato, cosa stai ascoltando e cosa ti piace.
+"""Music: Spotify connected, what you're listening to and what you like.
 
-Il companion e' il corpo, non il cervello: qui si vede la musica e si premono
-i tasti. Cosa rispondere a "che genere e'?" e quali brani sono "simili" lo
-decide l'agente, qualunque sia. Gli si racconta cosa suona e cosa sappiamo dei
-tuoi gusti; lui chiede di mettere musica con un'etichetta ``[[music: ...]]`` in
-fondo alla risposta, come per i promemoria.
+The companion is the body, not the brain: here the music is seen and the
+buttons are pressed. What to answer to "what genre is this?" and which
+tracks are "similar" is decided by the agent, whichever it is. It's told
+what's playing and what we know of your taste; it asks for music with a
+``[[music: ...]]`` tag at the end of the reply, as for reminders.
 
-* ``SpotifyClient``: OAuth con PKCE (nessun segreto: basta il Client ID di
-  un'app creata dall'utente su developer.spotify.com) e le poche API che servono.
-* ``TasteProfile``: i gusti imparati qui (brani ascoltati fino in fondo, saltati,
-  "mi piace") piu' gli artisti che Spotify dice che ascolti di piu'.
-* ``MusicService``: guarda cosa suona ogni 20 secondi (mai dentro
-  ``/api/health``), scrive il contesto per il cervello, esegue le etichette e i
-  comandi al volo ("metti in pausa la musica").
+* ``SpotifyClient``: OAuth with PKCE (no secret: the Client ID of an app
+  created by the user on developer.spotify.com is enough) and the few APIs
+  needed.
+* ``TasteProfile``: the taste learned here (tracks listened to the end,
+  skipped, "I like it") plus the artists Spotify says you listen to most.
+* ``MusicService``: looks at what's playing every 20 seconds (never inside
+  ``/api/health``), writes the context for the brain, runs the tags and the
+  quick commands ("pause the music").
 
-Dal 2024 Spotify non da' piu' raccomandazioni ne' artisti correlati alle app
-nuove: i brani simili li sceglie il cervello, qui si cercano e si mettono.
-Scegliere cosa suonare richiede Premium; pausa e cambio brano ripiegano sui
-tasti multimediali di Windows, che vanno con qualunque account e lettore.
+Since 2024 Spotify no longer gives recommendations or related artists to new
+apps: the similar tracks are chosen by the brain, here they're searched and
+played. Choosing what to play needs Premium; pause and skip fall back on
+Windows' media keys, which work with any account and player.
 """
 
 from __future__ import annotations
@@ -51,44 +52,63 @@ SCOPES = (
     "user-top-read user-library-modify"
 )
 
-#: Ogni quanto si guarda cosa suona (per imparare cosa ascolti e cosa salti).
+#: How often we look at what's playing (to learn what you listen to and what you skip).
 POLL_SECONDS = 20.0
-#: Dopo una domanda sulla musica, per quanti turni il cervello resta "in tema":
-#: "vorrei sentirne di simili" non nomina la musica, ma ne parla.
+#: After a question about music, for how many turns the brain stays "on topic":
+#: "I'd like to hear similar ones" doesn't name music, but it's about it.
 FOLLOW_TURNS = 2
-#: Gli artisti piu' ascoltati secondo Spotify si rileggono una volta al giorno.
+#: The most-listened artists according to Spotify are read again once a day.
 TOP_REFRESH_SECONDS = 24 * 3600
-#: Quanti brani al massimo per un'etichetta "play" o "queue".
+#: At most how many tracks for a "play" or "queue" tag.
 MAX_TRACKS = 10
 
 OnChange = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class SpotifyError(RuntimeError):
-    """Spotify ha detto di no; ``reason`` e' il codice di Spotify (PREMIUM_REQUIRED...)."""
+    """Spotify said no; ``reason`` is Spotify's code (PREMIUM_REQUIRED...)."""
 
     def __init__(self, message: str, reason: str = "", status: int = 0) -> None:
         super().__init__(message)
         self.reason = reason
         self.status = status
 
-    def explain(self) -> str:
-        """Una frase da dire all'utente."""
+    def explain(self, language: str = "en") -> str:
+        """A sentence to say to the user, in ``language`` ("it" or anything else for English)."""
+        it = language.startswith("it")
         if self.reason == "PREMIUM_REQUIRED":
-            return "Per scegliere cosa suonare Spotify vuole un account Premium: senza, posso solo mettere in pausa e cambiare brano."
+            if it:
+                return "Per scegliere cosa suonare Spotify vuole un account Premium: senza, posso solo mettere in pausa e cambiare brano."
+            return "To choose what to play Spotify wants a Premium account: without it, I can only pause and skip."
         if self.reason in ("NO_ACTIVE_DEVICE", "NO_DEVICE"):
-            return "Apri Spotify, qui o sul telefono: non c'è nessun lettore acceso."
+            return "Apri Spotify, qui o sul telefono: non c'è nessun lettore acceso." if it else "Open Spotify, here or on the phone: no player is on."
         if self.reason == "NOT_CONNECTED":
-            return "Spotify non è collegato: collegalo dal pannello, nella scheda Personaggio."
+            if it:
+                return "Spotify non è collegato: collegalo dal pannello, nella scheda Personaggio."
+            return "Spotify is not connected: connect it from the panel, in the Character tab."
         if self.status == 429:
-            return "Spotify mi chiede di rallentare: riprova tra poco."
+            return "Spotify mi chiede di rallentare: riprova tra poco." if it else "Spotify is asking me to slow down: try again in a bit."
         if self.reason in ("NOT_FOUND", "NOTHING", "NO_KEYS", "BAD_STATE", "NOT_CONFIGURED"):
-            return str(self)  # messaggi nostri, gia' in parole semplici
-        return f"Spotify non collabora: {self}"
+            # our own messages, already in plain words
+            return _ITALIAN.get(str(self), str(self)) if it else str(self)
+        return f"Spotify non collabora: {self}" if it else f"Spotify isn't cooperating: {self}"
+
+
+#: Our own error messages in Italian, for ``explain`` (the panel translates them by itself).
+_ITALIAN = {
+    "Your Spotify app's Client ID is missing.": "Manca il Client ID della tua app Spotify.",
+    "Request expired: press \"Connect Spotify\" again.": "Richiesta scaduta: premi di nuovo «Collega Spotify».",
+    "Spotify must be connected again from the panel.": "Spotify va ricollegato dal pannello.",
+    "Spotify is not connected.": "Spotify non è collegato.",
+    "I didn't find any of the chosen tracks on Spotify.": "Non ho trovato su Spotify nessuno dei brani scelti.",
+    "Nothing is playing.": "Non sta suonando niente.",
+    "No player is on.": "Nessun lettore acceso.",
+    "I can't press the media keys here.": "Qui non posso premere i tasti multimediali.",
+}
 
 
 # ---------------------------------------------------------------------------
-# Brani
+# Tracks
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Track:
@@ -99,7 +119,7 @@ class Track:
     artist_ids: tuple[str, ...] = ()
     album: str = ""
     year: str = ""
-    #: Durata in secondi.
+    #: Length in seconds.
     duration: float = 0.0
 
     @property
@@ -135,7 +155,7 @@ class Track:
 class NowPlaying:
     track: Track | None
     playing: bool
-    #: Secondi dall'inizio del brano.
+    #: Seconds from the start of the track.
     progress: float = 0.0
 
 
@@ -143,7 +163,7 @@ class NowPlaying:
 # Spotify
 # ---------------------------------------------------------------------------
 def _save_json(path: Path | None, data: dict[str, Any]) -> None:
-    """Scrive in un file temporaneo e poi lo sostituisce: mai un file a meta'."""
+    """Writes to a temporary file and then replaces: never a half-written file."""
     if not path:
         return
     try:
@@ -152,7 +172,7 @@ def _save_json(path: Path | None, data: dict[str, Any]) -> None:
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(temporary, path)
     except OSError as exc:
-        logger.warning("File non salvato (%s): %s", path, exc)
+        logger.warning("File not saved (%s): %s", path, exc)
 
 
 def _pkce_pair() -> tuple[str, str]:
@@ -162,7 +182,7 @@ def _pkce_pair() -> tuple[str, str]:
 
 
 class SpotifyClient:
-    """Il collegamento a Spotify: token in ``state/spotify.json``, mai nel ``.env``."""
+    """The connection to Spotify: tokens in ``state/spotify.json``, never in the ``.env``."""
 
     def __init__(self, path: Path | None) -> None:
         self.path = path
@@ -172,10 +192,10 @@ class SpotifyClient:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
                 self.data.update({k: str(v) for k, v in loaded.items() if k in self.data and v})
             except (OSError, ValueError) as exc:
-                logger.warning("Collegamento a Spotify non leggibile da %s: %s", path, exc)
+                logger.warning("Spotify connection unreadable from %s: %s", path, exc)
         self._access = ""
         self._expires = 0.0
-        #: state -> code_verifier dell'autorizzazione in corso (una sola alla volta).
+        #: state -> code_verifier of the authorization in progress (one at a time).
         self._pending: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._http: httpx.AsyncClient | None = None
@@ -195,16 +215,16 @@ class SpotifyClient:
     def set_client_id(self, client_id: str) -> None:
         client_id = client_id.strip()
         if not re.fullmatch(r"[0-9a-fA-F]{32}", client_id):
-            raise ValueError("Il Client ID di Spotify è fatto di 32 caratteri tra cifre e lettere a-f.")
+            raise ValueError("Spotify's Client ID is made of 32 characters among digits and letters a-f.")
         if client_id != self.data["clientId"]:
             self.data.update(clientId=client_id, refreshToken="", user="")
             self._access = ""
             self._save()
 
     def authorize_url(self, redirect_uri: str) -> str:
-        """Dove mandare il browser per dare il permesso (Authorization Code con PKCE)."""
+        """Where to send the browser to give the permission (Authorization Code with PKCE)."""
         if not self.configured:
-            raise SpotifyError("Manca il Client ID della tua app Spotify.", "NOT_CONFIGURED")
+            raise SpotifyError("Your Spotify app's Client ID is missing.", "NOT_CONFIGURED")
         verifier, challenge = _pkce_pair()
         state = secrets.token_urlsafe(16)
         self._pending = {state: verifier}
@@ -221,10 +241,10 @@ class SpotifyClient:
         )
 
     async def finish(self, code: str, state: str, redirect_uri: str) -> str:
-        """Il browser e' tornato col codice: lo si scambia coi token. Restituisce il nome dell'account."""
+        """The browser came back with the code: it's traded for the tokens. Returns the account's name."""
         verifier = self._pending.pop(state, None)
         if not verifier:
-            raise SpotifyError("Richiesta scaduta: premi di nuovo «Collega Spotify».", "BAD_STATE")
+            raise SpotifyError("Request expired: press \"Connect Spotify\" again.", "BAD_STATE")
         await self._post_token(
             {
                 "grant_type": "authorization_code",
@@ -255,7 +275,7 @@ class SpotifyClient:
     # -- HTTP ---------------------------------------------------------------
     async def _client(self) -> httpx.AsyncClient:
         if self._http is None:
-            # Creare un client carica i certificati (~0,2 s): in un thread.
+            # Creating a client loads the certificates (~0.2 s): in a thread.
             self._http = await asyncio.to_thread(httpx.AsyncClient, timeout=10.0)
         return self._http
 
@@ -263,9 +283,9 @@ class SpotifyClient:
         http = await self._client()
         response = await http.post(TOKEN_URL, data=form)
         if response.status_code == 400 and form.get("grant_type") == "refresh_token":
-            # Permesso revocato dall'account, o app cambiata: va ricollegato.
+            # Permission revoked by the account, or app changed: it must be connected again.
             self.disconnect()
-            raise SpotifyError("Spotify va ricollegato dal pannello.", "NOT_CONNECTED", 400)
+            raise SpotifyError("Spotify must be connected again from the panel.", "NOT_CONNECTED", 400)
         if not response.is_success:
             detail = response.text[:200]
             with contextlib.suppress(ValueError):
@@ -284,7 +304,7 @@ class SpotifyClient:
             if self._access and not force and time.time() < self._expires - 60:
                 return self._access
             if not self.connected:
-                raise SpotifyError("Spotify non è collegato.", "NOT_CONNECTED")
+                raise SpotifyError("Spotify is not connected.", "NOT_CONNECTED")
             await self._post_token(
                 {
                     "grant_type": "refresh_token",
@@ -313,7 +333,7 @@ class SpotifyClient:
             try:
                 return response.json()
             except ValueError:
-                return None  # i comandi del lettore a volte rispondono con testo
+                return None  # the player's commands sometimes answer with text
         reason, message = "", response.text[:200]
         with contextlib.suppress(ValueError, AttributeError):
             error = response.json().get("error") or {}
@@ -374,13 +394,13 @@ class SpotifyClient:
 
 
 # ---------------------------------------------------------------------------
-# Tasti multimediali: vanno con qualunque lettore, Premium o no
+# Media keys: they work with any player, Premium or not
 # ---------------------------------------------------------------------------
 _MEDIA_KEYS = {"next": 0xB0, "previous": 0xB1, "toggle": 0xB3}
 
 
 def press_media_key(key: str) -> bool:
-    """Preme un tasto multimediale (solo Windows). Falso se non si puo'."""
+    """Presses a media key (Windows only). False if it can't."""
     if os.name != "nt" or key not in _MEDIA_KEYS:
         return False
     import ctypes
@@ -393,10 +413,10 @@ def press_media_key(key: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Gusti
+# Taste
 # ---------------------------------------------------------------------------
 class TasteProfile:
-    """Cosa ti piace, imparato ascoltando con te. Sta in ``state/music_taste.json``."""
+    """What you like, learned listening with you. It lives in ``state/music_taste.json``."""
 
     MAX_TRACKS = 30
 
@@ -409,7 +429,7 @@ class TasteProfile:
                 if isinstance(loaded, dict):
                     self.data.update({k: v for k, v in loaded.items() if k in self.data})
             except (OSError, ValueError) as exc:
-                logger.warning("Gusti musicali non leggibili da %s: %s", path, exc)
+                logger.warning("Music taste unreadable from %s: %s", path, exc)
 
     @staticmethod
     def _empty() -> dict[str, Any]:
@@ -422,7 +442,7 @@ class TasteProfile:
         return entry
 
     def observe(self, track: Track, heard: bool, skipped: bool) -> None:
-        """Un brano e' finito: ascoltato fino in fondo (o quasi), oppure saltato."""
+        """A track ended: listened to the end (or almost), or skipped."""
         if not track.artists or not (heard or skipped):
             return
         self._artist(track.artists[0])["plays" if heard else "skips"] += 1
@@ -443,7 +463,7 @@ class TasteProfile:
         self._save()
 
     def set_top(self, artists: list[tuple[str, list[str]]]) -> None:
-        """Gli artisti che Spotify dice che ascolti di piu', coi loro generi."""
+        """The artists Spotify says you listen to most, with their genres."""
         self.data["top"] = [name for name, _ in artists][:20]
         genres = Counter(genre for _, names in artists for genre in names)
         self.data["genres"] = [genre for genre, _ in genres.most_common(8)]
@@ -471,7 +491,7 @@ class TasteProfile:
         return sorted(names, key=self.score)[:limit]
 
     def summary(self) -> str:
-        """I gusti in una riga, per il cervello (in inglese, come le altre istruzioni)."""
+        """The taste in one line, for the brain (in English, like the other instructions)."""
         parts = []
         if favourites := self.favourites():
             parts.append("favourite artists: " + ", ".join(favourites))
@@ -501,7 +521,7 @@ class TasteProfile:
 
 
 # ---------------------------------------------------------------------------
-# Etichette del cervello e comandi al volo
+# The brain's tags and quick commands
 # ---------------------------------------------------------------------------
 _ACTIONS = {
     "play": "play", "queue": "queue", "pause": "pause", "stop": "pause", "resume": "resume",
@@ -513,7 +533,7 @@ _QUOTES = " \t\"'“”«»‘’"
 
 
 def music_tag(tag: str) -> tuple[str, list[str]] | None:
-    """``[[music: play A - B; C - D]]`` -> ``("play", ["A - B", "C - D"])``; ``None`` se non e' musica."""
+    """``[[music: play A - B; C - D]]`` -> ``("play", ["A - B", "C - D"])``; ``None`` if it isn't music."""
     match = _TAG.match(tag.strip())
     if not match:
         return None
@@ -530,7 +550,7 @@ def is_music_tag(tag: str) -> bool:
 
 
 def _search_query(item: str) -> list[str]:
-    """ "Artista - Titolo" -> la ricerca precisa, poi quella libera."""
+    """ "Artist - Title" -> the precise search, then the free one."""
     parts = re.split(r"\s+[-–—]\s+", item, maxsplit=1)
     if len(parts) == 2:
         artist, title = parts
@@ -538,8 +558,8 @@ def _search_query(item: str) -> list[str]:
     return [item]
 
 
-#: Parole che rendono un messaggio "sulla musica": allora il cervello riceve
-#: cosa suona e le istruzioni per le etichette.
+#: Words that make a message "about music": then the brain gets what's
+#: playing and the instructions for the tags.
 MUSIC_WORDS = re.compile(
     r"\b(?:music\w*|canzon\w*|bran[oi]|pezz[oi]|tracc\w*|album|artist\w*|cantant\w*|band|playlist|spotify|"
     r"ascolt\w*|genere|sentir(?:ne|la|le|lo)|suon\w*|song\w*|tracks?|listen\w*|genre|singer|playing)\b",
@@ -565,7 +585,7 @@ _DONE = {
     "en": {"pause": "Music paused.", "resume": "Here we go again!", "next": "Here's the next one.", "previous": "Going back to the last one."},
 }
 
-#: Come si chiede la musica, spiegato al cervello (una volta per turno "in tema").
+#: How to ask for music, explained to the brain (once per "on topic" turn).
 TAG_HELP = (
     "To control their music, append at the very end [[music: play Artist - Title; Artist - Title]] to play "
     "songs now (when they want something similar, a mood or an artist, pick 5-8 real, existing songs that fit "
@@ -577,7 +597,7 @@ TAG_HELP = (
 
 
 def parse_command(text: str) -> str | None:
-    """ "Metti in pausa la musica" -> ``"pause"``; ``None`` se non e' un comando del lettore."""
+    """ "Pause the music" -> ``"pause"``; ``None`` if it isn't a player command."""
     for action, pattern in _COMMAND_RES.items():
         if pattern.match(text):
             return action
@@ -585,7 +605,7 @@ def parse_command(text: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Il servizio
+# The service
 # ---------------------------------------------------------------------------
 class MusicService:
     def __init__(self, state_dir: Path | None, redirect_uri: str, on_change: OnChange | None = None) -> None:
@@ -599,7 +619,7 @@ class MusicService:
         self._genres: dict[str, list[str]] = {}
         self._task: asyncio.Task | None = None
 
-    # -- ciclo --------------------------------------------------------------
+    # -- loop ---------------------------------------------------------------
     async def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._loop(), name="music")
@@ -626,11 +646,11 @@ class MusicService:
                     self.error = exc.explain()
                     logger.debug("Spotify: %s", exc)
                 except httpx.HTTPError as exc:
-                    logger.debug("Spotify non raggiungibile: %s", exc)
+                    logger.debug("Spotify unreachable: %s", exc)
             await asyncio.sleep(POLL_SECONDS)
 
     async def refresh(self) -> NowPlaying | None:
-        """Chiede a Spotify cosa suona; se e' cambiato impara e avvisa il pannello."""
+        """Asks Spotify what's playing; if it changed it learns and tells the panel."""
         current = await self.spotify.now_playing()
         before = self.now
         self._observe(current)
@@ -640,7 +660,7 @@ class MusicService:
         return current
 
     def _observe(self, current: NowPlaying | None) -> None:
-        """Il brano di prima e' finito: ascoltato (meta' o 4 minuti) o saltato (meno di 30 s)."""
+        """The previous track ended: listened (half or 4 minutes) or skipped (less than 30 s)."""
         before = self.now
         if before is None or before.track is None:
             return
@@ -667,9 +687,9 @@ class MusicService:
             "error": self.error,
         }
 
-    # -- cervello -----------------------------------------------------------
+    # -- brain --------------------------------------------------------------
     async def directive(self, prompt: str) -> str:
-        """Il contesto musicale per questo turno, vuoto se non si parla di musica."""
+        """The music context for this turn, empty if music isn't the topic."""
         if not self.spotify.connected:
             return ""
         if MUSIC_WORDS.search(prompt):
@@ -699,7 +719,7 @@ class MusicService:
         return " ".join(parts)
 
     async def _genres_of(self, track: Track) -> list[str]:
-        """I generi dell'artista secondo Spotify (una volta per artista; a volte vuoti)."""
+        """The artist's genres according to Spotify (once per artist; sometimes empty)."""
         if not track.artist_ids or not track.artist_ids[0]:
             return []
         artist = track.artist_ids[0]
@@ -710,8 +730,8 @@ class MusicService:
                 return []
         return self._genres[artist]
 
-    async def run_tags(self, tags: list[str]) -> str | None:
-        """Esegue le etichette ``[[music: ...]]`` del cervello; un problema da dire, o ``None``."""
+    async def run_tags(self, tags: list[str], language: str = "en") -> str | None:
+        """Runs the brain's ``[[music: ...]]`` tags; a problem to say, or ``None``."""
         for tag in tags:
             parsed = music_tag(tag)
             if parsed is None:
@@ -720,10 +740,10 @@ class MusicService:
             try:
                 await self._do(action, items)
             except SpotifyError as exc:
-                logger.info("Spotify: %s non riuscito (%s)", action, exc)
-                return exc.explain()
+                logger.info("Spotify: %s failed (%s)", action, exc)
+                return exc.explain(language)
             except httpx.HTTPError as exc:
-                return f"Non riesco a raggiungere Spotify: {exc}"
+                return f"Non riesco a raggiungere Spotify: {exc}" if language.startswith("it") else f"I can't reach Spotify: {exc}"
         return None
 
     async def _do(self, action: str, items: list[str]) -> None:
@@ -731,7 +751,7 @@ class MusicService:
             tracks = [track for track in await asyncio.gather(*(self._find(item) for item in items)) if track]
             uris = list(dict.fromkeys(track.uri for track in tracks))
             if not uris:
-                raise SpotifyError("Non ho trovato su Spotify nessuno dei brani scelti.", "NOT_FOUND")
+                raise SpotifyError("I didn't find any of the chosen tracks on Spotify.", "NOT_FOUND")
             logger.info("Spotify: %s %s", action, "; ".join(track.label for track in tracks))
             if action == "play":
                 await self._play(uris)
@@ -741,13 +761,13 @@ class MusicService:
         elif action in ("like", "dislike"):
             now = self.now or await self.spotify.now_playing()
             if now is None or now.track is None:
-                raise SpotifyError("Non sta suonando niente.", "NOTHING")
+                raise SpotifyError("Nothing is playing.", "NOTHING")
             if action == "like":
                 self.taste.like(now.track)
                 try:
                     await self.spotify.save(now.track)
                 except SpotifyError as exc:
-                    logger.info("Brano non aggiunto ai preferiti di Spotify: %s", exc)
+                    logger.info("Track not added to Spotify's favourites: %s", exc)
             else:
                 self.taste.dislike(now.track)
             await self._changed()
@@ -772,15 +792,15 @@ class MusicService:
         except SpotifyError as exc:
             if exc.reason != "NO_ACTIVE_DEVICE":
                 raise
-            # Spotify e' aperto ma nessun lettore e' "attivo": si sceglie il PC.
+            # Spotify is open but no player is "active": the PC is chosen.
             devices = await self.spotify.devices()
             devices.sort(key=lambda d: (not d.get("is_active"), d.get("type") != "Computer"))
             if not devices:
-                raise SpotifyError("Nessun lettore acceso.", "NO_DEVICE") from exc
+                raise SpotifyError("No player is on.", "NO_DEVICE") from exc
             await self.spotify.play(uris, str(devices[0].get("id") or ""))
 
     async def control(self, action: str) -> None:
-        """Pausa, ripresa, avanti, indietro: con l'API, o coi tasti multimediali senza Premium."""
+        """Pause, resume, next, previous: with the API, or with the media keys without Premium."""
         if self.spotify.connected:
             try:
                 await self.spotify.control(action)
@@ -790,12 +810,12 @@ class MusicService:
                     raise
         key = {"next": "next", "previous": "previous"}.get(action, "toggle")
         if key == "toggle" and self.now is not None and self.now.playing == (action == "resume"):
-            return  # gia' com'era richiesto: il tasto la farebbe ripartire
+            return  # already as requested: the key would start it again
         if not press_media_key(key):
-            raise SpotifyError("Qui non posso premere i tasti multimediali.", "NO_KEYS")
+            raise SpotifyError("I can't press the media keys here.", "NO_KEYS")
 
     async def command(self, text: str, language: str) -> str | None:
-        """ "Metti in pausa la musica", "prossima canzone": subito, senza cervello."""
+        """ "Pause the music", "next song": right away, without the brain."""
         action = parse_command(text)
         if action is None:
             return None
@@ -803,7 +823,7 @@ class MusicService:
         try:
             await self.control(action)
         except SpotifyError as exc:
-            return exc.explain()
+            return exc.explain(code)
         except httpx.HTTPError:
             return "Spotify non risponde." if code == "it" else "Spotify isn't answering."
         return _DONE[code][action]

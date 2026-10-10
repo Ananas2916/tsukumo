@@ -1,27 +1,26 @@
 /**
- * Animazioni registrate (.vrma), mescolate al corpo procedurale.
+ * Recorded animations (.vrma), blended into the procedural body.
  *
- * Il movimento di Tsukumo e' tutto procedurale (body.js): respiro, peso,
- * gesti, sguardo. Una clip VRMA - mocap o fatta a mano, per esempio con VRoid
- * o con i pacchetti gratuiti di pixiv - aggiunge movimenti che a mano sono
- * difficili da scrivere: un saluto teatrale, un balletto, uno stiracchiamento.
+ * Tsukumo's movement is all procedural (body.js): breathing, weight,
+ * gestures, gaze. A VRMA clip - mocap or hand-made, for example with VRoid or
+ * pixiv's free packs - adds movements that are hard to write by hand: a
+ * theatrical greeting, a little dance, a stretch.
  *
- * Le clip stanno in `frontend/public/animations/` (il backend le elenca con
- * `GET /api/animations`). Il nome dice quando usarle:
- *   - `greet*.vrma`  al posto del saluto con la mano, quando compare;
- *   - `idle*.vrma`   ogni tanto, fra i gesti spontanei;
- *   - `dance*.vrma`  in loop mentre Spotify suona;
- *   - `bow*`, `inchino*`         quando la ringrazi;
- *   - `alza*`, `here*`, `raise*` quando la chiami per nome (ascolto a chiamata);
- *   - le altre       solo a richiesta, dal pannello (anche bow e alza).
+ * Clips live in `frontend/public/animations/` (the backend lists them with
+ * `GET /api/animations`). The name says when to use them:
+ *   - `greet*.vrma`  instead of the hand wave, when she appears;
+ *   - `idle*.vrma`   now and then, among the spontaneous gestures;
+ *   - `dance*.vrma`  looped while Spotify plays;
+ *   - `bow*`, `inchino*`         when you thank her;
+ *   - `alza*`, `here*`, `raise*` when you call her by name (wake word);
+ *   - the others     only on request, from the panel (bow and raise too).
  *
- * Da un BVH di motion capture: `scripts/bvh2vrma.mjs`.
+ * From a motion-capture BVH: `scripts/bvh2vrma.mjs`.
  *
- * Si usano solo le rotazioni delle ossa: niente spostamento dei fianchi (la
- * mascotte non deve uscire dalla finestra), niente espressioni ne' sguardo
- * (li gestisce gia' il corpo). La clip entra e esce in dissolvenza, e tocca
- * solo le ossa che il corpo riscrive da capo a ogni frame: finita la clip non
- * resta niente di "incollato".
+ * Only bone rotations are used: no hip translation (the mascot must not
+ * leave the window), no expressions or gaze (the body already handles them).
+ * The clip fades in and out, and touches only the bones the body rewrites
+ * from scratch every frame: when the clip ends nothing stays "stuck".
  */
 
 import * as THREE from 'three';
@@ -31,7 +30,7 @@ import { createVRMAnimationHumanoidTracks, VRMAnimationLoaderPlugin } from '@pix
 const FADE_IN = 0.35;
 const FADE_OUT = 0.45;
 
-/** Dal nome del file al ruolo: greet, idle, dance, action. */
+/** From the file name to the role: greet, idle, dance, action. */
 export function clipRole(name) {
   const base = name.toLowerCase();
   if (/^(greet|wave|hello)/.test(base)) return 'greet';
@@ -45,7 +44,7 @@ export function clipRole(name) {
 export class ClipPlayer {
   /**
    * @param {import('@pixiv/three-vrm').VRM} vrm
-   * @param {Set<string>|string[]} managed ossa che il corpo riscrive a ogni frame
+   * @param {Set<string>|string[]} managed bones the body rewrites every frame
    */
   constructor(vrm, managed) {
     this.vrm = vrm;
@@ -57,7 +56,7 @@ export class ClipPlayer {
     this.loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
   }
 
-  /** Carica le clip elencate dal backend (`[{name, url}]`); quelle rotte si saltano. */
+  /** Loads the clips listed by the backend (`[{name, url}]`); broken ones are skipped. */
   async load(list) {
     const metaVersion = this.vrm.meta?.metaVersion === '0' ? '0' : '1';
     for (const item of list ?? []) {
@@ -76,7 +75,7 @@ export class ClipPlayer {
         const name = item.name.replace(/\.vrma$/i, '');
         this.clips.set(name, { name, role: clipRole(name), duration: animation.duration || 1, tracks });
       } catch (error) {
-        console.warn(`[clips] ${item.name} non caricata:`, error);
+        console.warn(`[clips] ${item.name} not loaded:`, error);
       }
     }
     return [...this.clips.values()].map(({ name, role, duration }) => ({ name, role, duration }));
@@ -90,7 +89,7 @@ export class ClipPlayer {
     return this.active !== null;
   }
 
-  /** Suona una clip per nome; `loop` per i balli. */
+  /** Plays a clip by name; `loop` for dances. */
   play(name, { loop = false } = {}) {
     const clip = this.clips.get(name);
     if (!clip) return false;
@@ -98,21 +97,21 @@ export class ClipPlayer {
     return true;
   }
 
-  /** Una clip a caso fra quelle di un ruolo. */
+  /** A random clip of a role. */
   playRole(role, options) {
     const candidates = [...this.clips.values()].filter((clip) => clip.role === role);
     if (!candidates.length) return false;
     return this.play(candidates[Math.floor(Math.random() * candidates.length)].name, options);
   }
 
-  /** Esce in dissolvenza. */
+  /** Fades out. */
   stop() {
     if (this.active) this.active.stopping = true;
   }
 
   /**
-   * Da chiamare dopo che il corpo ha scritto la sua posa e prima di vrm.update():
-   * porta le ossa verso la clip, del peso corrente.
+   * Call after the body has written its pose and before vrm.update(): moves
+   * the bones towards the clip, by the current weight.
    */
   apply(dt) {
     const state = this.active;
@@ -129,7 +128,7 @@ export class ClipPlayer {
       return;
     }
     const time = Math.min(state.time, clip.duration);
-    // Dissolvenza con partenza e arrivo morbidi: lineare si vede lo "scatto" all'inizio.
+    // Fade with a smooth start and end: linear shows the "snap" at the start.
     const weight = state.weight * state.weight * (3 - 2 * state.weight);
     for (const { node, interpolant } of clip.tracks) {
       const values = interpolant.evaluate(time);

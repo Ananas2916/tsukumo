@@ -1,6 +1,6 @@
-/* Tsukumo - colori e misure condivisi da personaggio e pannello.
-   Vetro scuro come i dock dell'immagine di riferimento: quasi nero, bordo
-   chiaro sottile, icone a tratto, un accento lilla. */
+/* Tsukumo - colours and sizes shared by the character and the panel.
+   Dark glass like the docks of the reference image: almost black, a thin
+   light border, line icons, a lilac accent. */
 
 :root {
   color-scheme: dark;

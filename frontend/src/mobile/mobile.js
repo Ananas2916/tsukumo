@@ -1,18 +1,23 @@
 /**
- * Tsukumo sul telefono: solo chat di testo, da Safari o dalla schermata Home.
+ * Tsukumo on the phone: text chat only, from Safari or the Home Screen.
  *
- * Il link arriva dal QR sul PC (backend/phone.py) e porta il token dopo "#":
- * il browser non lo manda mai al server. La pagina lo scambia con un cookie
- * (POST /api/phone/session), che poi accompagna il WebSocket. Il link resta
- * intero nella barra: "Aggiungi alla schermata Home" se lo porta dietro, e
- * l'app sulla Home (che non vede i dati di Safari) riparte da li'.
+ * The link comes from the QR code on the PC (backend/phone.py) and carries
+ * the token after "#": the browser never sends it to the server. The page
+ * trades it for a cookie (POST /api/phone/session), which then goes along
+ * with the WebSocket. The link stays whole in the address bar: "Add to Home
+ * Screen" takes it along, and the Home Screen app (which can't see Safari's
+ * data) starts again from there.
  *
- * Il WebSocket si apre con ?mode=text: il backend non le manda l'audio e i
- * turni scritti da qui non parlano ad alta voce sul PC a casa.
+ * The WebSocket opens with ?mode=text: the backend sends it no audio, and
+ * the turns written here aren't spoken aloud on the PC at home.
  */
+
+import { t, translateDom, tx } from '../i18n.js';
 
 import { renderMarkdown } from '../markdown.js';
 import { CompanionSocket } from '../ws.js';
+
+translateDom();
 
 const TOKEN_KEY = 'tsukumo:phone-token';
 const HISTORY_KEY = 'tsukumo:phone-chat';
@@ -38,7 +43,7 @@ function store(key, value) {
     if (value === null) window.localStorage.removeItem(key);
     else window.localStorage.setItem(key, value);
   } catch {
-    /* modalita' privata: si va avanti senza */
+    /* private mode: carry on without it */
   }
 }
 
@@ -49,14 +54,14 @@ function readToken() {
 }
 
 // ---------------------------------------------------------------------------
-// Messaggi
+// Messages
 
 /** @type {{role: string, text: string, note?: string, el?: HTMLElement, pending?: boolean, broken?: boolean}[]} */
 let messages = [];
-const replies = new Map(); // turno -> messaggio dell'assistente in arrivo
+const replies = new Map(); // turn -> assistant message on its way
 let renderTimer = null;
-// L'ultima battuta numerata dal backend (seq) che abbiamo visto: al
-// ricollegarsi si prendono dal hello solo quelle dopo.
+// The last line numbered by the backend (seq) we've seen: when reconnecting
+// only the later ones are taken from the hello.
 let synced = Number(load(SYNCED_KEY)) || 0;
 
 function saveHistory() {
@@ -70,9 +75,9 @@ function seen(message) {
 }
 
 /**
- * Le battute arrivate mentre Safari teneva la pagina sospesa (``transcript``
- * del hello). La prima volta con una cronologia gia' piena, di cui non
- * conosciamo i numeri, le diamo per viste: meglio perderne una che doppiarle.
+ * The lines that arrived while Safari kept the page suspended (the hello's
+ * ``transcript``). The first time, with a history already full whose numbers
+ * we don't know, we take them as seen: better to lose one than to double them.
  */
 function catchUp(lines) {
   if (!Array.isArray(lines) || !lines.length) return;
@@ -93,7 +98,7 @@ function catchUp(lines) {
         add({ role: 'user', text: line.text });
       }
     } else if (line.role === 'assistant') {
-      // Il turno a meta' quando la pagina si e' sospesa: si completa li'.
+      // The turn halfway through when the page was suspended: it completes there.
       const partial = replies.get(line.turn);
       const note = line.cancelled ? 'interrotta' : undefined;
       if (partial) {
@@ -167,7 +172,7 @@ function restoreHistory() {
 }
 
 // ---------------------------------------------------------------------------
-// Stato in alto e tasto invia/ferma
+// Status at the top and the send/stop button
 
 let busy = false;
 
@@ -181,11 +186,11 @@ function setBusy(value) {
   updateButton();
 }
 
-/** Mentre pensa, a campo vuoto, il tasto la ferma. */
+/** While she thinks, with an empty field, the button stops her. */
 function updateButton() {
   const stop = busy && !input.value.trim();
   send.dataset.mode = stop ? 'stop' : 'send';
-  send.setAttribute('aria-label', stop ? 'Ferma' : 'Invia');
+  send.setAttribute('aria-label', stop ? t('Stop') : t('Send'));
 }
 
 function lock(text) {
@@ -193,15 +198,15 @@ function lock(text) {
   log.classList.add('hidden');
   $('composer').classList.add('hidden');
   if (text) $('locked-text').textContent = text;
-  setStatus('offline', 'Non collegato');
+  setStatus('offline', t('Not connected'));
 }
 
 // ---------------------------------------------------------------------------
-// Collegamento
+// Connection
 
 /**
- * Scambia il token con il cookie del WebSocket: 'ok', 'denied', 'offline'
- * (niente risposta) o il codice HTTP di un altro errore.
+ * Trades the token for the WebSocket cookie: 'ok', 'denied', 'offline' (no
+ * answer) or the HTTP code of another error.
  */
 async function openSession(token) {
   try {
@@ -225,11 +230,11 @@ function connect() {
   url.searchParams.set('mode', 'text');
   const socket = new CompanionSocket(url.toString(), { maxDelay: 6000 });
 
-  socket.on('open', () => setStatus('online', 'Collegata'));
+  socket.on('open', () => setStatus('online', t('Connected')));
   socket.on('close', () => {
-    setStatus('offline', 'Non raggiungo il PC…');
+    setStatus('offline', t("Can't reach the PC…"));
     setBusy(false);
-    // Una parte dello streaming e' andata persa: alla fine vale il testo del reply.
+    // Part of the streaming got lost: in the end the reply's text counts.
     replies.forEach((reply) => {
       reply.broken = true;
     });
@@ -239,20 +244,20 @@ function connect() {
   socket.on('state', (message) => {
     if (message.value === 'thinking') {
       setBusy(true);
-      setStatus('busy', 'Sta pensando…');
+      setStatus('busy', t('Thinking…|status'));
     } else if (message.value === 'idle') {
       setBusy(false);
-      setStatus('online', 'Collegata');
+      setStatus('online', t('Connected'));
     }
   });
   socket.on('working', (message) => {
-    if (message.label) setStatus('busy', message.label);
+    if (message.label) setStatus('busy', tx(message.label));
   });
 
   socket.on('user', (message) => {
     seen(message);
     const text = String(message.text ?? '');
-    // Il messaggio scritto qui torna dal backend: diventa "consegnato".
+    // The message written here comes back from the backend: it becomes "delivered".
     const mine = messages.find((m) => m.pending && m.text.trim() === text.trim());
     if (mine) {
       mine.pending = false;
@@ -296,15 +301,15 @@ function connect() {
         messages = messages.filter((m) => m !== reply);
       }
     } else if (message.text && message.cancelled !== undefined && !message.failed) {
-      // Promemoria e notifiche: parla di sua iniziativa.
+      // Reminders and notifications: she speaks on her own.
       add({ role: 'assistant', text: message.text });
     }
     scrollDown();
     saveHistory();
   });
 
-  socket.on('notice', (message) => add({ role: 'notice', text: message.message ?? '' }));
-  socket.on('error', (message) => add({ role: 'error', text: message.message ?? 'Errore', note: message.hint }));
+  socket.on('notice', (message) => add({ role: 'notice', text: tx(message.message) ?? '' }));
+  socket.on('error', (message) => add({ role: 'error', text: tx(message.message) ?? t('Error'), note: tx(message.hint) }));
   socket.on('reset', clearChat);
 
   socket.connect();
@@ -339,14 +344,14 @@ function wire(socket) {
     autosize();
     updateButton();
   });
-  // Invio manda, Maiusc+Invio va a capo (con una tastiera fisica).
+  // Enter sends, Shift+Enter starts a new line (with a physical keyboard).
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       $('composer').requestSubmit();
     }
   });
-  // Con la tastiera aperta la pagina si accorcia a quello che resta visibile.
+  // With the keyboard open the page shrinks to what's still visible.
   const viewport = window.visualViewport;
   if (viewport) {
     const fit = () => {
@@ -370,19 +375,19 @@ async function start() {
   restoreHistory();
   let session = await openSession(token);
   while (session !== 'ok' && session !== 'denied') {
-    // Un errore diverso (es. 403) non e' "PC spento": lo diciamo col suo codice.
-    const why = session === 'offline' ? 'Non raggiungo il PC: Tailscale e Tsukumo sono accesi?' : `Il PC rifiuta il collegamento (errore ${session})`;
+    // A different error (e.g. 403) isn't "PC off": we say it with its code.
+    const why = session === 'offline' ? t("Can't reach the PC: are Tailscale and Tsukumo running?") : t('The PC refuses the connection (error {code})', { code: session });
     setStatus('offline', why);
     await new Promise((resolve) => setTimeout(resolve, 5000));
     session = await openSession(token);
   }
   if (session === 'denied') {
     store(TOKEN_KEY, null);
-    lock('Questo link non vale più. Sul PC apri http://127.0.0.1:8770/api/phone e inquadra il QR nuovo.');
+    lock(t('This link is no longer valid. On the PC open http://127.0.0.1:8770/api/phone and scan the new QR code.'));
     return;
   }
   const socket = connect();
-  // Il cookie puo' scadere o sparire: lo rinnoviamo a ogni caduta.
+  // The cookie can expire or vanish: we renew it at every drop.
   socket.on('close', () => openSession(token));
   wire(socket);
 }

@@ -1,22 +1,26 @@
 /**
- * Scheda "Personaggio": come parla, come appare, come si comporta.
+ * "Character" tab: how she speaks, how she looks, how she behaves.
  *
- * Le voci arrivano dal motore attivo con nome, lingua e genere (un elenco di
- * Kokoro, del tuo account ElevenLabs, delle voci Azure...): si cercano, si
- * filtrano per lingua e si ascoltano prima di sceglierle.
+ * Voices come from the active engine with name, language and gender (a list
+ * from Kokoro, from your ElevenLabs account, Azure's voices...): you search
+ * them, filter by language and listen before choosing.
  */
 
 import { apiUrl } from '../config.js';
-import { el, iconButton, languageLabel, readSetting, writeSetting } from '../dom.js';
+import { el, iconButton, languageLabel, readBody, readSetting, writeSetting } from '../dom.js';
+import { LANG, savedLanguage, setLanguage, t, tx, UI_LANGUAGES } from '../i18n.js';
 import { icon } from '../icons.js';
+import { paletteKey, PALETTE_LABELS, swatchColor } from '../flame/palettes.js';
+import { OUTFIT_LABELS, parseOutfit, seasonalOutfit, SELECTIONS } from '../flame/wardrobe.js';
 import { MIC_SETTING, SAMPLE_RATE, VoiceInput, listMicrophones } from '../mic.js';
 import { BARGE_IN_SETTING } from '../voice.js';
 import { MemoryCard } from './memory.js';
 import { MusicCard } from './music.js';
+import { outfitPreview } from './wardrobe-art.js';
 
-/** Quanto dura la registrazione di prova. */
+/** How long the test recording lasts. */
 const MIC_TEST_SECONDS = 4;
-/** Sotto questo livello il rilevatore del parlato (mic.js, modo `vad`) non si accorge che parli. */
+/** Below this level the speech detector (mic.js, `vad` mode) doesn't notice you're talking. */
 const VAD_THRESHOLD = 0.02;
 
 const SAMPLES = {
@@ -30,76 +34,102 @@ const SAMPLES = {
 };
 
 const REPLY_LANGUAGES = [
-  { value: 'auto', label: 'Nella lingua della voce' },
-  { value: 'same', label: 'Nella lingua in cui scrivo' },
-  { value: 'Italian', label: 'Sempre in italiano' },
-  { value: 'English', label: 'Sempre in inglese' },
+  { value: 'auto', label: t("In the voice's language") },
+  { value: 'same', label: t('In the language I write in') },
+  { value: 'Italian', label: t('Always in Italian') },
+  { value: 'English', label: t('Always in English') },
 ];
 
-/** I modi di stare in piedi (frontend/src/body/stances.js), con le loro etichette. */
+/** The ways of standing (frontend/src/body/stances.js), with their labels. */
 const STANCES = [
-  { value: 'standard', label: 'Normale' },
-  { value: 'innocent', label: 'Innocente' },
+  { value: 'standard', label: t('Normal') },
+  { value: 'innocent', label: t('Innocent') },
   { value: 'cool', label: 'Cool' },
-  { value: 'ladylike', label: 'Elegante' },
-  { value: 'shy', label: 'Timida' },
-  { value: 'energetic', label: 'Energica' },
+  { value: 'ladylike', label: t('Elegant') },
+  { value: 'shy', label: t('Shy') },
+  { value: 'energetic', label: t('Energetic') },
   { value: 'flamboyant', label: 'Diva' },
-  { value: 'gentleman', label: 'Gentiluomo' },
-  { value: 'powerful', label: 'Potente' },
+  { value: 'gentleman', label: t('Gentleman') },
+  { value: 'powerful', label: t('Powerful') },
 ];
 
 const WEATHER_WORDS = {
-  clear: 'sereno',
-  cloudy: 'nuvoloso',
-  fog: 'nebbia',
-  rain: 'pioggia',
-  snow: 'neve',
-  storm: 'temporale',
+  clear: t('clear'),
+  cloudy: t('cloudy'),
+  fog: t('fog'),
+  rain: t('rain'),
+  snow: t('snow'),
+  storm: t('storm'),
 };
 
 const ACTIONS = [
-  { play: 'wave', label: 'Saluta', icon: 'hand' },
-  { play: 'stretch', label: 'Stiracchiati', icon: 'resize' },
-  { play: 'lookAround', label: 'Guardati intorno', icon: 'search' },
-  { play: 'hum', label: 'Canticchia', icon: 'music' },
-  { play: 'yawn', label: 'Sbadiglia', icon: 'moon' },
-  { play: 'knock', label: 'Bussa', icon: 'hand' },
-  { play: 'fanSelf', label: 'Che caldo', icon: 'wave' },
-  { play: 'shiver', label: 'Che freddo', icon: 'ghost' },
-  { play: 'pout', label: 'Broncio', icon: 'smile' },
-  { play: 'greetPop', label: 'Ciao dal basso', icon: 'hand' },
-  { play: 'peace', label: 'Fai la V', icon: 'smile' },
+  // Born for the flame; the body renders them with the closest gesture (vrm.js, VRM_STAND_IN).
+  { play: 'cheer', label: t('Celebrate'), icon: 'star' },
+  { play: 'hearts', label: t('Little hearts'), icon: 'smile' },
+  { play: 'cool', label: t('Sunglasses'), icon: 'sun' },
+  { play: 'surprise', label: t('Surprise'), icon: 'alert' },
+  { play: 'speechless', label: t('Speechless'), icon: 'dots' },
+  { play: 'dizzy', label: t('Dizzy'), icon: 'refresh' },
+  { play: 'wave', label: t('Wave'), icon: 'hand' },
+  { play: 'stretch', label: t('Stretch'), icon: 'resize' },
+  { play: 'lookAround', label: t('Look around'), icon: 'search' },
+  { play: 'hum', label: t('Hum'), icon: 'music' },
+  { play: 'yawn', label: t('Yawn'), icon: 'moon' },
+  { play: 'knock', label: t('Knock'), icon: 'hand' },
+  { play: 'fanSelf', label: t('So hot'), icon: 'wave' },
+  { play: 'shiver', label: t('So cold'), icon: 'ghost' },
+  { play: 'pout', label: t('Pout'), icon: 'smile' },
+  { play: 'greetPop', label: t('Peek-a-boo hello'), icon: 'hand' },
+  { play: 'peace', label: t('Make a V'), icon: 'smile' },
   { play: 'shoot', label: 'Bang!', icon: 'hand' },
-  { play: 'showOff', label: 'Fatti vedere', icon: 'character' },
-  { play: 'spin', label: 'Giravolta', icon: 'refresh' },
-  { play: 'model', label: 'Posa da modella', icon: 'star' },
+  { play: 'showOff', label: t('Show off'), icon: 'character' },
+  { play: 'spin', label: t('Twirl'), icon: 'refresh' },
+  { play: 'model', label: t('Model pose'), icon: 'star' },
   { play: 'squat', label: 'Squat', icon: 'sit' },
-  // Solo la fiammella: uno scatto lungo la barra, subito.
+  // Flame only: a dash along the taskbar, right away.
   { sprint: true, label: 'Sprint', icon: 'bolt' },
-  { posture: 'sit', label: 'Siediti', icon: 'sit' },
-  { posture: 'lie', label: 'Sdraiati', icon: 'window' },
-  { posture: 'side', label: 'Sul fianco', icon: 'window' },
-  { posture: 'stand', label: 'Alzati', icon: 'character' },
+  { posture: 'sit', label: t('Sit down'), icon: 'sit' },
+  { posture: 'lie', label: t('Lie down'), icon: 'window' },
+  { posture: 'side', label: t('On her side'), icon: 'window' },
+  { posture: 'stand', label: t('Stand up'), icon: 'character' },
 ];
 
 const GENDER = { female: 'donna', male: 'uomo' };
 
-/** 'vrm', 'flame' o 'spirit' (senza corpo), da `dc:form` e `dc:body` (li legge anche il personaggio). */
+/** 'spirit' (just the flame), 'flame' or 'vrm' (with the body), from `dc:body` and `dc:form` (the character reads them too). */
 export function currentForm() {
-  return readSetting('dc:body', 'vrm') === 'none' ? 'spirit' : readSetting('dc:form', 'vrm');
+  return readBody() === 'none' ? 'spirit' : readSetting('dc:form', 'vrm');
 }
 
-/** Salva la forma scelta; al personaggio la manda chi chiama (`{type: 'form', value}`). */
+/** The flame's colours (frontend/src/flame/palettes.js), with the swatch colour. */
+const FLAME_COLORS = Object.entries(PALETTE_LABELS).map(([value, label]) => ({ value, label, swatch: swatchColor(value) }));
+
+/** The short name under each wardrobe preview (the long one is in the title). */
+const OUTFIT_SHORT = {
+  auto: 'Auto',
+  none: t('Nothing'),
+  hachimaki: 'Hachimaki',
+  kitsune: 'Kitsune',
+  sakura: 'Sakura',
+  lantern: t('Lantern'),
+  glasses: t('Glasses'),
+  scarf: t('Scarf'),
+  kasa: t('Straw'),
+  witch: t('Witch'),
+  santa: t('Christmas'),
+  party: t('Party'),
+};
+
+/** Saves the chosen form; whoever calls sends it to the character (`{type: 'form', value}`). */
 export function applyForm(value) {
   writeSetting('dc:body', value === 'spirit' ? 'none' : 'vrm');
   writeSetting('dc:form', value === 'vrm' ? 'vrm' : 'flame');
 }
 
-/** Le lingue in cui una voce clonata può parlare (quelle di Chatterbox che il pannello sa nominare). */
+/** The languages a cloned voice can speak (those of Chatterbox the panel can name). */
 const CLONE_LANGUAGES = ['it', 'en', 'es', 'fr', 'de', 'pt', 'ja', 'zh', 'hi'];
 
-/** Come il backend chiama le lingue (`replyLanguageResolved`), per codice. */
+/** How the backend names the languages (`replyLanguageResolved`), by code. */
 const ENGLISH_NAMES = {
   it: 'Italian',
   en: 'English',
@@ -113,7 +143,7 @@ const ENGLISH_NAMES = {
   cmn: 'Mandarin Chinese',
 };
 
-/** Riproduce PCM 16 bit mono a 16 kHz e aspetta che finisca. */
+/** Plays 16-bit mono PCM at 16 kHz and waits for it to finish. */
 async function playPcm16(buffer) {
   const samples = new Int16Array(buffer);
   const context = new AudioContext();
@@ -145,15 +175,15 @@ export class CharacterView {
     this._loadMicrophones();
     this.memory.load();
     this._showWeather?.();
-    // Scelta dalla presentazione, nella stessa finestra: lo "storage" non arriva.
+    // Chosen from the introduction, in the same window: the "storage" event doesn't arrive.
     this.form.value = currentForm();
   }
 
-  // ----------------------------------------------------------------- DOM
+  // ------------------------------------------------------------------- DOM
   _build() {
-    // Voce ---------------------------------------------------------------
+    // Voice -----------------------------------------------------------------
     this.engineLine = el('p', { class: 'card-sub' });
-    this.search = el('input', { class: 'field-input search', type: 'search', placeholder: 'Cerca una voce…' });
+    this.search = el('input', { class: 'field-input search', type: 'search', placeholder: t('Search a voice…') });
     this.languageChips = el('div', { class: 'chip-row' });
     this.voiceList = el('div', { class: 'voice-list', role: 'listbox' });
     this.replyLanguage = el(
@@ -162,7 +192,7 @@ export class CharacterView {
       REPLY_LANGUAGES.map((option) => el('option', { value: option.value }, option.label)),
     );
     this.languageHint = el('p', { class: 'hint' });
-    this.muted = this._switch('Voce accesa', 'Se la spegni risponde solo per iscritto, e le voci a consumo non spendono niente.');
+    this.muted = this._switch(t('Voice on'), t('If you turn it off she answers only in writing, and pay-per-use voices spend nothing.'));
 
     this.search.addEventListener('input', () => {
       this.filter.text = this.search.value.trim().toLowerCase();
@@ -182,30 +212,30 @@ export class CharacterView {
 
     const voiceCard = this._card(
       'volume',
-      'Voce',
+      t('Voice'),
       this.engineLine,
       this.search,
       this.languageChips,
       this.voiceList,
       this.cloneBox,
-      this._row('Risponde', this.replyLanguage),
+      this._row(t('Answers'), this.replyLanguage),
       this.languageHint,
       this.muted.node,
     );
 
-    // Microfono -----------------------------------------------------------
+    // Microphone ------------------------------------------------------------
     this.micSelect = el('select', { class: 'field-input' });
     this.micMeter = el('span', { class: 'mic-meter-fill' });
-    this.micStatus = el('p', { class: 'hint' }, 'Parla per 4 secondi: poi ti faccio riascoltare e ti dico cosa ho capito.');
-    this.micTest = el('button', { class: 'btn', type: 'button', onClick: () => this._testMicrophone() }, icon('mic', 16), el('span', {}, 'Prova il microfono'));
+    this.micStatus = el('p', { class: 'hint' }, t("Talk for 4 seconds: then I'll play it back and tell you what I understood."));
+    this.micTest = el('button', { class: 'btn', type: 'button', onClick: () => this._testMicrophone() }, icon('mic', 16), el('span', {}, t('Test the microphone')));
     this.micSelect.addEventListener('change', () => {
       writeSetting(MIC_SETTING, this.micSelect.value);
       this.companion?.sendToPet({ type: 'mic-device', value: this.micSelect.value });
     });
     navigator.mediaDevices?.addEventListener?.('devicechange', () => this._loadMicrophones());
     this.bargeIn = this._switch(
-      'Puoi interromperla parlando',
-      'In ascolto continuo o a chiamata: se le parli sopra si ferma e ti ascolta. Se con le casse alte si interrompe da sola, spegnilo o usa le cuffie.',
+      t('You can interrupt her by talking'),
+      t('In continuous or wake-word listening: if you talk over her she stops and listens. If she interrupts herself with loud speakers, turn it off or use headphones.'),
     );
     this.bargeIn.input.checked = readSetting(BARGE_IN_SETTING, true);
     this.bargeIn.input.addEventListener('change', () => {
@@ -214,15 +244,15 @@ export class CharacterView {
     });
     const micCard = this._card(
       'mic',
-      'Microfono',
-      this._row('Usa', this.micSelect),
+      t('Microphone'),
+      this._row(t('Use'), this.micSelect),
       el('div', { class: 'mic-meter' }, this.micMeter),
       this.micTest,
       this.micStatus,
       this.bargeIn.node,
     );
 
-    // Aspetto ------------------------------------------------------------
+    // Look --------------------------------------------------------------------
     this.scale = this._slider(0.5, 2.6, 0.05, (value) => `${Math.round(value * 100)}%`);
     this.gain = this._slider(0.4, 2.5, 0.05, (value) => value.toFixed(2));
     const gain = readSetting('dc:gain', 1.15);
@@ -230,7 +260,7 @@ export class CharacterView {
 
     let scaleTimer = null;
     this.scale.input.addEventListener('input', () => {
-      // Ridimensionare la finestra a ogni pixel dello slider e' pesante.
+      // Resizing the window at every pixel of the slider is heavy.
       clearTimeout(scaleTimer);
       scaleTimer = setTimeout(() => this.companion?.setScale(this.scale.value()), 40);
     });
@@ -239,52 +269,142 @@ export class CharacterView {
       this.companion?.sendToPet({ type: 'gain', value: this.gain.value() });
     });
 
-    const model = el('button', { class: 'btn', type: 'button', onClick: () => this.companion?.pickModel() }, icon('cube', 16), el('span', {}, 'Cambia modello 3D…'));
-    // La forma: il personaggio o la fiammella, la sua anima (frontend/src/flame.js);
-    // oppure solo la fiammella, senza corpo: il VRM allora non si carica nemmeno.
+    const model = el('button', { class: 'btn', type: 'button', onClick: () => this.companion?.pickModel() }, icon('body', 16), el('span', {}, t('Choose a 3D body (VRM)…')));
+    // The flame is her (frontend/src/flame.js); the 3D body is optional:
+    // without it the VRM isn't even loaded; with it, she enters and leaves it when you like.
     this.form = el(
       'select',
       { class: 'field-input' },
-      el('option', { value: 'vrm' }, 'Personaggio 3D'),
-      el('option', { value: 'flame' }, 'Fiammella'),
-      el('option', { value: 'spirit' }, 'Solo fiammella, senza corpo'),
+      el('option', { value: 'spirit' }, t('Flame')),
+      el('option', { value: 'flame' }, t('Flame, with a 3D body ready')),
+      el('option', { value: 'vrm' }, t('Inside the 3D body')),
     );
     this.form.value = currentForm();
     this.form.addEventListener('change', () => {
       applyForm(this.form.value);
       this.companion?.sendToPet({ type: 'form', value: this.form.value });
     });
-    // Cambiata dal dock sul personaggio: il pannello si allinea (stesso localStorage).
+    // Changed from the dock on the character: the panel lines up (same localStorage).
     window.addEventListener('storage', (event) => {
       if (event.key === 'dc:form' || event.key === 'dc:body') this.form.value = currentForm();
     });
+    // The flame's colour: it shows right away, with a flare. Besides the six
+    // named ones there's the free one (the rainbow swatch opens the picker).
+    let flameColor = paletteKey(readSetting('dc:flame-color', 'lilac')) ?? 'lilac';
+    const swatches = el('div', { class: 'swatch-row', role: 'radiogroup', 'aria-label': t('Flame colour') });
+    let colorTimer = null;
+    const pickColor = (value, { now = true } = {}) => {
+      flameColor = value;
+      writeSetting('dc:flame-color', flameColor);
+      clearTimeout(colorTimer);
+      // Dragging in the picker sends many colours: only the last one goes to the flame.
+      colorTimer = setTimeout(() => this.companion?.sendToPet({ type: 'flame-color', value: flameColor }), now ? 0 : 120);
+      renderSwatches();
+      renderWardrobe();
+    };
+    const custom = el('input', { type: 'color', class: 'swatch-picker', 'aria-label': t('Free colour') });
+    custom.addEventListener('input', () => pickColor(custom.value.toLowerCase(), { now: false }));
+    const renderSwatches = () => {
+      const free = flameColor.startsWith('#');
+      custom.value = free ? flameColor : '#a58bff';
+      swatches.replaceChildren(
+        ...FLAME_COLORS.map((color) =>
+          el('button', {
+            type: 'button',
+            class: `swatch${color.value === flameColor ? ' on' : ''}`,
+            role: 'radio',
+            'aria-checked': String(color.value === flameColor),
+            'aria-label': color.label,
+            title: color.label,
+            style: { background: color.swatch },
+            onClick: () => pickColor(color.value),
+          }),
+        ),
+        el(
+          'label',
+          {
+            class: `swatch swatch-free${free ? ' on' : ''}`,
+            title: free ? t('Free colour ({color})', { color: flameColor }) : t('Free colour'),
+            style: free ? { background: flameColor } : {},
+          },
+          custom,
+        ),
+      );
+    };
+
+    // The wardrobe: one preview per accessory, in the current colour.
+    let outfit = parseOutfit(readSetting('dc:flame-outfit', 'auto'));
+    const wardrobeNow = el('span', { class: 'wardrobe-now' });
+    const wardrobe = el('div', { class: 'wardrobe', role: 'radiogroup', 'aria-label': t('Wardrobe') });
+    const describe = (choice) => {
+      if (choice !== 'auto') return OUTFIT_LABELS[choice];
+      const season = seasonalOutfit();
+      return season === 'none' ? t('Automatic · nothing this season') : t('Automatic · {outfit}', { outfit: OUTFIT_LABELS[season] });
+    };
+    const renderWardrobe = () => {
+      wardrobeNow.textContent = describe(outfit);
+      wardrobe.replaceChildren(
+        ...SELECTIONS.map((choice) => {
+          const tile = el('button', {
+            type: 'button',
+            class: `wardrobe-item${choice === outfit ? ' on' : ''}`,
+            role: 'radio',
+            'aria-checked': String(choice === outfit),
+            title: describe(choice),
+            onClick: () => {
+              outfit = choice;
+              writeSetting('dc:flame-outfit', outfit);
+              this.companion?.sendToPet({ type: 'flame-outfit', value: outfit });
+              renderWardrobe();
+            },
+          });
+          // SVG made in here with already validated colours (palettes.js): no user text.
+          tile.innerHTML = outfitPreview(choice === 'auto' ? seasonalOutfit() : choice, flameColor, { badge: choice === 'auto' });
+          tile.append(el('span', {}, OUTFIT_SHORT[choice]));
+          tile.addEventListener('pointerenter', () => (wardrobeNow.textContent = describe(choice)));
+          tile.addEventListener('pointerleave', () => (wardrobeNow.textContent = describe(outfit)));
+          return tile;
+        }),
+      );
+    };
+    // Changed from the island (the wardrobe is there too): the panel lines up.
+    window.addEventListener('storage', (event) => {
+      if (event.key !== 'dc:flame-outfit') return;
+      outfit = parseOutfit(readSetting('dc:flame-outfit', 'auto'));
+      renderWardrobe();
+    });
+    renderSwatches();
+    renderWardrobe();
+
     const lookCard = this._card(
-      'character',
-      'Aspetto',
+      'flame',
+      t('Look'),
       this._row(
-        'Forma',
+        t('Form'),
         this.form,
-        'La fiammella è la sua anima: piccola, sta sulla barra e ogni tanto fa uno sprint. Mai mentre ti parla, in riunione, a schermo intero o mentre giochi. Senza corpo il modello 3D non si carica: più leggera per il PC.',
+        t("Tsukumo is the flame. The 3D body is optional: without it the model isn't loaded and she's lighter on the PC."),
       ),
-      this._row('Dimensione', this.scale.node),
-      this._row('Bocca', this.gain.node, 'Quanto apre la bocca mentre parla.'),
+      el('div', { class: 'row' }, el('span', { class: 'row-label' }, t('Colour')), swatches),
+      el('div', { class: 'wardrobe-block' }, el('div', { class: 'wardrobe-head' }, el('span', { class: 'row-label' }, t('Wardrobe')), wardrobeNow), wardrobe),
+      this._row(t('Size'), this.scale.node),
+      this._row(t('Mouth'), this.gain.node, t('How wide she opens her mouth while speaking.')),
       model,
     );
 
-    // Comportamento --------------------------------------------------------
-    this.onTop = this._switch('Sempre davanti alle finestre');
-    this.windows = this._switch('Si siede sulle finestre', 'Se la lasci cadere su una finestra ci resta sopra e viaggia con lei.');
-    this.spontaneous = this._switch('Gesti e pose spontanee');
+    // Behaviour ---------------------------------------------------------------
+    this.onTop = this._switch(t('Always in front of windows'));
+    this.windows = this._switch(t('Sits on windows'), t('If you drop her on a window she stays on it and travels with it.'));
+    this.spontaneous = this._switch(t('Spontaneous gestures and poses'));
     this.stance = el('select', { class: 'field-input' }, ...STANCES.map((item) => el('option', { value: item.value }, item.label)));
     this.stance.value = readSetting('dc:stance', 'standard');
     this.stance.addEventListener('change', () => {
       writeSetting('dc:stance', this.stance.value);
       this.companion?.sendToPet({ type: 'stance', value: this.stance.value });
     });
-    this.dance = this._switch('Balla con Spotify', "Quando Spotify suona ascolta l'audio del PC e si muove a tempo.");
-    this.vocals = this._switch('Versetti con la sua voce', 'Un “Ciao!” quando saluta, una risatina alle carezze: con la voce scelta.');
-    this.sleep = this._switch('Si addormenta se non usi il PC', 'Prima è assonnata, poi dorme; quando torni si sveglia e ti saluta.');
-    this.sfx = this._switch('Effetti sonori', 'Un «pop» quando compare, un tonfo quando atterra, un campanello per i promemoria.');
+    this.dance = this._switch(t('Dance to Spotify'), t("When Spotify plays she listens to the PC's audio and moves in time."));
+    this.vocals = this._switch(t('Vocals in her voice'), t('A "Hi!" when she greets, a giggle when petted: in the chosen voice.'));
+    this.sleep = this._switch(t("Falls asleep if you don't use the PC"), t("First she's drowsy, then she sleeps; when you come back she wakes up and greets you."));
+    this.sfx = this._switch(t('Sound effects'), t('A "pop" when she appears, a thud when she lands, a chime for reminders.'));
     this.drowsyAfter = this._slider(1, 30, 1, (value) => `${value} min`);
     this.asleepAfter = this._slider(2, 60, 1, (value) => `${value} min`);
     this.drowsyAfter.set(readSetting('dc:sleep-drowsy', 2));
@@ -299,7 +419,7 @@ export class CharacterView {
     };
     this.drowsyAfter.input.addEventListener('change', sendSleepTimes);
     this.asleepAfter.input.addEventListener('change', sendSleepTimes);
-    this.ghost = this._switch('Modalità fantasma', 'I click la attraversano; per uscirne usa l’icona nell’area di notifica.');
+    this.ghost = this._switch(t('Ghost mode'), t('Clicks go through her; to leave it use the icon in the notification area.'));
 
     this.spontaneous.input.checked = readSetting('dc:spontaneous', true);
     this.dance.input.checked = readSetting('dc:dance', true);
@@ -332,22 +452,22 @@ export class CharacterView {
 
     const behaviourCard = this._card(
       'sit',
-      'Comportamento',
+      t('Behaviour'),
       this.onTop.node,
       this.windows.node,
-      this._row('Come sta in piedi', this.stance, 'Il suo modo di stare ferma: timida, cool, elegante, energica...'),
+      this._row(t('How she stands'), this.stance, t('Her way of standing still: shy, cool, elegant, energetic...')),
       this.spontaneous.node,
       this.vocals.node,
       this.sfx.node,
       this.sleep.node,
-      this._row('Assonnata dopo', this.drowsyAfter.node),
-      this._row('Dorme dopo', this.asleepAfter.node),
+      this._row(t('Drowsy after'), this.drowsyAfter.node),
+      this._row(t('Asleep after'), this.asleepAfter.node),
       this.dance.node,
       this.ghost.node,
     );
     const chatterCard = this._chatterCard();
 
-    // Azioni ---------------------------------------------------------------
+    // Actions -----------------------------------------------------------------
     const chips = ACTIONS.map((action) =>
       el(
         'button',
@@ -367,35 +487,50 @@ export class CharacterView {
         el('span', {}, action.label),
       ),
     );
-    // Le clip .vrma "a richiesta" (vedi clips.js) si aggiungono qui quando arrivano.
+    // The "on request" .vrma clips (see clips.js) are added here when they arrive.
     this.clipChips = el('div', { class: 'action-grid' });
     this.app.on('hello', (message) => this._renderClipChips(message.animations ?? []));
     const actionsCard = this._card(
       'hand',
-      'Falle fare qualcosa',
+      t('Make her do something'),
       el('div', { class: 'action-grid' }, chips),
       this.clipChips,
-      el('p', { class: 'hint' }, 'Sedersi e sdraiarsi funzionano quando è sulla barra delle applicazioni.'),
+      el('p', { class: 'hint' }, t("The sprint is the flame's; sitting and lying down are the 3D body's, when it's on the taskbar.")),
     );
 
-    // Altro ----------------------------------------------------------------
-    this.debug = this._switch('Pannello di debug del lip-sync');
+    // More --------------------------------------------------------------------
+    this.debug = this._switch(t('Lip-sync debug panel'));
     this.debug.input.addEventListener('change', () => this.companion?.sendToPet({ type: 'debug', value: this.debug.input.checked }));
-    const quit = el('button', { class: 'btn danger', type: 'button', onClick: () => this.companion?.quit() }, icon('power', 16), el('span', {}, 'Chiudi Tsukumo'));
+    const quit = el('button', { class: 'btn danger', type: 'button', onClick: () => this.companion?.quit() }, icon('power', 16), el('span', {}, t('Quit Tsukumo')));
     const replay = el(
       'button',
       { class: 'btn', type: 'button', onClick: () => this.app.welcome?.start() },
       icon('star', 16),
-      el('span', {}, 'Rifai la presentazione'),
+      el('span', {}, t('Redo the introduction')),
     );
-    const moreCard = this._card('bug', 'Altro', this.debug.node, replay, quit);
+    const moreCard = this._card('bug', t('More'), this.debug.node, replay, quit);
+
+    // Interface language (i18n.js): every open window reloads in the new one.
+    const uiLanguage = el(
+      'select',
+      { class: 'field-input', 'aria-label': t('Interface language') },
+      el('option', { value: 'auto' }, t('Automatic (system)')),
+      ...Object.entries(UI_LANGUAGES).map(([code, name]) => el('option', { value: code }, name)),
+    );
+    uiLanguage.value = savedLanguage();
+    uiLanguage.addEventListener('change', () => {
+      setLanguage(uiLanguage.value);
+      window.location.reload();
+    });
+    const languageCard = this._card('globe', t('Language'), this._row(t('Interface'), uiLanguage, t('What she says follows her voice (Voice, above).')));
 
     if (!this.companion) {
       for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
     }
     this.memory = new MemoryCard(this.app, (...args) => this._card(...args));
     this.music = new MusicCard(this.app, (...args) => this._card(...args));
-    this.root.append(voiceCard, this.memory.node, this.music.node, micCard, chatterCard, lookCard, behaviourCard, actionsCard, moreCard);
+    // First her (the flame and her colour), then the voice and the rest.
+    this.root.append(lookCard, voiceCard, this.memory.node, this.music.node, micCard, chatterCard, behaviourCard, actionsCard, languageCard, moreCard);
   }
 
   _renderClipChips(animations) {
@@ -414,40 +549,40 @@ export class CharacterView {
   }
 
   /**
-   * Quanto chiacchiera di sua iniziativa e di cosa (vedi backend/proactive.py).
-   * Le preferenze stanno nel backend (`/api/preferences`), non qui.
+   * How much she chats on her own and about what (see backend/proactive.py).
+   * The preferences live in the backend (`/api/preferences`), not here.
    */
   _chatterCard() {
     const level = el(
       'select',
       { class: 'field-input' },
       ...[
-        ['off', 'Mai (solo batteria)'],
-        ['rare', 'Poco'],
-        ['normal', 'Normale'],
-        ['chatty', 'Tanto'],
+        ['off', t('Never (battery only)')],
+        ['rare', t('A little')],
+        ['normal', t('Normal')],
+        ['chatty', t('A lot')],
       ].map(([value, label]) => el('option', { value }, label)),
     );
     const topics = {
-      night: this._switch('Ora tarda', 'All’una sei ancora lì? Te lo fa notare (e sbadiglia).'),
-      breaks: this._switch('Pause', 'Dopo due ore di fila al PC ti propone una pausa.'),
-      weather: this._switch('Meteo', 'Il buongiorno col tempo che fa, il caldo, il freddo, la pioggia.'),
-      battery: this._switch('Batteria', 'Al 20, 10 e 5% ti ricorda il caricabatterie.'),
-      youtube: this._switch('Video di YouTube', 'Un commento sul video che stai guardando o sul suo creator.'),
-      news: this._switch('Notizie', 'Un titolo di oggi, commentato.'),
-      facts: this._switch('Curiosità', 'Un fatto sorprendente, ogni tanto.'),
-      films: this._switch('Film', 'Un film da vedere, con il perché.'),
+      night: this._switch(t('Late hour'), t('Still there at 1 a.m.? She points it out (and yawns).')),
+      breaks: this._switch(t('Breaks'), t('After two hours straight at the PC she suggests a break.')),
+      weather: this._switch(t('Weather'), t('Good morning with the weather, the heat, the cold, the rain.')),
+      battery: this._switch(t('Battery'), t('At 20, 10 and 5% she reminds you of the charger.')),
+      youtube: this._switch(t('YouTube videos'), t("A comment on the video you're watching or on its creator.")),
+      news: this._switch(t('News|headlines'), t("One of today's headlines, with a comment.")),
+      facts: this._switch(t('Fun facts'), t('A surprising fact, now and then.')),
+      films: this._switch(t('Films'), t('A film to watch, and why.')),
     };
-    const city = el('input', { class: 'field-input', type: 'text', placeholder: 'Vuoto = dall’indirizzo IP', 'aria-label': 'Città per il meteo' });
+    const city = el('input', { class: 'field-input', type: 'text', placeholder: t('Empty = from the IP address'), 'aria-label': t('City for the weather') });
     const weatherLine = el('p', { class: 'card-sub' });
 
-    // Chi scrive notizie, curiosità e commenti: un modello a parte (cloud o
-    // locale), così un agente a consumo non spende un turno per ogni chiacchiera.
-    const brain = el('select', { class: 'field-input' }, el('option', { value: '' }, 'Il cervello principale'));
-    const models = el('input', { class: 'field-input', type: 'text', spellcheck: 'false', 'aria-label': 'Modelli per le chiacchiere' });
-    const key = el('input', { class: 'field-input', type: 'password', autocomplete: 'off', placeholder: 'Incolla la chiave', 'aria-label': 'Chiave API per le chiacchiere' });
-    const modelsRow = this._row('Modelli', models, 'Separati da virgole: se il primo è occupato prova il successivo.');
-    const keyRow = this._row('Chiave', key, 'Resta nel file .env di questo PC, come quelle in Motori.');
+    // Who writes news, fun facts and comments: a separate model (cloud or
+    // local), so a pay-per-use agent doesn't spend a turn on every chat.
+    const brain = el('select', { class: 'field-input' }, el('option', { value: '' }, t('The main brain')));
+    const models = el('input', { class: 'field-input', type: 'text', spellcheck: 'false', 'aria-label': t('Models for the chatter') });
+    const key = el('input', { class: 'field-input', type: 'password', autocomplete: 'off', placeholder: t('Paste the key'), 'aria-label': t('API key for the chatter') });
+    const modelsRow = this._row(t('Models'), models, t('Comma separated: if the first is busy it tries the next one.'));
+    const keyRow = this._row(t('Key'), key, t("It stays in this PC's .env file, like those in Engines."));
     const brainLine = el('p', { class: 'card-sub' });
     const brains = { specs: {}, saved: {}, error: null };
     const brainSpec = () => brains.specs[brain.value] ?? null;
@@ -457,11 +592,11 @@ export class CharacterView {
       const secret = secretOf(spec);
       const model = spec?.fields.find((field) => field.env.endsWith('_MODEL'));
       modelsRow.hidden = !model;
-      models.placeholder = model?.default ? `Vuoto = ${model.default}` : '';
+      models.placeholder = model?.default ? t('Empty = {model}', { model: model.default }) : '';
       keyRow.hidden = !secret || Boolean(brains.saved[spec.id]?.[secret.env]);
-      if (!spec) brainLine.textContent = 'Notizie, curiosità e commenti li scrive il cervello scelto in Motori.';
-      else if (brains.error) brainLine.textContent = `${spec.label} non ha risposto: ${brains.error}`;
-      else brainLine.textContent = `Li scrive ${spec.label}; il cervello principale resta per quando gli parli tu.`;
+      if (!spec) brainLine.textContent = t('News, fun facts and comments are written by the brain chosen in Engines.');
+      else if (brains.error) brainLine.textContent = t("{engine} didn't answer: {error}", { engine: tx(spec.label), error: tx(brains.error) });
+      else brainLine.textContent = t('{engine} writes them; the main brain stays for when you talk to her.', { engine: tx(spec.label) });
     };
     const loadBrains = async () => {
       try {
@@ -472,13 +607,13 @@ export class CharacterView {
         brains.saved = data.saved?.llm ?? {};
         const current = brain.value;
         brain.replaceChildren(
-          el('option', { value: '' }, 'Il cervello principale'),
-          ...usable.map((spec) => el('option', { value: spec.id }, spec.pricing === 'free' ? spec.label : `${spec.label} (${spec.pricing === 'freemium' ? 'anche gratis' : 'a consumo'})`)),
+          el('option', { value: '' }, t('The main brain')),
+          ...usable.map((spec) => el('option', { value: spec.id }, spec.pricing === 'free' ? spec.label : `${tx(spec.label)} (${spec.pricing === 'freemium' ? t('free too') : t('pay as you go')})`)),
         );
         brain.value = current in brains.specs ? current : '';
         refreshBrain();
       } catch {
-        // Senza backend resta "il cervello principale".
+        // Without the backend it stays "the main brain".
       }
     };
     const saveKey = async () => {
@@ -492,13 +627,13 @@ export class CharacterView {
           body: JSON.stringify({ kind: 'llm', provider: spec.id, options: { [secret.env]: key.value.trim() } }),
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+        if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
         brains.saved[spec.id] = data.saved;
         key.value = '';
         refreshBrain();
-        this.app.toast(`Chiave di ${spec.label} salvata`, 'ok');
+        this.app.toast(t('{engine} key saved', { engine: tx(spec.label) }), 'ok');
       } catch (error) {
-        this.app.toast(`Chiave non salvata: ${error.message}`, 'error');
+        this.app.toast(t('Key not saved: {error}', { error: error.message }), 'error');
       }
     };
 
@@ -511,7 +646,7 @@ export class CharacterView {
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
       } catch (error) {
-        this.app.toast(`Preferenza non salvata: ${error.message}`, 'error');
+        this.app.toast(t('Preference not saved: {error}', { error: error.message }), 'error');
       }
     };
     const apply = (prefs) => {
@@ -529,8 +664,8 @@ export class CharacterView {
         const data = await response.json();
         const weather = data.weather;
         weatherLine.textContent = weather
-          ? `Adesso${weather.city ? ` a ${weather.city}` : ''}: ${weather.temperature}°, ${WEATHER_WORDS[weather.condition] ?? weather.condition}.`
-          : 'Meteo non disponibile (serve la connessione).';
+          ? weather.city ? t('Now in {city}: {temp}°, {condition}.', { city: weather.city, temp: weather.temperature, condition: WEATHER_WORDS[weather.condition] ?? weather.condition }) : t('Now: {temp}°, {condition}.', { temp: weather.temperature, condition: WEATHER_WORDS[weather.condition] ?? weather.condition })
+          : t('Weather unavailable (it needs the connection).');
       } catch {
         weatherLine.textContent = '';
       }
@@ -559,13 +694,13 @@ export class CharacterView {
 
     return this._card(
       'chat',
-      'Chiacchiere',
-      el('p', { class: 'card-sub' }, 'Quanto parla di sua iniziativa: mai con lo schermo intero, in riunione o se non sei al PC.'),
-      this._row('Quanto', level),
+      t('Chatter'),
+      el('p', { class: 'card-sub' }, t("How much she talks on her own: never in full screen, in a meeting or when you're away from the PC.")),
+      this._row(t('How much'), level),
       ...Object.values(topics).map((control) => control.node),
-      this._row('Città', city),
+      this._row(t('City'), city),
       weatherLine,
-      this._row('Chi le scrive', brain),
+      this._row(t('Who writes them'), brain),
       modelsRow,
       keyRow,
       brainLine,
@@ -581,27 +716,27 @@ export class CharacterView {
     );
   }
 
-  /** "Clona una voce": scegli un audio, dagli un nome e una lingua. Solo coi motori che sanno clonare. */
+  /** "Clone a voice": choose a recording, give it a name and a language. Only with engines that can clone. */
   _buildClone() {
     const file = el('input', { type: 'file', accept: 'audio/*,.wav,.mp3,.flac,.ogg', class: 'hidden' });
-    const name = el('input', { class: 'field-input', type: 'text', maxlength: 40, placeholder: 'Nome della voce' });
+    const name = el('input', { class: 'field-input', type: 'text', maxlength: 40, placeholder: t('Voice name') });
     const language = el(
       'select',
       { class: 'field-input' },
       CLONE_LANGUAGES.map((code) => el('option', { value: code }, languageLabel(code))),
     );
-    const status = el('p', { class: 'hint' }, 'Un audio pulito di 5-20 secondi, con una sola persona che parla e senza musica sotto.');
-    const submit = el('button', { class: 'btn primary', type: 'button' }, icon('check', 16), el('span', {}, 'Clona'));
-    const cancel = el('button', { class: 'btn', type: 'button' }, el('span', {}, 'Annulla'));
-    const form = el('div', { class: 'clone-form hidden' }, this._row('Nome', name), this._row('Parla in', language), status, el('div', { class: 'clone-actions' }, submit, cancel));
-    const open = el('button', { class: 'btn', type: 'button', onClick: () => file.click() }, icon('mic', 16), el('span', {}, 'Clona una voce…'));
+    const status = el('p', { class: 'hint' }, t('A clean recording of 5-20 seconds, with one person speaking and no music underneath.'));
+    const submit = el('button', { class: 'btn primary', type: 'button' }, icon('check', 16), el('span', {}, t('Clone')));
+    const cancel = el('button', { class: 'btn', type: 'button' }, el('span', {}, t('Cancel')));
+    const form = el('div', { class: 'clone-form hidden' }, this._row(t('Name'), name), this._row(t('Speaks'), language), status, el('div', { class: 'clone-actions' }, submit, cancel));
+    const open = el('button', { class: 'btn', type: 'button', onClick: () => file.click() }, icon('mic', 16), el('span', {}, t('Clone a voice…')));
 
     const reset = () => {
       file.value = '';
       form.classList.add('hidden');
       open.classList.remove('hidden');
       status.classList.remove('error');
-      status.textContent = 'Un audio pulito di 5-20 secondi, con una sola persona che parla e senza musica sotto.';
+      status.textContent = t('A clean recording of 5-20 seconds, with one person speaking and no music underneath.');
     };
     file.addEventListener('change', () => {
       const picked = file.files?.[0];
@@ -619,16 +754,16 @@ export class CharacterView {
       if (!picked) return;
       submit.disabled = true;
       status.classList.remove('error');
-      status.textContent = 'Ascolto la voce e la imparo…';
+      status.textContent = t('Listening to the voice and learning it…');
       try {
-        const query = new URLSearchParams({ name: name.value.trim() || 'Voce', language: language.value });
+        const query = new URLSearchParams({ name: name.value.trim() || t('Voice'), language: language.value });
         const response = await fetch(apiUrl(`/api/voices/clone?${query}`), { method: 'POST', body: picked });
         const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.error || result.detail || `Errore ${response.status}`);
+        if (!response.ok) throw new Error(tx(result.error || result.detail) || t('Error {code}', { code: response.status }));
         const engine = this.app.settings.ttsEngine;
         if (engine) writeSetting(`dc:voice:${engine}`, result.voice);
         reset();
-        this.app.toast('Voce clonata: ora parla così', 'ok');
+        this.app.toast(t('Voice cloned: now she speaks like this'), 'ok');
         this._preview({ id: result.voice, language: language.value });
       } catch (error) {
         status.classList.add('error');
@@ -640,19 +775,19 @@ export class CharacterView {
     return el('div', { class: 'clone-box hidden' }, file, open, form);
   }
 
-  // ----------------------------------------------------------- microfono
+  // ------------------------------------------------------------- microphone
   async _loadMicrophones() {
     if (!navigator.mediaDevices?.enumerateDevices) return;
     let mics = [];
     try {
       mics = await listMicrophones();
     } catch (error) {
-      this.micStatus.textContent = `Non riesco a vedere i microfoni: ${error.message}`;
+      this.micStatus.textContent = t("I can't see the microphones: {error}", { error: error.message });
     }
     const saved = readSetting(MIC_SETTING, '');
-    const options = [el('option', { value: '' }, 'Predefinito di Windows'), ...mics.map((mic) => el('option', { value: mic.id }, mic.label))];
+    const options = [el('option', { value: '' }, t('Windows default')), ...mics.map((mic) => el('option', { value: mic.id }, mic.label))];
     if (saved && !mics.some((mic) => mic.id === saved)) {
-      options.push(el('option', { value: saved }, 'Microfono scollegato (uso il predefinito)'));
+      options.push(el('option', { value: saved }, t('Microphone unplugged (using the default)')));
     }
     this.micSelect.replaceChildren(...options);
     this.micSelect.value = saved;
@@ -663,7 +798,7 @@ export class CharacterView {
     this.micTesting = true;
     this.micTest.disabled = true;
     this.micStatus.classList.remove('warn', 'error');
-    // Il personaggio non deve prendere la frase di prova per una domanda.
+    // The character must not take the test sentence for a question.
     this.companion?.sendToPet({ type: 'mic-test', value: true });
 
     let peak = 0;
@@ -685,7 +820,7 @@ export class CharacterView {
       if (!(await input.start({ mode: 'push', deviceId: this.micSelect.value }))) throw new Error(this.micStatus.textContent);
       input.beginPush();
       for (let left = MIC_TEST_SECONDS; left > 0; left -= 1) {
-        this.micStatus.textContent = `Parla adesso… ${left}`;
+        this.micStatus.textContent = t('Talk now… {left}', { left });
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
       input.endPush();
@@ -694,19 +829,19 @@ export class CharacterView {
 
       if (!recorded || peak < 0.004) {
         this.micStatus.classList.add('error');
-        this.micStatus.textContent = 'Non sento niente: controlla che il microfono sia collegato e non silenziato in Windows.';
+        this.micStatus.textContent = t("I can't hear anything: check that the microphone is plugged in and not muted in Windows.");
         return;
       }
-      this.micStatus.textContent = 'Ti faccio riascoltare…';
+      this.micStatus.textContent = t('Playing it back…');
       await playPcm16(recorded);
-      this.micStatus.textContent = 'Cerco di capire cosa hai detto…';
+      this.micStatus.textContent = t('Trying to understand what you said…');
       const heard = await this._transcribe(recorded);
-      const quiet = peak < VAD_THRESHOLD ? ' Però ti sento piano: se mi lasci sempre in ascolto potrei non accorgermi che parli.' : '';
+      const quiet = peak < VAD_THRESHOLD ? t(" But I hear you faintly: if you leave me always listening I might not notice you're talking.") : '';
       this.micStatus.classList.toggle('warn', Boolean(quiet));
       this.micStatus.textContent = `${heard}${quiet}`;
     } catch (error) {
       this.micStatus.classList.add('error');
-      this.micStatus.textContent = error.message || 'Microfono non disponibile';
+      this.micStatus.textContent = error.message || t('Microphone unavailable');
     } finally {
       input.stop();
       this.micMeter.style.width = '0%';
@@ -719,14 +854,14 @@ export class CharacterView {
   async _transcribe(pcm16) {
     const response = await fetch(apiUrl('/api/transcribe'), { method: 'POST', body: pcm16 });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) return `L'audio arriva bene. ${result.error || result.detail || ''}`.trim();
-    return result.text?.trim() ? `Ho capito: «${result.text.trim()}»` : 'L’audio arriva, ma non ho riconosciuto parole.';
+    if (!response.ok) return `${t('The audio comes through fine.')} ${tx(result.error || result.detail || '')}`.trim();
+    return result.text?.trim() ? t('I understood: "{text}"', { text: result.text.trim() }) : t('The audio comes through, but I recognized no words.');
   }
 
   async _removeVoice(voice) {
-    if (!window.confirm(`Eliminare la voce "${voice.name || voice.id}"?`)) return;
+    if (!window.confirm(t('Delete the voice "{name}"?', { name: voice.name || voice.id }))) return;
     const response = await fetch(apiUrl(`/api/voices/${encodeURIComponent(voice.id)}`), { method: 'DELETE' });
-    if (!response.ok) this.app.toast('Non sono riuscita a eliminarla', 'warn');
+    if (!response.ok) this.app.toast(t("I couldn't delete it"), 'warn');
   }
 
   _row(label, control, hint) {
@@ -765,7 +900,7 @@ export class CharacterView {
     };
   }
 
-  // -------------------------------------------------------------- stato
+  // ------------------------------------------------------------------ state
   _listen() {
     const { app } = this;
     app.on('voices', () => this._renderVoices());
@@ -785,9 +920,9 @@ export class CharacterView {
   }
 
   /**
-   * Le scelte fatte qui valgono anche dopo un riavvio del backend: se e'
-   * ripartito coi default, gliele rimandiamo. La voce e' salvata per motore:
-   * `af_heart` e' una voce Kokoro e su ElevenLabs non significa niente.
+   * The choices made here hold after a backend restart too: if it started
+   * again with the defaults, we send them back. The voice is saved per engine:
+   * `af_heart` is a Kokoro voice and means nothing on ElevenLabs.
    */
   _restorePreferences(config) {
     const wanted = {};
@@ -810,10 +945,10 @@ export class CharacterView {
   _renderEngineLine() {
     const tts = this.app.engines?.tts;
     this.engineLine.replaceChildren(
-      el('span', {}, `Motore: ${tts?.label ?? this.app.settings.ttsEngine ?? '…'}`),
+      el('span', {}, t('Engine: {name}', { name: tx(tts?.label) ?? this.app.settings.ttsEngine ?? '…' })),
       el('button', { class: 'link-btn', type: 'button', onClick: () => this.app.showTab('engines', { section: 'tts' }) }, 'cambia', icon('chevronRight', 13)),
     );
-    if (tts?.state === 'degraded' && tts.detail) this.engineLine.append(el('span', { class: 'warn-text' }, tts.detail));
+    if (tts?.state === 'degraded' && tts.detail) this.engineLine.append(el('span', { class: 'warn-text' }, tx(tts.detail)));
   }
 
   _renderLanguageHint() {
@@ -824,14 +959,14 @@ export class CharacterView {
     this.languageHint.classList.toggle('warn', reply !== 'auto' && Boolean(mismatch));
     if (reply === 'auto') {
       this.languageHint.textContent = voiceLanguage
-        ? `Risponde in ${languageLabel(voiceLanguage).toLowerCase()}, la lingua della voce, anche se le scrivi in un'altra.`
-        : 'La voce è multilingua: risponde nella lingua in cui le scrivi.';
+        ? t("She answers in {language}, the voice's language, even if you write to her in another one.", { language: LANG === 'it' ? languageLabel(voiceLanguage).toLowerCase() : languageLabel(voiceLanguage) })
+        : t('The voice is multilingual: she answers in the language you write in.');
     } else {
-      this.languageHint.textContent = mismatch ? 'Attenzione: questa voce pronuncia bene solo la sua lingua.' : '';
+      this.languageHint.textContent = mismatch ? t('Careful: this voice pronounces only its own language well.') : '';
     }
   }
 
-  // ---------------------------------------------------------------- voci
+  // ------------------------------------------------------------------ voices
   _renderVoices() {
     const voices = this.app.voices ?? [];
     const current = this.app.settings.voice;
@@ -839,7 +974,7 @@ export class CharacterView {
     const counts = new Map();
     for (const voice of voices) counts.set(voice.language || '', (counts.get(voice.language || '') ?? 0) + 1);
 
-    // Filtri per lingua: prima quella della voce attuale, poi le piu' comuni.
+    // Language filters: first the current voice's, then the most common ones.
     const currentLanguage = voices.find((voice) => voice.id === current)?.language ?? null;
     const languages = [...counts.keys()].sort((a, b) => {
       const score = (code) => (code === currentLanguage ? -3 : code === 'it' ? -2 : code === 'en' ? -1 : 0);
@@ -860,7 +995,7 @@ export class CharacterView {
           },
           label,
         );
-      this.languageChips.append(chip(null, 'Tutte'), ...languages.slice(0, 6).map((code) => chip(code, languageLabel(code))));
+      this.languageChips.append(chip(null, t('All')), ...languages.slice(0, 6).map((code) => chip(code, languageLabel(code))));
     }
     this.search.classList.toggle('hidden', voices.length <= 8);
 
@@ -872,11 +1007,11 @@ export class CharacterView {
 
     this.voiceList.replaceChildren();
     if (!voices.length) {
-      this.voiceList.append(el('p', { class: 'hint pad' }, 'Carico le voci del motore…'));
+      this.voiceList.append(el('p', { class: 'hint pad' }, t("Loading the engine's voices…")));
       return;
     }
     if (!matches.length) {
-      this.voiceList.append(el('p', { class: 'hint pad' }, 'Nessuna voce corrisponde.'));
+      this.voiceList.append(el('p', { class: 'hint pad' }, t('No voice matches.')));
       return;
     }
     for (const voice of matches.slice(0, 300)) this.voiceList.append(this._voiceRow(voice, voice.id === current));
@@ -885,7 +1020,7 @@ export class CharacterView {
 
   _voiceRow(voice, selected) {
     const meta = [languageLabel(voice.language), GENDER[voice.gender], voice.description].filter(Boolean).join(' · ');
-    const preview = iconButton('play', { title: 'Ascolta', className: 'icon-btn small', size: 14 });
+    const preview = iconButton('play', { title: t('Listen'), className: 'icon-btn small', size: 14 });
     preview.addEventListener('click', (event) => {
       event.stopPropagation();
       this._preview(voice);
@@ -907,7 +1042,7 @@ export class CharacterView {
       preview,
     );
     if (voice.removable) {
-      const remove = iconButton('trash', { title: 'Elimina', className: 'icon-btn small', size: 14 });
+      const remove = iconButton('trash', { title: t('Delete'), className: 'icon-btn small', size: 14 });
       remove.addEventListener('click', (event) => {
         event.stopPropagation();
         this._removeVoice(voice);
@@ -927,8 +1062,8 @@ export class CharacterView {
 
   _preview(voice) {
     if (voice.preview) {
-      // ElevenLabs offre un campione gia' registrato: non costa caratteri.
-      new Audio(voice.preview).play().catch(() => this.app.toast('Anteprima non disponibile', 'warn'));
+      // ElevenLabs offers an already recorded sample: it costs no characters.
+      new Audio(voice.preview).play().catch(() => this.app.toast(t('Preview unavailable'), 'warn'));
       return;
     }
     const text = SAMPLES[voice.language] ?? SAMPLES.it;

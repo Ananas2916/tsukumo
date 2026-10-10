@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -8,36 +8,40 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <!-- Il personaggio. Tutto il resto compare solo quando serve. -->
+    <!-- The flame's island (right-click): BEFORE the canvas, so she is drawn on top of it -->
+    <div id="island" aria-label="Tsukumo menu" data-i18n-attrs="aria-label"></div>
+
+    <!-- The character. Everything else appears only when needed. -->
     <canvas id="stage"></canvas>
 
-    <!-- I dock ad arco ai suoi lati: tasto destro per aprirli -->
-    <div id="hud" aria-label="Comandi di Tsukumo"></div>
+    <!-- The arc docks beside the 3D body: right-click to open them -->
+    <div id="hud" aria-label="Tsukumo commands" data-i18n-attrs="aria-label"></div>
 
-    <!-- Quello che sta dicendo, sopra la testa -->
+    <!-- What she's saying, above her head -->
     <div id="bubble" class="bubble hidden" aria-live="polite"></div>
     <div id="zzz" class="zzz hidden" aria-hidden="true"><span>z</span><span>z</span><span>Z</span></div>
 
-    <!-- Messaggi di sistema, passeggeri -->
+    <!-- Passing system messages -->
     <div id="toast" class="toast hidden" aria-live="polite" data-solid></div>
 
-    <!-- Solo nel browser: nella finestra desktop si scrive nel pannello -->
+    <!-- Browser only: in the desktop window you write in the panel -->
     <form id="composer" class="composer hidden" autocomplete="off" data-solid>
-      <input id="input" class="input" type="text" placeholder="Scrivile qualcosa..." aria-label="Messaggio" />
-      <button id="btn-send" class="composer-send" type="submit" title="Invia (Invio)" aria-label="Invia"></button>
+      <input id="input" class="input" type="text" placeholder="Write her something…" aria-label="Message" data-i18n-attrs="placeholder,aria-label" />
+      <button id="btn-send" class="composer-send" type="submit" title="Send (Enter)" aria-label="Send" data-i18n-attrs="title,aria-label"></button>
     </form>
+
     <input id="file-vrm" type="file" accept=".vrm" hidden />
 
-    <!-- Caricamento e problemi bloccanti -->
+    <!-- Loading and blocking problems -->
     <div id="overlay" class="overlay" data-solid>
       <div class="overlay-card">
         <div class="spinner"></div>
-        <p id="overlay-text">Tsukumo si sta svegliando…</p>
+        <p id="overlay-text" data-i18n>Tsukumo is waking up…</p>
         <p id="overlay-hint" class="overlay-hint"></p>
       </div>
     </div>
 
-    <!-- Pannello di debug del lip-sync -->
+    <!-- Lip-sync debug panel -->
     <div id="debug" class="debug hidden" data-solid>
       <div class="debug-row"><span>viseme</span><b id="dbg-viseme">sil</b></div>
       <div class="debug-row"><span>rms</span><b id="dbg-rms">0.00</b></div>

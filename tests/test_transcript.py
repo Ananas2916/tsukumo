@@ -1,4 +1,4 @@
-"""Le ultime battute della chat, rimandate a chi si ricollega (il telefono sospeso)."""
+"""The last lines of the chat, sent again to whoever reconnects (the suspended phone)."""
 
 import pytest
 
@@ -30,7 +30,7 @@ class Clock:
             {"type": "reply", "text": "Allora, il fi", "turn": 5, "cancelled": True},
             {"role": "assistant", "text": "Allora, il fi", "turn": 5, "cancelled": True},
         ),
-        # Niente da recuperare: turni vuoti, la voce che ripete, lo streaming.
+        # Nothing to recover: empty turns, the voice repeating, streaming.
         ({"type": "reply", "text": "", "turn": 6, "failed": True}, None),
         ({"type": "reply", "text": "Ciao a tutti", "turn": 7, "said": True}, None),
         ({"type": "user", "text": "  ", "turn": 8}, None),
@@ -53,7 +53,7 @@ def test_seq_always_grows_and_old_lines_drop_off():
     clock = Clock()
     transcript = Transcript(keep=3, clock=clock)
     seqs = [transcript.observe({"type": "reply", "text": f"r{i}", "turn": i})["seq"] for i in range(5)]
-    # Nello stesso millisecondo non si ripete; dopo un riavvio riparte dall'orologio, piu' avanti.
+    # Within the same millisecond it doesn't repeat; after a restart it starts again from the clock, further on.
     assert seqs == sorted(set(seqs)) and seqs[0] == 1_759_500_000_000
     assert [entry["text"] for entry in transcript.recent()] == ["r2", "r3", "r4"]
     clock.now += 60
@@ -82,7 +82,7 @@ def test_a_client_that_reconnects_finds_the_reply(client):
                 break
     assert lines["user"]["seq"] < lines["reply"]["seq"]
 
-    # Il telefono era sospeso: riaprendo l'app, il hello gli porta la risposta.
+    # The phone was suspended: reopening the app, the hello brings it the answer.
     with client.websocket_connect("/ws?mode=text") as ws:
         hello = ws.receive_json()
     recent = {entry["seq"]: entry for entry in hello["transcript"]}

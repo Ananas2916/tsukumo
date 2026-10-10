@@ -1,4 +1,4 @@
-/* Tsukumo sul telefono: la chat del pannello, a misura di iPhone. */
+/* Tsukumo on the phone: the panel's chat, sized for an iPhone. */
 
 @import '../theme.css';
 
@@ -24,7 +24,7 @@ body {
   height: var(--app-height, 100dvh);
 }
 
-/* --- In alto: nome e stato, sotto la barra di stato di iOS -------------- */
+/* --- Top: name and status, below the iOS status bar --------------------- */
 
 .top {
   flex: none;
@@ -86,7 +86,7 @@ body {
   }
 }
 
-/* --- Conversazione ------------------------------------------------------ */
+/* --- Conversation ------------------------------------------------------- */
 
 .log {
   flex: 1;
@@ -153,7 +153,7 @@ body {
   white-space: normal;
 }
 
-/* Il primo pezzo di risposta non e' ancora arrivato. */
+/* The first piece of the reply hasn't arrived yet. */
 .msg.assistant .bubble:empty::after {
   content: '…';
   color: var(--muted);
@@ -180,7 +180,7 @@ body {
   color: var(--muted);
 }
 
-/* Markdown delle risposte (markdown.js). */
+/* Markdown of the replies (markdown.js). */
 .bubble p {
   margin: 0 0 8px;
 }
@@ -224,7 +224,7 @@ body {
   color: var(--accent);
 }
 
-/* --- Link mancante o non valido ----------------------------------------- */
+/* --- Missing or invalid link -------------------------------------------- */
 
 .locked {
   flex: 1;
@@ -245,7 +245,7 @@ body {
   margin: 0;
 }
 
-/* --- Scrivi ------------------------------------------------------------- */
+/* --- Write -------------------------------------------------------------- */
 
 .composer {
   flex: none;
@@ -257,7 +257,7 @@ body {
   border-top: 1px solid var(--line);
 }
 
-/* 16px: con meno Safari ingrandisce la pagina quando tocchi il campo. */
+/* 16px: with less, Safari zooms the page when you tap the field. */
 .composer textarea {
   flex: 1;
   resize: none;

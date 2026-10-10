@@ -1,9 +1,9 @@
-"""Interfaccia comune ai motori di riconoscimento vocale.
+"""Common interface of the speech-recognition engines.
 
-Speculare a ``backend/tts/base.py``: la' si va da testo ad audio, qui da audio
-a testo. Il formato dell'audio in ingresso e' lo stesso che il TTS produce in
-uscita — **mono float32 in -1..1** — cosi' i due lati della catena vocale
-parlano la stessa lingua e non serve alcuna conversione intermedia.
+It mirrors ``backend/tts/base.py``: there you go from text to audio, here from
+audio to text. The incoming audio format is the same the TTS produces —
+**mono float32 in -1..1** — so the two sides of the voice chain speak the same
+language and no intermediate conversion is needed.
 """
 
 from __future__ import annotations
@@ -13,21 +13,21 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-#: Whisper e quasi tutti i modelli di riconoscimento lavorano a 16 kHz.
-#: Il frontend ricampiona gia' a questa frequenza prima di inviare.
+#: Whisper and almost all recognition models work at 16 kHz.
+#: The frontend already resamples to this rate before sending.
 SAMPLE_RATE = 16000
 
 
 @dataclass
 class Transcript:
-    """Il risultato di una trascrizione."""
+    """The result of a transcription."""
 
     text: str
-    #: Lingua riconosciuta (codice ISO), se il motore la espone.
+    #: Recognized language (ISO code), if the engine exposes it.
     language: str | None = None
-    #: Confidenza media 0-1, se disponibile: utile per scartare il rumore.
+    #: Average confidence 0-1, if available: handy to discard noise.
     confidence: float | None = None
-    #: Durata dell'audio trascritto, in secondi.
+    #: Length of the transcribed audio, in seconds.
     duration: float = 0.0
     meta: dict = field(default_factory=dict)
 
@@ -37,9 +37,9 @@ class Transcript:
 
 
 class STTEngine(ABC):
-    """Contratto minimo che ogni backend di riconoscimento deve rispettare."""
+    """Minimal contract every recognition backend must follow."""
 
-    #: Nome breve del motore, esposto via /api/health.
+    #: Short name of the engine, exposed via /api/health.
     name: str = "stt"
 
     @abstractmethod
@@ -49,27 +49,27 @@ class STTEngine(ABC):
         sample_rate: int = SAMPLE_RATE,
         language: str | None = None,
     ) -> Transcript:
-        """Trascrive audio mono float32 in -1..1.
+        """Transcribes mono float32 audio in -1..1.
 
-        Viene chiamato dentro un thread pool, quindi puo' essere bloccante.
+        It's called inside a thread pool, so it may block.
         """
 
     def prepare(self) -> None:
-        """Carica (e scarica, la prima volta) quello che serve, prima della prima frase.
+        """Loads (and downloads, the first time) what's needed, before the first sentence.
 
-        Bloccante: va chiamata in un thread. I motori senza modello non fanno niente.
+        Blocking: call it in a thread. Engines without a model do nothing.
         """
 
     def close(self) -> None:
-        """Rilascia eventuali risorse (modelli caricati, client HTTP, ...)."""
+        """Releases any resources (loaded models, HTTP clients, ...)."""
 
 
 def to_pcm16(samples: np.ndarray) -> bytes:
-    """float32 -1..1 -> PCM 16 bit little-endian, il formato che i server vogliono."""
+    """float32 -1..1 -> 16-bit little-endian PCM, the format servers want."""
     clipped = np.clip(samples, -1.0, 1.0)
     return (clipped * 32767.0).astype("<i2").tobytes()
 
 
 def from_pcm16(raw: bytes) -> np.ndarray:
-    """PCM 16 bit little-endian -> float32 -1..1 (quello che arriva dal browser)."""
+    """16-bit little-endian PCM -> float32 -1..1 (what comes from the browser)."""
     return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0

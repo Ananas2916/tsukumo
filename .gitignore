@@ -1,13 +1,13 @@
-# Pesi dei modelli (centinaia di MB)
+# Model weights (hundreds of MB)
 models/*.onnx
 models/*.bin
 models/*.part
 
-# Avatar VRM dell'utente e le sue clip .vrma (hanno licenze loro)
+# The user's VRM avatar and .vrma clips (they have their own licences)
 frontend/public/models/*.vrm
 frontend/public/animations/*.vrma
 frontend/public/animations/CREDITS-*.txt
-# Motion capture scaricato a mano (BVH con licenze loro)
+# Motion capture downloaded by hand (BVH with their own licences)
 models/mocap/
 
 # Python
@@ -17,18 +17,18 @@ __pycache__/
 venv/
 .env
 
-# Stato locale (sessionKey OpenClaw del companion, non un segreto ma non va
-# nel repo: e' specifico di questa macchina)
+# Local state (the companion's OpenClaw sessionKey, not a secret but it doesn't
+# belong in the repo: it's specific to this machine)
 state/
 logs/
 
 # Node / build
 node_modules/
-# Installer: Python incluso, risorse, cache dei download (scripts/build_installer.ps1)
+# Installer: bundled Python, resources, download cache (scripts/build_installer.ps1)
 build/
 frontend/dist/
 electron/dist/
 
-# Sistema
+# System
 .DS_Store
 Thumbs.db

@@ -1,37 +1,42 @@
-"""Interfaccia comune ai client LLM e agli agenti."""
+"""Common interface of the LLM clients and the agents."""
 
 from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 Role = Literal["system", "user", "assistant"]
 
-#: Che genere di lavoro sta facendo un agente: decide la posa del personaggio.
+#: What kind of work an agent is doing: it decides the character's pose.
 ActivityKind = Literal["read", "search", "web", "write", "run", "agent", "plan", "tool"]
 
 
 @dataclass(frozen=True)
 class Activity:
-    """Un passo di lavoro di un agente (un tool), detto in parole.
+    """One work step of an agent (a tool), said in words.
 
-    ``label`` e' gia' leggibile ("legge main.js"), ``detail`` e' il dato grezzo
-    (il percorso, il comando) per chi vuole mostrarlo per intero.
+    ``label`` is already readable ("reads main.js"), ``detail`` is the raw data
+    (the path, the command) for whoever wants to show it in full.
     """
 
     kind: ActivityKind
     label: str
     detail: str = ""
     tool: str = ""
+    #: The agent's task list after this step, if it just changed it (see ``tasks.py``).
+    tasks: tuple[dict[str, str], ...] | None = field(default=None, compare=False, hash=False)
 
-    def as_dict(self) -> dict[str, str]:
-        return {"kind": self.kind, "label": self.label, "detail": self.detail, "tool": self.tool}
+    def as_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"kind": self.kind, "label": self.label, "detail": self.detail, "tool": self.tool}
+        if self.tasks is not None:
+            data["tasks"] = [dict(item) for item in self.tasks]
+        return data
 
-#: Un controllo di stato non deve mai tenere fermo nessuno: oltre questo
-#: tempo il motore e' considerato "non risponde".
+#: A status check must never hold anyone up: beyond this time the engine is
+#: considered "not answering".
 PROBE_TIMEOUT = 4.0
 
 
@@ -39,9 +44,9 @@ PROBE_TIMEOUT = 4.0
 class Message:
     role: Role
     content: str
-    #: Immagini allegate (percorsi): i modelli che vedono le ricevono nel messaggio.
+    #: Attached images (paths): the models that see get them in the message.
     images: tuple[str, ...] = ()
-    #: Cartelle dei file allegati: un agente deve poterle leggere (``--add-dir``).
+    #: Folders of the attached files: an agent must be able to read them (``--add-dir``).
     folders: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, str]:
@@ -49,70 +54,69 @@ class Message:
 
 
 class LLMClient(ABC):
-    """Un LLM (o un agente) che produce testo in streaming, frammento per frammento."""
+    """An LLM (or an agent) producing text in streaming, chunk by chunk."""
 
     name: str = "llm"
 
-    #: Il motore tiene da se' la memoria della conversazione (gli agenti:
-    #: OpenClaw, Claude Code, Codex...). A lui basta l'ultimo messaggio: il
-    #: companion non gli rimanda tutta la cronologia a ogni turno.
+    #: The engine keeps the conversation's memory by itself (the agents:
+    #: OpenClaw, Claude Code, Codex...). The last message is enough for it: the
+    #: companion doesn't send it the whole history at every turn.
     stateful: bool = False
 
-    #: Chi vuole sapere cosa fa l'agente mentre lavora (lo imposta il companion
-    #: per la durata di un turno). I modelli semplici non lo chiamano mai.
+    #: Whoever wants to know what the agent does while it works (the companion
+    #: sets it for the length of a turn). Simple models never call it.
     on_activity: Callable[[Activity], None] | None = None
 
     def report(self, activity: Activity) -> None:
-        """Segnala un passo di lavoro, se qualcuno ascolta."""
+        """Reports a work step, if someone is listening."""
         if self.on_activity is not None:
             self.on_activity(activity)
 
     @abstractmethod
     def stream(self, messages: list[Message]) -> AsyncIterator[str]:
-        """Genera i frammenti di testo della risposta, in ordine.
+        """Yields the reply's text chunks, in order.
 
-        Implementato come *async generator*: va usato con ``async for``.
+        Implemented as an *async generator*: use it with ``async for``.
         """
 
     @abstractmethod
     async def health(self) -> dict[str, Any]:
-        """Stato del backend (raggiungibilita', modello caricato, ...).
+        """State of the backend (reachability, model loaded, ...).
 
-        Deve essere rapido e non avere effetti collaterali: niente sessioni
-        aperte, niente processi lanciati. Lo chiama il monitor ogni pochi
-        secondi.
+        It must be quick and have no side effects: no sessions opened, no processes
+        started. The monitor calls it every few seconds.
         """
 
     async def probe(self) -> dict[str, Any]:
-        """``health()`` con un tetto di tempo: e' quello che usa il monitor."""
+        """``health()`` with a time cap: it's what the monitor uses."""
         try:
             return await asyncio.wait_for(self.health(), PROBE_TIMEOUT)
         except asyncio.TimeoutError:
             return {
                 "backend": self.name,
                 "ok": False,
-                "error": f"Non risponde entro {PROBE_TIMEOUT:.0f} secondi",
+                "error": f"No answer within {PROBE_TIMEOUT:.0f} seconds",
             }
-        except Exception as exc:  # pragma: no cover - health() non dovrebbe sollevare
+        except Exception as exc:  # pragma: no cover - health() shouldn't raise
             return {"backend": self.name, "ok": False, "error": describe_error(exc)}
 
     async def reset(self) -> None:
-        """Dimentica la conversazione tenuta dal backend, se ne tiene una.
+        """Forgets the conversation kept by the backend, if it keeps one.
 
-        I backend stateless (Ollama, LM Studio) non hanno niente da dimenticare:
-        la cronologia la manda il companion a ogni richiesta. Gli agenti invece
-        tengono la memoria dalla loro parte, in una sessione.
+        Stateless backends (Ollama, LM Studio) have nothing to forget: the companion
+        sends the history at every request. Agents instead keep the memory on their
+        side, in a session.
         """
 
     async def close(self) -> None:
-        """Chiude eventuali connessioni aperte (e ferma i processi figli)."""
+        """Closes any open connections (and stops the child processes)."""
 
 
 # ---------------------------------------------------------------------------
-# Aiuti per gli agenti
+# Helpers for the agents
 # ---------------------------------------------------------------------------
 def last_user_text(messages: list[Message]) -> str:
-    """L'ultimo messaggio dell'utente: e' tutto quello che serve a un agente."""
+    """The user's last message: it's all an agent needs."""
     return next((m.content for m in reversed(messages) if m.role == "user"), "")
 
 
@@ -121,19 +125,19 @@ def last_user_message(messages: list[Message]) -> Message | None:
 
 
 def speech_directive(messages: list[Message]) -> str:
-    """I vincoli del parlato (lingua, testo semplice): l'ultimo messaggio di sistema.
+    """The speech constraints (language, plain text): the last system message.
 
-    Il pipeline lo mette sempre in coda ai messaggi di sistema proprio perche'
-    gli agenti, che hanno una personalita' propria, ricevano solo lui.
+    The pipeline always puts it at the end of the system messages precisely so
+    that the agents, which have a personality of their own, receive only it.
     """
     return next((m.content for m in reversed(messages) if m.role == "system"), "")
 
 
 def with_directive(messages: list[Message]) -> str:
-    """Il messaggio dell'utente preceduto dai vincoli del parlato, fra parentesi.
+    """The user's message preceded by the speech constraints, in brackets.
 
-    Senza, un agente risponde nella lingua in cui scrivi anche se la voce e'
-    inglese, e usa markdown ed elenchi che letti ad alta voce non hanno senso.
+    Without it, an agent answers in the language you write in even if the voice
+    is English, and uses markdown and lists that make no sense read aloud.
     """
     text = last_user_text(messages)
     directive = speech_directive(messages)
@@ -141,23 +145,23 @@ def with_directive(messages: list[Message]) -> str:
 
 
 def describe_error(exc: BaseException) -> str:
-    """Un messaggio d'errore leggibile, mai vuoto.
+    """A readable error message, never empty.
 
-    ``str()`` di un ``TimeoutError`` o di un ``CancelledError`` e' la stringa
-    vuota: e' cosi' che nella chat compariva "LLM non raggiungibile ()".
+    ``str()`` of a ``TimeoutError`` or a ``CancelledError`` is the empty string:
+    that's how "LLM unreachable ()" showed up in the chat.
     """
     text = str(exc).strip()
     name = type(exc).__name__
     lowered = text.lower()
 
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "timeout" in name.lower():
-        return "Tempo scaduto: nessuna risposta"
+        return "Timed out: no answer"
     if isinstance(exc, FileNotFoundError):
-        return f"Programma non trovato{': ' + exc.filename if getattr(exc, 'filename', None) else ''}"
+        return f"Program not found{': ' + exc.filename if getattr(exc, 'filename', None) else ''}"
     if isinstance(exc, ConnectionRefusedError) or "connecterror" in name.lower() or (
         "1225" in text or "connection refused" in lowered or "all connection attempts failed" in lowered
     ):
-        return "Non raggiungibile: il servizio è spento o l'indirizzo è sbagliato"
+        return "Unreachable: the service is off or the address is wrong"
     if not text:
         return name
     return text if len(text) <= 400 else text[:400] + "…"

@@ -1,11 +1,11 @@
-"""Voci neurali di Microsoft Edge, tramite il pacchetto ``edge-tts``.
+"""Microsoft Edge's neural voices, through the ``edge-tts`` package.
 
-Sono gratuite e non richiedono chiave, ma **passano da internet**: e' l'unico
-motore TTS di default a non essere offline, quindi va scelto consapevolmente.
+They're free and need no key, but **they go through the internet**: it's the
+only default TTS engine that isn't offline, so it must be chosen knowingly.
 
-Edge restituisce MP3, e nel progetto non c'e' un decoder audio: per questo il
-motore richiede anche ``soundfile`` (che porta con se' libsndfile, senza
-dipendenze di sistema da installare a mano).
+Edge returns MP3, and the project has no audio decoder: that's why the
+engine also needs ``soundfile`` (which brings libsndfile along, with no
+system dependencies to install by hand).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class EdgeTTS(TTSEngine):
-    """Sintesi tramite le voci neurali di Microsoft Edge."""
+    """Synthesis through Microsoft Edge's neural voices."""
 
     name = "edge"
 
@@ -32,7 +32,7 @@ class EdgeTTS(TTSEngine):
             import soundfile  # noqa: F401
         except ImportError as exc:
             raise RuntimeError(
-                "Il motore Edge TTS richiede due pacchetti: "
+                "The Edge TTS engine needs two packages: "
                 "pip install edge-tts soundfile"
             ) from exc
 
@@ -43,7 +43,7 @@ class EdgeTTS(TTSEngine):
     # ------------------------------------------------------------------
     @staticmethod
     def _rate(speed: float) -> str:
-        """Traduce un moltiplicatore (1.15) nel formato di Edge ("+15%")."""
+        """Turns a multiplier (1.15) into Edge's format ("+15%")."""
         percent = int(round((speed - 1.0) * 100))
         return f"{percent:+d}%"
 
@@ -56,7 +56,7 @@ class EdgeTTS(TTSEngine):
                 found = asyncio.run(edge_tts.list_voices())
                 self._voices_cache = sorted(v["ShortName"] for v in found)
             except Exception as exc:
-                logger.warning("Elenco voci Edge non disponibile: %s", exc)
+                logger.warning("Edge voice list unavailable: %s", exc)
                 self._voices_cache = [self.default_voice]
         return list(self._voices_cache)
 
@@ -92,10 +92,10 @@ class EdgeTTS(TTSEngine):
 
         mp3 = asyncio.run(_collect())
         if not mp3:
-            raise RuntimeError(f"Edge TTS non ha restituito audio per la voce {chosen_voice!r}")
+            raise RuntimeError(f"Edge TTS returned no audio for the voice {chosen_voice!r}")
 
         samples, sample_rate = sf.read(io.BytesIO(mp3), dtype="float32", always_2d=False)
-        if samples.ndim > 1:  # se arriva stereo, il lip-sync vuole un canale solo
+        if samples.ndim > 1:  # if it arrives in stereo, the lip-sync wants a single channel
             samples = samples.mean(axis=1)
 
         return Speech(

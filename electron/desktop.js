@@ -1,16 +1,17 @@
 /**
- * Le finestre degli altri programmi, viste dalla mascotte.
+ * Other programs' windows, as the mascot sees them.
  *
- * Desktop Mate fa sedere i personaggi sul bordo superiore delle finestre e li
- * fa viaggiare con loro. Electron non sa nulla delle finestre altrui, quindi
- * le chiediamo direttamente a Windows (user32/dwmapi) tramite koffi, una FFI
- * con binari precompilati: niente da compilare, niente processi esterni.
+ * Desktop Mate makes its characters sit on the top edge of windows and
+ * travel with them. Electron knows nothing about other apps' windows, so we
+ * ask Windows directly (user32/dwmapi) through koffi, an FFI with prebuilt
+ * binaries: nothing to compile, no external processes.
  *
- * Tutto quello che esce da qui e' in pixel logici (DIP), le stesse unita' di
- * BrowserWindow.setPosition: Windows ragiona in pixel fisici, e con lo
- * schermo scalato al 125-150% la differenza e' tutt'altro che trascurabile.
+ * Everything coming out of here is in logical pixels (DIP), the same units
+ * as BrowserWindow.setPosition: Windows reasons in physical pixels, and with
+ * the screen scaled to 125-150% the difference is far from negligible.
  *
- * Su macOS e Linux il modulo non fa nulla: restano solo pavimento e bordi.
+ * On macOS and Linux the module does nothing: only the floor and the edges
+ * remain.
  */
 
 const { screen } = require('electron');
@@ -59,7 +60,7 @@ function load() {
       ),
     };
   } catch (error) {
-    console.error('[desktop] finestre non disponibili (koffi):', error.message);
+    console.error('[desktop] windows unavailable (koffi):', error.message);
     api = false;
   }
   return api;
@@ -77,11 +78,11 @@ const SWP_NOACTIVATE = 0x0010;
 const SWP_NOOWNERZORDER = 0x0200;
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
-/** Classi da non considerare mai "finestre su cui sedersi". */
+/** Classes never to be considered "windows to sit on". */
 const IGNORED_CLASSES = new Set([
-  'Progman', // il desktop
-  'WorkerW', // lo sfondo animato / il desktop
-  'Shell_TrayWnd', // la barra delle applicazioni: la gestiamo come "pavimento"
+  'Progman', // the desktop
+  'WorkerW', // the animated wallpaper / the desktop
+  'Shell_TrayWnd', // the taskbar: we treat it as the "floor"
   'Shell_SecondaryTrayWnd',
   'NotifyIconOverflowWindow',
   'TaskListThumbnailWnd',
@@ -96,7 +97,7 @@ function className(hwnd) {
   return buffer.toString('utf16le', 0, Math.max(0, length) * 2);
 }
 
-/** Rettangolo visibile (senza i bordi invisibili di ridimensionamento di Windows 10/11). */
+/** Visible rectangle (without Windows 10/11's invisible resize borders). */
 function physicalRect(hwnd) {
   const rect = {};
   if (api.DwmRect(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, rect, 16) !== 0) {
@@ -116,11 +117,11 @@ function isCloaked(hwnd) {
 }
 
 /**
- * Finestre visibili in ordine di profondita' (la prima e' quella davanti a
- * tutte), escluse le nostre. Solo finestre "vere", quelle che vedresti con
- * Alt+Tab: niente strumenti, niente finestre fantasma delle app UWP.
+ * Visible windows in depth order (the first is the one in front of all),
+ * excluding ours. Only "real" windows, the ones you'd see with Alt+Tab: no
+ * tool windows, no ghost windows of UWP apps.
  *
- * @param {Set<number>} own handle delle finestre del companion
+ * @param {Set<number>} own handles of the companion's windows
  * @returns {Array<{hwnd: number, x: number, y: number, width: number, height: number, maximized: boolean}>}
  */
 function listWindows(own = new Set()) {
@@ -141,7 +142,7 @@ function listWindows(own = new Set()) {
       if (dip.width < 160 || dip.height < 80) return true;
       found.push({ hwnd: Number(hwnd), ...dip, maximized: api.IsZoomed(hwnd) });
     } catch {
-      /* una finestra che sparisce mentre la leggiamo: la saltiamo */
+      /* a window vanishing while we read it: we skip it */
     }
     return true;
   }, api.koffi.pointer(api.EnumProc));
@@ -154,8 +155,8 @@ function listWindows(own = new Set()) {
 }
 
 /**
- * Rettangolo aggiornato di una sola finestra, o `null` se non c'e' piu', e'
- * ridotta a icona o nascosta. Costa pochissimo: si puo' chiamare a ogni tick.
+ * The updated rectangle of a single window, or `null` if it's gone,
+ * minimized or hidden. It costs very little: it can be called every tick.
  */
 function windowRect(hwnd) {
   if (!load()) return null;
@@ -176,7 +177,7 @@ function windowTitle(hwnd) {
   return buffer.toString('utf16le', 0, Math.max(0, read) * 2);
 }
 
-/** Nome dell'eseguibile di un processo (`Code.exe`), o '' se non si puo' leggere. */
+/** Executable name of a process (`Code.exe`), or '' if it can't be read. */
 function processName(pid) {
   if (!pid) return '';
   const handle = api.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
@@ -192,11 +193,11 @@ function processName(pid) {
 }
 
 /**
- * La finestra su cui sta lavorando l'utente: titolo, programma e se occupa
- * tutto lo schermo (un gioco, un video a schermo intero, una presentazione).
- * Il backend ci capisce cosa sta facendo (vedi backend/context.py).
+ * The window the user is working in: title, program and whether it takes
+ * the whole screen (a game, a full-screen video, a presentation). The
+ * backend works out what they're doing from it (see backend/context.py).
  *
- * @param {Set<number>} own handle delle finestre del companion
+ * @param {Set<number>} own handles of the companion's windows
  * @returns {{title: string, exe: string, fullscreen: boolean, own: boolean}|null}
  */
 function foregroundWindow(own = new Set()) {
@@ -226,17 +227,17 @@ function foregroundWindow(own = new Set()) {
 }
 
 /**
- * Riporta una finestra in cima alla pila "sempre in primo piano" senza
- * rubarle il focus. Windows riordina le finestre topmost ogni volta che una
- * di loro si attiva (e la barra delle applicazioni lo e'): senza questo
- * richiamo periodico il personaggio finiva dietro alle altre finestre.
+ * Brings a window back to the top of the "always on top" stack without
+ * stealing focus. Windows reorders topmost windows every time one of them
+ * activates (and the taskbar is one): without this periodic call the
+ * character ended up behind the other windows.
  */
 function keepOnTop(hwnd) {
   if (!load()) return false;
   return api.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 }
 
-/** Handle nativo di una BrowserWindow, come numero confrontabile con quelli di listWindows. */
+/** Native handle of a BrowserWindow, as a number comparable with listWindows'. */
 function handleOf(browserWindow) {
   const buffer = browserWindow.getNativeWindowHandle();
   return buffer.length >= 8 ? Number(buffer.readBigUInt64LE(0)) : buffer.readUInt32LE(0);

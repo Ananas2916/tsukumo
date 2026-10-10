@@ -1,31 +1,32 @@
-"""Commenti spontanei: il companion parla di sua iniziativa, al momento giusto.
+"""Spontaneous comments: the companion speaks on her own, at the right moment.
 
-Guarda l'ora, cosa stai facendo (``context.py``), la batteria, il meteo, e
-ogni tanto dice qualcosa:
+She looks at the time, at what you're doing (``context.py``), the battery,
+the weather, and now and then says something:
 
-* **Ora tarda** - all'una e sei ancora li' a programmare: "Sono le 1 e 12!
-  Vai a dormire, hai programmato abbastanza per oggi." (e sbadiglia).
-* **Pause** - due ore di fila al PC: "fai una pausa, sgranchisciti".
-* **Meteo** - il buongiorno col tempo che fa, il caldo (si fa aria con la
-  mano), il freddo (trema), la pioggia che comincia.
-* **Batteria** - al 20, 10 e 5%, finche' non la attacchi.
-* **Limiti degli agenti** - Claude Code o Codex all'80 e al 95% di un limite
-  del piano, e quando il limite si azzera (``usage.py``).
-* **YouTube** - un commento sul video che stai guardando o sul suo creator.
-* **Chiacchiere** - una notizia di oggi, una curiosita', un film da vedere.
+* **Late hour** - it's 1 a.m. and you're still coding: "It's 1:12! Go to
+  sleep, you've coded enough for today." (and she yawns).
+* **Breaks** - two hours straight at the PC: "take a break, stretch".
+* **Weather** - good morning with the weather, the heat (she fans herself),
+  the cold (she shivers), the rain starting.
+* **Battery** - at 20, 10 and 5%, until you plug it in.
+* **Agent limits** - Claude Code or Codex at 80 and 95% of a plan limit, and
+  when the limit resets (``usage.py``).
+* **YouTube** - a comment on the video you're watching or on its creator.
+* **Chatter** - a news item of the day, a fun fact, a film to watch.
 
-Le frasi fisse (ora, pause, meteo, batteria) sono pronte in italiano e in
-inglese: arrivano subito e costano zero. I commenti su video, notizie e
-curiosita' li scrive il cervello, con un messaggio "nascosto" che non compare
-in chat come se l'avessi scritto tu. Nel pannello si puo' affidarli a un
-cervello a parte (un modello economico o gratuito, cloud o locale): cosi' un
-agente a consumo come Claude Code non spende un turno per ogni notizia, e se
-quel cervello non risponde lei resta zitta invece di ripiegare sull'agente.
+The fixed phrases (time, breaks, weather, battery) are ready in Italian and
+English: they arrive right away and cost nothing. Comments on videos, news
+and fun facts are written by the brain, with a "hidden" message that doesn't
+show up in the chat as if you had written it. In the panel they can be
+given to a separate brain (a cheap or free model, cloud or local): so a
+pay-per-use agent like Claude Code doesn't spend a turn on every news item,
+and if that brain doesn't answer she stays quiet instead of falling back on
+the agent.
 
-Mai quando dai fastidio: niente con lo schermo intero, in riunione o in un
-gioco, niente se non sei al PC, niente mentre lei sta gia' parlando, e fra un
-commento e l'altro passano almeno 8 minuti. Nel pannello si sceglie quanto
-chiacchiera (spenta, poco, normale, tanto) e di cosa.
+Never when it's a bother: nothing in full screen, in a meeting or in a game,
+nothing if you're not at the PC, nothing while she's already speaking, and
+at least 8 minutes pass between one comment and the next. In the panel you
+choose how much she chats (off, a little, normal, a lot) and about what.
 """
 
 from __future__ import annotations
@@ -53,26 +54,26 @@ logger = logging.getLogger(__name__)
 
 Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
 
-#: Fra due commenti qualsiasi (la batteria quasi scarica fa eccezione).
+#: Between any two comments (an almost flat battery is the exception).
 MIN_GAP = 8 * 60
-#: Ogni quanto, in media, una chiacchiera (notizia, curiosita', film).
+#: How often, on average, some chatter (news, fun fact, film).
 CHATTER_GAPS = {"rare": 90 * 60, "normal": 45 * 60, "chatty": 20 * 60}
-#: Fra due commenti su video di YouTube.
+#: Between two comments on YouTube videos.
 YOUTUBE_GAPS = {"rare": 45 * 60, "normal": 15 * 60, "chatty": 6 * 60}
-#: Il video va guardato almeno tanto prima di commentarlo (non mentre scorri).
+#: The video must be watched at least this long before commenting (not while you scroll).
 YOUTUBE_WATCHED = 45
-#: Di notte: prima dell'alba e' "tardi".
+#: At night: before dawn it's "late".
 NIGHT_UNTIL_HOUR = 5
 NIGHT_REPEAT = 45 * 60
 NIGHT_YAWN_EVERY = 12 * 60
-#: Pause: la prima dopo due ore di fila, poi ogni ora.
+#: Breaks: the first after two hours straight, then every hour.
 BREAK_AFTER_MINUTES = 120
 BREAK_REPEAT_MINUTES = 60
 BATTERY_LEVELS = (20, 10, 5)
-#: Soglie dei limiti degli agenti (percentuale usata), e sotto quanto si e' azzerato.
+#: Thresholds of the agents' limits (percentage used), and below what it has reset.
 USAGE_LEVELS = (80, 95)
 USAGE_RESET_BELOW = 30
-#: Attivita' in cui una chiacchiera interromperebbe (si aspetta che tu stia fermo).
+#: Activities a chat would interrupt (it waits for you to be idle).
 FOCUSED = {"coding", "office", "meeting", "game", "video", "youtube", "tsukumo", "chat"}
 
 FACT_TOPICS = (
@@ -81,7 +82,7 @@ FACT_TOPICS = (
 )
 FILM_KINDS = ("animated", "science fiction", "comedy", "fantasy", "classic", "adventure", "mystery", "feel-good", "Studio Ghibli")
 
-#: Cosa hai fatto troppo, per "vai a dormire, hai ___ abbastanza".
+#: What you did too much, for "go to sleep, you've ___ enough".
 _DID = {
     "coding": ("programmato", "coded"),
     "youtube": ("guardato video", "watched videos"),
@@ -164,7 +165,7 @@ TEMPLATES: dict[str, dict[str, list[str]]] = {
     },
 }
 
-#: Il gesto che accompagna ogni frase (azioni di body/actions.js).
+#: The gesture that goes with each phrase (actions of body/actions.js).
 GESTURES = {
     "night": "yawn",
     "night_did": "yawn",
@@ -186,13 +187,13 @@ GESTURES = {
 
 
 def italian_percent(p: int) -> tuple[str, str]:
-    """("l'80", "all'80") / ("il 90", "al 90"): l'articolo segue il suono del numero."""
+    """("l'80", "all'80") / ("il 90", "al 90"): the Italian article follows the number's sound."""
     vowel = str(p).startswith("8") or p in (1, 11)
     return (f"l'{p}", f"all'{p}") if vowel else (f"il {p}", f"al {p}")
 
 
 def spoken_clock(now: datetime, lang: str) -> tuple[str, str]:
-    """L'ora da dire: ("È l'una e 12", "l'una e 12") / ("It's 1:12", "1:12")."""
+    """The time to say: ("È l'una e 12", "l'una e 12") / ("It's 1:12", "1:12")."""
     hour, minute = now.hour, now.minute
     if lang == "it":
         if hour in (1, 13):
@@ -215,7 +216,7 @@ def spoken_clock(now: datetime, lang: str) -> tuple[str, str]:
 
 
 class Proactive:
-    """Decide se e cosa dire, un giro ogni ``interval`` secondi."""
+    """Decides whether and what to say, one round every ``interval`` seconds."""
 
     def __init__(
         self,
@@ -238,9 +239,9 @@ class Proactive:
         self.weather = weather
         self.news = news
         self.battery_reader = battery_reader
-        #: L'ultima lettura dei consumi degli agenti (usage.py), senza toccare i file.
+        #: The last reading of the agents' usage (usage.py), without touching the files.
         self.usage = usage
-        #: Per ogni limite ("codex:primary") la soglia gia' detta e per quale azzeramento.
+        #: For every limit ("codex:primary") the threshold already said and for which reset.
         self.usage_warned: dict[str, tuple[float | None, int]] = {}
         self.rng = rng or random.Random()
         self.interval = interval
@@ -254,7 +255,7 @@ class Proactive:
         self.next_break_minutes = BREAK_AFTER_MINUTES
         self.next_chatter_at: float | None = None
         self.fact_topics: list[str] = []
-        #: Il cervello delle chiacchiere, e la scelta da cui e' nato (vedi _chatter_brain).
+        #: The chatter brain, and the choice it was born from (see _chatter_brain).
         self._brain: LLMClient | None = None
         self._brain_key: tuple[Any, ...] | None = None
         self.brain_error: str | None = None
@@ -284,12 +285,12 @@ class Proactive:
                 await self.tick()
             except asyncio.CancelledError:
                 raise
-            except Exception:  # pragma: no cover - non deve mai morire
-                logger.exception("Commenti spontanei")
+            except Exception:  # pragma: no cover - it must never die
+                logger.exception("Spontaneous comments")
 
     # ------------------------------------------------------------------
     async def tick(self, now: datetime | None = None) -> str | None:
-        """Un giro di controllo; restituisce cosa ha detto (per i test e il log)."""
+        """One round of checks; returns what it said (for the tests and the log)."""
         now = now or datetime.now()
         ts = now.timestamp()
         companion = self._companion()
@@ -307,7 +308,7 @@ class Proactive:
         if prefs.chatter == "off" or not context.present or context.activity.dnd:
             return None
 
-        # Di notte ogni tanto sbadiglia, anche senza dire niente.
+        # At night now and then she yawns, even without saying anything.
         if prefs.topic("night") and self._is_night(now) and ts - self.last.get("yawn", 0) >= NIGHT_YAWN_EVERY:
             self.last["yawn"] = ts
             await self.broadcast({"type": "gesture", "name": "yawn"})
@@ -319,11 +320,11 @@ class Proactive:
             if said:
                 self.last_any = ts
                 self.last[said.split(":")[0]] = ts
-                logger.info("Commento spontaneo: %s", said)
+                logger.info("Spontaneous comment: %s", said)
                 return said
         return None
 
-    # ------------------------------------------------------------------ regole
+    # ------------------------------------------------------------------ rules
     async def _battery(self, companion: "Companion", ts: float) -> str | None:
         if not self.preferences.topic("battery"):
             return None
@@ -336,21 +337,21 @@ class Proactive:
         level = next((level for level in reversed(BATTERY_LEVELS) if reading.percent <= level), None)
         if level is None or level in self.battery_warned:
             return None
-        # Si segnano anche le soglie piu' alte: al 9% non si dice "20%" dopo "10%".
+        # The higher thresholds are noted too: at 9% you don't say "20%" after "10%".
         self.battery_warned.update(value for value in BATTERY_LEVELS if value >= level)
         critical = level == BATTERY_LEVELS[-1]
         if not critical and (not self.context.present or ts - self.last_any < MIN_GAP / 4):
             return None
-        await self._say(companion, f"battery_{level}", event=f"Batteria al {reading.percent}%", p=reading.percent)
+        await self._say(companion, f"battery_{level}", event=f"Battery at {reading.percent}%", p=reading.percent)
         self.last_any = ts
         return f"battery:{reading.percent}"
 
     async def _usage(self, companion: "Companion", now: datetime) -> str | None:
-        """Un agente vicino al limite del piano (80, 95%), o il limite appena azzerato.
+        """An agent near a plan limit (80, 95%), or the limit just reset.
 
-        Come la batteria non dipende da quanto chiacchiera: e' un avviso di
-        lavoro. Ma aspetta che tu sia al PC e non in riunione, e ogni soglia
-        si dice una volta per finestra.
+        Like the battery it doesn't depend on how much she chats: it's a work
+        notice. But it waits for you to be at the PC and not in a meeting, and
+        every threshold is said once per window.
         """
         if not self.preferences.topic("usage") or self.usage is None:
             return None
@@ -385,7 +386,7 @@ class Proactive:
         await self._say(
             companion,
             key,
-            event=f"{agent['label']} al {p}% del limite ({limit['id']})",
+            event=f"{agent['label']} at {p}% of the limit ({limit['id']})",
             agent=agent["label"],
             p=p,
             the_p=the_p,
@@ -412,7 +413,7 @@ class Proactive:
         await self._say(
             companion,
             key,
-            event=f"Sono le {now:%H:%M} e l'utente è ancora al PC ({self.context.activity.kind})",
+            event=f"It's {now:%H:%M} and the user is still at the PC ({self.context.activity.kind})",
             Clock=head,
             clock=inner,
             did=did[0 if lang == "it" else 1] if did else "",
@@ -429,7 +430,7 @@ class Proactive:
         self.next_break_minutes = minutes + BREAK_REPEAT_MINUTES
         lang = self._lang(companion)
         hours = speak_duration(round(minutes / 30) * 30 * 60, lang)
-        await self._say(companion, "break", event=f"L'utente è al PC da {round(minutes)} minuti", hours=hours, Hours=hours[:1].upper() + hours[1:])
+        await self._say(companion, "break", event=f"The user has been at the PC for {round(minutes)} minutes", hours=hours, Hours=hours[:1].upper() + hours[1:])
         return f"break:{round(minutes)}"
 
     async def _weather(self, companion: "Companion", now: datetime) -> str | None:
@@ -443,18 +444,18 @@ class Proactive:
         previous, self.last_condition = self.last_condition, weather.condition
         t = round(weather.temperature)
         event = f"Meteo: {weather.condition}, {t}°C"
-        # 1. Il buongiorno col tempo che fa, una volta al giorno.
+        # 1. Good morning with the weather, once a day.
         if 6 <= now.hour < 12 and self.said_on.get("morning") != today:
             self.said_on["morning"] = today
             key = weather.feel if weather.feel != "mild" else weather.condition
             await self._say(companion, key, event=event, prefix="morning", t=t)
             return f"weather:morning-{key}"
-        # 2. Caldo o freddo forti, una volta al giorno ciascuno.
+        # 2. Strong heat or cold, once a day each.
         if weather.feel != "mild" and self.said_on.get(weather.feel) != today:
             self.said_on[weather.feel] = today
             await self._say(companion, weather.feel, event=event, t=round(weather.apparent))
             return f"weather:{weather.feel}"
-        # 3. Comincia a piovere, nevicare, tuonare.
+        # 3. It starts raining, snowing, thundering.
         wet = {"rain", "snow", "storm"}
         if weather.condition in wet and previous is not None and previous not in wet:
             if now.timestamp() - self.last.get("weather", 0) >= 3 * 3600:
@@ -496,7 +497,7 @@ class Proactive:
             return None
         if ts < self.next_chatter_at:
             return None
-        # Non mentre lavori, guardi o chatti: aspetta che ti fermi un attimo.
+        # Not while you work, watch or chat: it waits for you to stop for a moment.
         if self.context.activity.kind in FOCUSED and self.context.idle < 90:
             return None
         self.next_chatter_at = ts + gap * self.rng.uniform(0.7, 1.3)
@@ -538,21 +539,21 @@ class Proactive:
                 return f"films:{kind}"
         return None
 
-    # ------------------------------------------------------------------ voce
+    # ------------------------------------------------------------------ voice
     def _lang(self, companion: "Companion") -> str:
         return companion.voice_language or "en"
 
     def _brain_ready(self, companion: "Companion") -> bool:
-        """C'e' chi scrive i commenti: il cervello delle chiacchiere, o quello principale se sta bene."""
+        """There's someone to write the comments: the chatter brain, or the main one if it's well."""
         if self.preferences.brain:
             return self._chatter_brain(companion) is not None
         return companion.settings.selected("llm") not in ("mock", "offline") and "llm" not in companion.last_errors
 
     def _chatter_brain(self, companion: "Companion") -> LLMClient | None:
-        """Il cervello scelto per le chiacchiere; si rifa' quando cambia la scelta o la chiave.
+        """The brain chosen for the chatter; rebuilt when the choice or the key changes.
 
-        None se non c'e' una scelta (scrive il cervello principale) o se non
-        parte (chiave mancante, motore sconosciuto): allora si sta zitti.
+        None if there's no choice (the main brain writes) or if it doesn't start
+        (missing key, unknown engine): then she stays quiet.
         """
         engine = self.preferences.brain
         if not engine:
@@ -569,15 +570,15 @@ class Proactive:
         try:
             self._brain = create_chatter_llm(companion.settings, engine, self.preferences.brain_models)
             self.brain_error = None
-            logger.info("Chiacchiere scritte da %s (%s)", engine, self.preferences.brain_models or "modello salvato")
+            logger.info("Chatter written by %s (%s)", engine, self.preferences.brain_models or "saved model")
         except Exception as exc:
             self._brain = None
             self.brain_error = describe_error(exc)
-            logger.warning("Il cervello delle chiacchiere (%s) non parte: %s", engine, self.brain_error)
+            logger.warning("The chatter brain (%s) doesn't start: %s", engine, self.brain_error)
         return self._brain
 
     async def _say(self, companion: "Companion", key: str, *, event: str, prefix: str | None = None, **values: Any) -> None:
-        """Una frase pronta, con il suo gesto. Per le lingue senza frasi pronte la riscrive il cervello."""
+        """A ready phrase, with its gesture. For languages without ready phrases the brain rewrites it."""
         lang = self._lang(companion)
         gesture = GESTURES.get(key)
         if gesture:
@@ -600,7 +601,7 @@ class Proactive:
         return (self.rng.choice(table[prefix]) + text) if prefix else text
 
     async def _ask(self, companion: "Companion", prompt: str, gesture: str | None = None) -> None:
-        """Un commento scritto dal cervello, col messaggio che lo chiede nascosto."""
+        """A comment written by the brain, with the message asking for it hidden."""
         if gesture:
             await self.broadcast({"type": "gesture", "name": gesture})
         await companion.chat(prompt, self.broadcast, hidden=True, brain=self._chatter_brain(companion))

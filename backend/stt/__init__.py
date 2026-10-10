@@ -1,12 +1,12 @@
-"""Factory dei motori di riconoscimento vocale.
+"""Factory of the speech-recognition engines.
 
-Due id non hanno un motore lato server e restituiscono ``None``:
+Two ids have no server-side engine and return ``None``:
 
-* ``none``    — input vocale disattivato, si parla solo scrivendo;
-* ``browser`` — la trascrizione la fa il browser (Web Speech API) e al backend
-  arriva gia' del testo, quindi non c'e' nulla da istanziare qui.
+* ``none``    — voice input off, you only talk by typing;
+* ``browser`` — the browser does the transcription (Web Speech API) and text
+  arrives at the backend already, so there's nothing to instantiate here.
 
-Il chiamante deve quindi sempre gestire il caso ``None``.
+So the caller must always handle the ``None`` case.
 """
 
 from __future__ import annotations
@@ -28,23 +28,23 @@ __all__ = [
     "create_stt_engine",
 ]
 
-#: Id che non hanno un'implementazione lato server.
+#: Ids that have no server-side implementation.
 CLIENT_SIDE = {"none", "browser"}
 
 
 def create_stt_engine(settings: Settings) -> STTEngine | None:
-    """Istanzia il motore indicato da ``DC_STT_ENGINE``.
+    """Instantiates the engine named by ``DC_STT_ENGINE``.
 
-    Restituisce ``None`` se l'input vocale e' disattivato o se la trascrizione
-    avviene nel browser. Se il motore richiesto non e' disponibile lo segnala e
-    ripiega su ``None``: un riconoscimento vocale mancante non deve impedire di
-    usare il companion scrivendo.
+    Returns ``None`` if voice input is off or if the transcription happens in the
+    browser. If the requested engine isn't available it reports it and falls back
+    to ``None``: missing speech recognition must not prevent using the companion
+    by typing.
     """
     engine = STT_REGISTRY.resolve(settings.stt_engine) or "none"
 
     if engine in CLIENT_SIDE:
         if engine == "browser":
-            logger.info("Riconoscimento vocale: delegato al browser")
+            logger.info("Speech recognition: delegated to the browser")
         return None
 
     options = settings.provider_config("stt", engine)
@@ -72,8 +72,8 @@ def create_stt_engine(settings: Settings) -> STTEngine | None:
             api_key = str(options.get("STT_API_KEY") or "")
             if not api_key:
                 raise RuntimeError(
-                    "Manca la chiave API per la trascrizione. Impostala nel "
-                    "pannello oppure con DC_STT_API_KEY."
+                    "The API key for transcription is missing. Set it in the "
+                    "panel or with DC_STT_API_KEY."
                 )
             return WhisperAPISTT(
                 api_key=api_key,
@@ -81,8 +81,8 @@ def create_stt_engine(settings: Settings) -> STTEngine | None:
                 model=str(options.get("STT_MODEL") or "whisper-1"),
             )
 
-        raise ValueError(f"Motore STT sconosciuto: {settings.stt_engine!r}")
+        raise ValueError(f"Unknown STT engine: {settings.stt_engine!r}")
     except Exception as exc:
-        logger.error("Riconoscimento vocale '%s' non disponibile: %s", engine, exc)
-        logger.warning("L'input vocale resta spento; si può comunque scrivere.")
+        logger.error("Speech recognition '%s' unavailable: %s", engine, exc)
+        logger.warning("Voice input stays off; you can still type.")
         return None

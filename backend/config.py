@@ -1,8 +1,8 @@
-"""Configurazione centralizzata di Tsukumo.
+"""Tsukumo's centralized configuration.
 
-Ogni parametro puo' essere sovrascritto tramite variabile d'ambiente con
-prefisso ``DC_`` (es. ``DC_PORT=9000``) oppure scrivendo un file ``.env``
-nella root del progetto (vedi ``.env.example``).
+Every parameter can be overridden with an environment variable prefixed
+``DC_`` (e.g. ``DC_PORT=9000``) or by writing a ``.env`` file in the
+project's root (see ``.env.example``).
 """
 
 from __future__ import annotations
@@ -14,32 +14,32 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from . import provider_specs  # noqa: F401  (l'import popola i registri)
+from . import provider_specs  # noqa: F401  (the import fills the registries)
 from .languages import system_language
 from .providers import REGISTRIES
 from .security import clean_env_value
 
-# Root del progetto: .../desk-companion
+# The project's root: .../desk-companion
 ROOT = Path(__file__).resolve().parent.parent
-#: Le chiavi che il pannello puo' scrivere nel .env.
+#: The keys the panel can write in the .env.
 _ENV_KEY = re.compile(r"DC_[A-Z0-9_]{1,64}")
 
 
 def env_file() -> Path:
-    """Il file delle impostazioni: ``.env`` del progetto, o ``DC_ENV_FILE``.
+    """The settings file: the project's ``.env``, or ``DC_ENV_FILE``.
 
-    L'app installata lo tiene fra i dati dell'utente (vedi electron/main.js):
-    le risorse dell'app vengono sostituite a ogni aggiornamento.
+    The installed app keeps it among the user's data (see electron/main.js): the
+    app's resources are replaced at every update.
     """
     override = os.environ.get("DC_ENV_FILE")
     return Path(override) if override else ROOT / ".env"
 
 
 def load_dotenv(path: Path | None = None) -> None:
-    """Carica un file ``.env`` molto semplice (KEY=VALUE) nelle env vars.
+    """Loads a very simple ``.env`` file (KEY=VALUE) into the env vars.
 
-    Le variabili gia' presenti nell'ambiente hanno la precedenza, cosi' e'
-    sempre possibile sovrascrivere il file da riga di comando.
+    Variables already in the environment take precedence, so the file can
+    always be overridden from the command line.
     """
     path = path or env_file()
     if not path.is_file():
@@ -55,20 +55,20 @@ def load_dotenv(path: Path | None = None) -> None:
 
 
 def save_dotenv(updates: dict[str, str], path: Path | None = None) -> Path:
-    """Scrive coppie ``DC_CHIAVE=valore`` nel file ``.env``, preservando il resto.
+    """Writes ``DC_KEY=value`` pairs in the ``.env`` file, keeping the rest.
 
-    Le righe esistenti vengono aggiornate al loro posto e i commenti restano
-    dove sono: il file resta quello che l'utente ha scritto a mano, con dentro
-    le modifiche fatte dal pannello. Le chiavi nuove finiscono in fondo.
+    Existing lines are updated in place and comments stay where they are: the
+    file stays the one the user wrote by hand, with the panel's changes inside.
+    New keys go at the end.
 
-    Un valore vuoto **rimuove** la riga, cosi' si torna al default invece di
-    imporre una stringa vuota.
+    An empty value **removes** the line, so you go back to the default instead
+    of forcing an empty string.
     """
     path = path or env_file()
     for key in updates:
         if not _ENV_KEY.fullmatch(key):
-            raise ValueError(f"Nome di variabile non valido: {key!r}")
-    # Un a capo nel valore scriverebbe una riga (una variabile) in piu'.
+            raise ValueError(f"Invalid variable name: {key!r}")
+    # A newline in the value would write one more line (one more variable).
     updates = {key: clean_env_value(value) for key, value in updates.items()}
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
     remaining = dict(updates)
@@ -82,7 +82,7 @@ def save_dotenv(updates: dict[str, str], path: Path | None = None) -> Path:
         key = stripped.partition("=")[0].strip()
         if key in remaining:
             value = remaining.pop(key)
-            if value:  # vuoto = torna al default, quindi togliamo la riga
+            if value:  # empty = back to the default, so we remove the line
                 output.append(f"{key}={value}")
         else:
             output.append(raw_line)
@@ -91,13 +91,13 @@ def save_dotenv(updates: dict[str, str], path: Path | None = None) -> Path:
     if new_keys:
         if output and output[-1].strip():
             output.append("")
-        output.append("# --- Scritto dal pannello -------------------------------------")
+        output.append("# --- Written by the panel ---------------------------------------")
         output.extend(f"{key}={value}" for key, value in new_keys.items())
 
     path.write_text("\n".join(output) + "\n", encoding="utf-8")
 
-    # L'ambiente del processo va allineato, o un successivo from_env()
-    # rileggerebbe i valori vecchi (load_dotenv usa setdefault).
+    # The process environment must be aligned too, or a later from_env() would
+    # read the old values again (load_dotenv uses setdefault).
     for key, value in updates.items():
         if value:
             os.environ[key] = value
@@ -138,10 +138,10 @@ def _env_path(key: str, default: Path) -> Path:
 
 
 def _collect_provider_options() -> dict[str, str]:
-    """Legge dall'ambiente ogni campo dichiarato dai provider registrati.
+    """Reads from the environment every field declared by the registered providers.
 
-    Cosi' un motore nuovo non richiede un attributo dedicato su ``Settings``:
-    basta che dichiari i suoi campi in ``provider_specs``.
+    So a new engine doesn't need a dedicated attribute on ``Settings``: it's
+    enough that it declares its fields in ``provider_specs``.
     """
     values: dict[str, str] = {}
     for registry in REGISTRIES.values():
@@ -153,10 +153,10 @@ def _collect_provider_options() -> dict[str, str]:
     return values
 
 
-# La lingua della risposta non sta qui: la aggiunge il pipeline a ogni turno
-# (vedi languages.speech_directive), cosi' segue la voce scelta.
-# Nome e carattere non stanno qui: li sceglie l'utente nel pannello e valgono
-# per ogni cervello (vedi backend/memory.py).
+# The reply's language isn't here: the pipeline adds it at every turn (see
+# languages.speech_directive), so it follows the chosen voice.
+# Name and character aren't here: the user chooses them in the panel and
+# they hold for every brain (see backend/memory.py).
 DEFAULT_SYSTEM_PROMPT = (
     "You are a small 3D character living on the user's desktop. Reply with at "
     "most three short sentences of plain text: no markdown, no bullet points, no "
@@ -167,108 +167,108 @@ DEFAULT_SYSTEM_PROMPT = (
 
 @dataclass
 class Settings:
-    """Tutti i parametri runtime dell'applicazione."""
+    """All the application's runtime parameters."""
 
-    # --- Server -----------------------------------------------------------
+    # --- Server -------------------------------------------------------------
     host: str = "127.0.0.1"
     port: int = 8770
     log_level: str = "info"
-    #: Origini in piu' (oltre al backend stesso) che possono usare API e WebSocket.
-    #: Vuoto di default: vedi backend/security.py.
+    #: Extra origins (besides the backend itself) that may use the API and WebSocket.
+    #: Empty by default: see backend/security.py.
     cors_origins: list[str] = field(default_factory=list)
-    #: Nomi in piu' accettati nell'header Host (per un proxy come ``tailscale serve``).
+    #: Extra names accepted in the Host header (for a proxy like ``tailscale serve``).
     allowed_hosts: list[str] = field(default_factory=list)
 
-    # --- LLM --------------------------------------------------------------
-    # "ollama" = LLM locale via Ollama
-    # "openai" = qualunque server locale con API stile OpenAI
+    # --- LLM ----------------------------------------------------------------
+    # "ollama" = local LLM via Ollama
+    # "openai" = any local server with an OpenAI-style API
     #            (LM Studio, llama.cpp server, vLLM, text-generation-webui, ...)
-    # "mock"   = risponditore offline integrato, nessun modello richiesto
+    # "mock"   = built-in offline answerer, no model needed
     llm_backend: str = "ollama"
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "llama3.2"
     ollama_timeout: float = 120.0
-    # LM Studio espone la sua API sulla 1234 di default (tab Developer -> Start Server).
+    # LM Studio exposes its API on 1234 by default (Developer tab -> Start Server).
     openai_base_url: str = "http://127.0.0.1:1234/v1"
-    # "auto" = usa il primo modello che il server ha gia' caricato.
+    # "auto" = use the first model the server has already loaded.
     openai_model: str = "auto"
     openai_api_key: str = ""
     openai_timeout: float = 120.0
     temperature: float = 0.7
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     history_turns: int = 12
-    # Se il cervello non risponde, rispondere con frasi preconfezionate
-    # nasconde il problema ("Ciao! Che si fa oggi?" al posto di un errore):
-    # di default si mostra l'errore, con il motivo e come rimediare.
+    # If the brain doesn't answer, answering with canned sentences hides the
+    # problem ("Hi! What shall we do today?" instead of an error): by default
+    # the error is shown, with the reason and how to fix it.
     llm_fallback_to_mock: bool = False
 
-    # --- TTS --------------------------------------------------------------
-    # "kokoro"      = kokoro-onnx in-process (default, tutto locale)
-    # "kokoro_http" = server Kokoro-FastAPI gia' avviato (API OpenAI-compatible)
-    # "formant"     = sintetizzatore di vocali integrato, per testare senza pesi
+    # --- TTS ----------------------------------------------------------------
+    # "kokoro"      = kokoro-onnx in-process (default, all local)
+    # "kokoro_http" = a Kokoro-FastAPI server already started (OpenAI-compatible API)
+    # "formant"     = built-in vowel synthesizer, to test without weights
     tts_engine: str = "kokoro"
     tts_fallback_to_formant: bool = True
     kokoro_model_path: Path = ROOT / "models" / "kokoro-v1.0.onnx"
     kokoro_voices_path: Path = ROOT / "models" / "voices-v1.0.bin"
     kokoro_http_url: str = "http://127.0.0.1:8880"
     voice: str = "af_heart"
-    #: ``DC_VOICE`` e' scritto nel .env o nell'ambiente: vince sulla lingua del sistema.
+    #: ``DC_VOICE`` is written in the .env or the environment: it wins over the system's language.
     voice_explicit: bool = False
-    #: Lingua dell'interfaccia del sistema operativo (``it``): se nessuno ha
-    #: scelto una voce, si parte con una voce in questa lingua.
+    #: The operating system's interface language (``it``): if nobody chose a
+    #: voice, we start with a voice in this language.
     system_language: str = "en"
     speech_speed: float = 1.0
-    # Lingua del phonemizer se la voce non la dice gia' col suo nome.
+    # The phonemizer's language if the voice doesn't already say it with its name.
     language: str = "en-us"
-    # In che lingua risponde: "auto" = quella della voce, "same" = quella in
-    # cui scrivi, oppure una lingua precisa ("English", "it", ...).
+    # Which language she answers in: "auto" = the voice's, "same" = the one you
+    # write in, or a specific language ("English", "it", ...).
     reply_language: str = "auto"
     max_sentence_chars: int = 220
 
-    # --- STT (input vocale) -------------------------------------------------
-    # "none" = solo tastiera. Vedi provider_specs per i motori disponibili.
+    # --- STT (voice input) --------------------------------------------------
+    # "none" = keyboard only. See provider_specs for the available engines.
     stt_engine: str = "none"
-    # "push" = premi e parla, "vad" = sempre in ascolto, "wake" = a chiamata.
+    # "push" = push to talk, "vad" = always listening, "wake" = wake word.
     voice_mode: str = "push"
-    # Tasto globale per il push-to-talk (sintassi acceleratori di Electron).
+    # Global key for push-to-talk (Electron accelerator syntax).
     push_to_talk_key: str = "Control+Space"
-    # Parola di attivazione per voice_mode="wake".
+    # Wake word for voice_mode="wake".
     wake_word: str = "companion"
-    # Quanto silenzio (secondi) chiude la frase quando si e' sempre in ascolto.
+    # How much silence (seconds) ends the sentence when always listening.
     vad_silence: float = 0.8
-    # Sotto questa soglia di energia il microfono e' considerato muto (0-1).
+    # Below this energy threshold the microphone counts as mute (0-1).
     vad_threshold: float = 0.02
-    # Interrompi la voce del companion se l'utente inizia a parlare.
+    # Interrupt the companion's voice if the user starts talking.
     voice_interrupt: bool = True
 
-    # --- Stato dei motori ---------------------------------------------------
-    # Ogni quanti secondi controllare che cervello e voce rispondano (la spia
-    # nel pannello e gli anelli accanto al personaggio).
+    # --- Engine state -------------------------------------------------------
+    # How many seconds between checks that brain and voice answer (the light in
+    # the panel and the rings beside the character).
     status_interval: float = 10.0
-    # All'avvio cerca i cervelli installati (Claude Code, Codex, OpenClaw,
-    # Ollama, LM Studio). Se DC_LLM_BACKEND non e' impostato usa il primo.
+    # At startup it looks for the installed brains (Claude Code, Codex,
+    # OpenClaw, Ollama, LM Studio). If DC_LLM_BACKEND isn't set it uses the first.
     detect_engines: bool = True
-    # Commenti spontanei (ora tarda, meteo, batteria, YouTube, notizie...):
-    # quanto e di cosa si sceglie dal pannello; questo li spegne del tutto.
+    # Spontaneous comments (late hour, weather, battery, YouTube, news...): how
+    # much and about what is chosen in the panel; this turns them off entirely.
     proactive: bool = True
-    # Sessioni degli agenti (OpenClaw, Claude Code, Codex): sopravvivono ai
-    # riavvii, cosi' la conversazione riprende da dove era rimasta.
+    # Agent sessions (OpenClaw, Claude Code, Codex): they survive restarts, so
+    # the conversation picks up where it left off.
     state_dir: Path = ROOT / "state"
 
-    # --- Lip-sync ---------------------------------------------------------
+    # --- Lip-sync -----------------------------------------------------------
     viseme_gain: float = 1.15
     viseme_silence_threshold: float = 0.07
     viseme_hop: float = 0.01
 
-    # --- Frontend ---------------------------------------------------------
+    # --- Frontend -----------------------------------------------------------
     frontend_dist: Path = ROOT / "frontend" / "dist"
     avatar_dir: Path = ROOT / "frontend" / "public" / "models"
-    #: Clip .vrma (greet*, idle*, dance*, altre a richiesta): vedi frontend/src/clips.js.
+    #: .vrma clips (greet*, idle*, dance*, others on request): see frontend/src/clips.js.
     animations_dir: Path = ROOT / "frontend" / "public" / "animations"
 
-    # --- Provider -----------------------------------------------------------
-    # Valori grezzi dei campi dichiarati in provider_specs, letti dall'ambiente.
-    # Chiave = suffisso della variabile (``OLLAMA_MODEL``), non il nome completo.
+    # --- Providers ----------------------------------------------------------
+    # Raw values of the fields declared in provider_specs, read from the
+    # environment. Key = the variable's suffix (``OLLAMA_MODEL``), not the full name.
     provider_options: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -326,24 +326,25 @@ class Settings:
             provider_options=_collect_provider_options(),
         )
 
-    # --- Accesso ai campi dei provider ------------------------------------
+    # --- Access to the providers' fields ------------------------------------
 
-    #: Per ogni tipo, l'attributo che dice quale provider e' attivo.
+    #: For each kind, the attribute that says which provider is active.
     _SELECTED_ATTR = {"llm": "llm_backend", "tts": "tts_engine", "stt": "stt_engine"}
 
     def selected(self, kind: str) -> str:
-        """Id del provider attivo per ``kind`` ("llm", "tts", "stt")."""
+        """Id of the active provider for ``kind`` ("llm", "tts", "stt")."""
         return getattr(self, self._SELECTED_ATTR[kind], "") or ""
 
     def option(self, env: str, default: Any = "") -> Any:
-        """Valore di un campo dichiarato in ``provider_specs``."""
+        """Value of a field declared in ``provider_specs``."""
         return self.provider_options.get(env, default)
 
     def provider_config(self, kind: str, provider_id: str | None = None) -> dict[str, Any]:
-        """Tutti i campi del provider indicato, con i default dello schema.
+        """All the fields of the given provider, with the schema's defaults.
 
-        I valori sono quelli veri, segreti compresi: e' pensato per i factory,
-        non per essere mandato al frontend (per quello c'e' ``provider_public``).
+        The values are the real ones, secrets included: it's meant for the
+        factories, not to be sent to the frontend (for that there's
+        ``provider_public``).
         """
         registry = REGISTRIES[kind]
         spec = registry.get(provider_id or self.selected(kind))
@@ -352,10 +353,10 @@ class Settings:
         return {f.env: self.provider_options.get(f.env, f.default) for f in spec.fields}
 
     def provider_public(self, kind: str) -> dict[str, Any]:
-        """Come ``provider_config`` ma con i segreti ridotti a un booleano.
+        """Like ``provider_config`` but with the secrets reduced to a boolean.
 
-        Il pannello deve poter mostrare "chiave impostata" senza che la chiave
-        attraversi mai la rete.
+        The panel must be able to show "key set" without the key ever crossing the
+        network.
         """
         registry = REGISTRIES[kind]
         spec = registry.get(self.selected(kind))
@@ -368,7 +369,7 @@ class Settings:
         return values
 
     def public_dict(self) -> dict[str, Any]:
-        """Sottoinsieme sicuro da esporre al frontend (niente path assoluti)."""
+        """Safe subset to expose to the frontend (no absolute paths)."""
         return {
             "llmBackend": self.llm_backend,
             "ollamaModel": self.ollama_model,

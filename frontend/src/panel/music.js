@@ -1,48 +1,51 @@
 /**
- * "Musica": Spotify collegato, cosa sta suonando e cosa ha capito dei tuoi gusti.
+ * "Music": Spotify connected, what's playing and what she has understood of
+ * your taste.
  *
- * Il backend (backend/music.py) racconta al cervello cosa ascolti quando si
- * parla di musica, e mette i brani che il cervello sceglie. Per collegarsi
- * serve un'app Spotify tua (è gratis): Spotify non dà un accesso unico a tutti.
- * Il permesso si dà nel browser di sistema, poi Spotify torna sul backend.
+ * The backend (backend/music.py) tells the brain what you listen to when
+ * music comes up, and plays the tracks the brain picks. Connecting needs a
+ * Spotify app of your own (it's free): Spotify doesn't give everyone a
+ * single shared access. Permission is given in the system browser, then
+ * Spotify comes back to the backend.
  */
 
 import { apiUrl } from '../config.js';
 import { el } from '../dom.js';
+import { t, tx } from '../i18n.js';
 import { icon } from '../icons.js';
 
 export class MusicCard {
   /**
    * @param {{socket: object, toast: Function}} app
-   * @param {(iconName: string, title: string, ...children: Node[]) => HTMLElement} card costruttore dei riquadri
+   * @param {(iconName: string, title: string, ...children: Node[]) => HTMLElement} card builds the cards
    */
   constructor(app, card) {
     this.app = app;
 
-    this.status = el('p', { class: 'card-sub' }, 'Spotify non è collegato.');
+    this.status = el('p', { class: 'card-sub' }, t('Spotify is not connected.'));
     this.clientId = el('input', {
       class: 'field-input',
       type: 'text',
       spellcheck: 'false',
       autocomplete: 'off',
       maxlength: 64,
-      placeholder: '32 caratteri, dalla tua app Spotify',
-      'aria-label': 'Client ID di Spotify',
+      placeholder: t('32 characters, from your Spotify app'),
+      'aria-label': t('Spotify Client ID'),
       onKeydown: (event) => {
         if (event.key === 'Enter') this._connect();
       },
     });
     this.redirect = el('code', { class: 'music-redirect' });
-    this.connectButton = el('button', { class: 'btn primary', type: 'button', onClick: () => this._connect() }, icon('music', 15), el('span', {}, 'Collega Spotify'));
+    this.connectButton = el('button', { class: 'btn primary', type: 'button', onClick: () => this._connect() }, icon('music', 15), el('span', {}, t('Connect Spotify')));
     this.setup = el(
       'div',
       { class: 'music-setup' },
       el(
         'ol',
         { class: 'hint music-steps' },
-        el('li', {}, 'Su ', el('a', { href: 'https://developer.spotify.com/dashboard', target: '_blank', rel: 'noreferrer' }, 'developer.spotify.com/dashboard'), ' crea un’app e spunta «Web API».'),
-        el('li', {}, 'Come Redirect URI incolla: ', this.redirect),
-        el('li', {}, 'Copia qui il Client ID e premi Collega: il permesso lo dai nel browser.'),
+        el('li', {}, t('On '), el('a', { href: 'https://developer.spotify.com/dashboard', target: '_blank', rel: 'noreferrer' }, 'developer.spotify.com/dashboard'), t(' create an app and tick "Web API".')),
+        el('li', {}, t('As the Redirect URI paste: '), this.redirect),
+        el('li', {}, t('Copy the Client ID here and press Connect: you give the permission in the browser.')),
       ),
       el('label', { class: 'row' }, el('span', { class: 'row-label' }, 'Client ID'), this.clientId),
       this.connectButton,
@@ -56,21 +59,21 @@ export class MusicCard {
       el(
         'div',
         { class: 'music-links' },
-        el('button', { class: 'link-btn', type: 'button', onClick: () => this._post('/api/music/taste/forget', 'Gusti dimenticati') }, 'Dimentica i gusti'),
-        el('button', { class: 'link-btn', type: 'button', onClick: () => this._post('/api/music/spotify/disconnect', 'Spotify scollegato') }, 'Scollega'),
+        el('button', { class: 'link-btn', type: 'button', onClick: () => this._post('/api/music/taste/forget', t('Taste forgotten')) }, t('Forget my taste')),
+        el('button', { class: 'link-btn', type: 'button', onClick: () => this._post('/api/music/spotify/disconnect', t('Spotify disconnected')) }, t('Disconnect')),
       ),
     );
 
     this.node = card(
       'music',
-      'Musica',
+      t('Music'),
       this.status,
       this.setup,
       this.connected,
       el(
         'p',
         { class: 'hint' },
-        'Chiedile «che genere è?», «mettine di simili», «metti in pausa la musica». Scegliere cosa suonare richiede Spotify Premium; pausa e cambio brano vanno con qualunque account.',
+        t('Ask her "what genre is this?", "play something similar", "pause the music". Choosing what to play needs Spotify Premium; pause and skip work with any account.'),
       ),
     );
 
@@ -83,7 +86,7 @@ export class MusicCard {
       const response = await fetch(apiUrl('/api/music'));
       if (response.ok) this._set(await response.json());
     } catch {
-      // Senza backend resta "non collegato".
+      // Without the backend it stays "not connected".
     }
   }
 
@@ -95,21 +98,21 @@ export class MusicCard {
 
     const now = data.nowPlaying;
     if (!connected) {
-      this.status.textContent = data.configured ? 'Spotify non è collegato: premi Collega e dai il permesso nel browser.' : 'Spotify non è collegato.';
+      this.status.textContent = data.configured ? t('Spotify is not connected: press Connect and give the permission in the browser.') : t('Spotify is not connected.');
     } else if (now) {
-      this.status.textContent = `${now.playing ? 'Sta suonando' : 'In pausa'}: ${now.title} — ${now.artist}.`;
+      this.status.textContent = `${now.playing ? t('Playing') : t('Paused')}: ${now.title} — ${now.artist}.`;
     } else {
-      this.status.textContent = `Collegato${data.user ? ` come ${data.user}` : ''}. Adesso non suona niente.`;
+      this.status.textContent = data.user ? t('Connected as {user}. Nothing is playing right now.', { user: data.user }) : t('Connected. Nothing is playing right now.');
     }
     if (data.error && connected) this.status.textContent += ` ${data.error}`;
 
     const taste = data.taste ?? {};
     const pieces = [];
-    if (taste.favourites?.length) pieces.push(`ti piacciono ${taste.favourites.slice(0, 5).join(', ')}`);
-    if (taste.genres?.length) pieces.push(`soprattutto ${taste.genres.slice(0, 3).join(', ')}`);
+    if (taste.favourites?.length) pieces.push(t('you like {list}', { list: taste.favourites.slice(0, 5).join(', ') }));
+    if (taste.genres?.length) pieces.push(t('mostly {list}', { list: taste.genres.slice(0, 3).join(', ') }));
     this.taste.textContent = pieces.length
-      ? `Ho capito che ${pieces.join(', ')}.`
-      : 'Sto ancora imparando i tuoi gusti: li capisco da cosa ascolti fino in fondo, cosa salti e cosa mi dici che ti piace.';
+      ? t('I understood that {things}.', { things: pieces.join(', ') })
+      : t("I'm still learning your taste: I get it from what you listen to all the way through, what you skip and what you tell me you like.");
   }
 
   async _connect() {
@@ -126,12 +129,12 @@ export class MusicCard {
         body: JSON.stringify({ clientId }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
-      // Si apre nel browser di sistema (setWindowOpenHandler in electron/main.js).
+      if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
+      // It opens in the system browser (setWindowOpenHandler in electron/main.js).
       window.open(data.authorizeUrl, '_blank');
-      this.status.textContent = 'Dai il permesso nella pagina di Spotify che si è aperta nel browser…';
+      this.status.textContent = t('Give the permission in the Spotify page that opened in the browser…');
     } catch (error) {
-      this.app.toast(`Spotify non collegato: ${error.message}`, 'error');
+      this.app.toast(t('Spotify not connected: {error}', { error: error.message }), 'error');
     } finally {
       this.connectButton.disabled = false;
     }
@@ -144,7 +147,7 @@ export class MusicCard {
       this._set(await response.json());
       this.app.toast(done, 'ok');
     } catch (error) {
-      this.app.toast(`Non riuscito: ${error.message}`, 'error');
+      this.app.toast(t('Failed: {error}', { error: error.message }), 'error');
     }
   }
 }

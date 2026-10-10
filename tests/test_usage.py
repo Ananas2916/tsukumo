@@ -1,4 +1,4 @@
-"""Consumi degli agenti: log di Claude Code e Codex, barra di stato, avvisi, a voce."""
+"""Agents' usage: Claude Code and Codex logs, status line, notifications, spoken."""
 
 import base64
 import json
@@ -80,17 +80,17 @@ def test_claude_tokens_of_today_counted_once_and_incrementally(home):
         [
             claude_line("old", 500, yesterday),
             claude_line("m1", 100),
-            claude_line("m1", 100),  # stesso messaggio, un altro blocco: non si conta due volte
+            claude_line("m1", 100),  # same message, another block: not counted twice
             {"type": "user", "timestamp": stamp(NOW), "message": {"content": "usage"}},
         ],
-        tail=json.dumps(claude_line("m2", 7))[:40],  # riga a meta': si aspetta che finisca
+        tail=json.dumps(claude_line("m2", 7))[:40],  # half-written line: wait for it to finish
     )
     reader = service(home)
     claude = by_id(reader.snapshot(force=True))["claude_code"]
     assert claude["today"] == {"tokens": 100, "messages": 1}
-    assert claude["limits"] == [] and "barra di stato" in claude["note"]
+    assert claude["limits"] == [] and "status line" in claude["note"]
 
-    # Claude finisce di scrivere la riga e ne aggiunge un'altra: si leggono solo quelle.
+    # Claude finishes writing the line and adds another: only those are read.
     with log.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(claude_line("m2", 7))[40:] + "\n" + json.dumps(claude_line("m3", 3)) + "\n")
     claude = by_id(reader.snapshot(force=True))["claude_code"]
@@ -141,7 +141,7 @@ def test_codex_limits_come_from_the_newest_session_and_tokens_from_today(home):
     codex = by_id(service(home).snapshot(force=True))["codex"]
     assert codex["plan"] == "free"
     assert [(item["id"], item["used"], item["windowMinutes"]) for item in codex["limits"]] == [("primary", 11.0, 43200)]
-    # Due eventi uguali (stesso totale) sono uno solo; quello di tre giorni fa non e' di oggi.
+    # Two identical events (same total) are one; the one from three days ago isn't today's.
     assert codex["today"] == {"tokens": 250, "messages": 2}
 
 
@@ -224,19 +224,19 @@ def test_describe_speaks_limits_resets_and_tokens():
 
 
 # ---------------------------------------------------------------------------
-# Barra di stato di Claude Code
+# Claude Code's status line
 # ---------------------------------------------------------------------------
 def test_statusline_install_wraps_the_previous_one_and_uninstall_restores_it(tmp_path):
     path = tmp_path / "settings.json"
     previous = {"type": "command", "command": "bash ~/.claude/line.sh", "padding": 1}
     path.write_text(json.dumps({"model": "opus", "statusLine": previous}), encoding="utf-8")
-    assert notify.install_statusline(path) == "collegato"
+    assert notify.install_statusline(path) == "connected"
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["model"] == "opus" and data["statusLine"]["padding"] == 1
     assert notify.STATUSLINE_MARK in data["statusLine"]["command"] and "--then" in data["statusLine"]["command"]
     assert notify.statusline_installed(path)
-    assert notify.install_statusline(path) == "già collegato"
-    assert notify.uninstall_statusline(path) == "scollegato"
+    assert notify.install_statusline(path) == "already connected"
+    assert notify.uninstall_statusline(path) == "disconnected"
     assert json.loads(path.read_text(encoding="utf-8")) == {"model": "opus", "statusLine": previous}
 
     fresh = tmp_path / "fresh.json"
@@ -275,7 +275,7 @@ def test_statusline_script_runs_the_previous_line(tmp_path):
     encoded = base64.urlsafe_b64encode(json.dumps(previous).encode()).decode()
     done = run_statusline(tmp_path, {"model": {"display_name": "Opus"}}, "--then", encoded)
     assert done.returncode == 0 and done.stdout.decode("utf-8").strip() == "42"
-    # Niente limiti (piano senza abbonamento): niente file.
+    # No limits (plan without a subscription): no file.
     assert not (tmp_path / usage.CLAUDE_LIMITS_FILE).exists()
 
 
@@ -286,7 +286,7 @@ def test_statusline_script_never_breaks_on_garbage(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Server: endpoint, domanda a voce, avvisi
+# Server: endpoints, spoken question, notifications
 # ---------------------------------------------------------------------------
 def test_usage_endpoint_and_spoken_answer(client, monkeypatch, home):
     sessions = home / "home" / ".codex" / "sessions"
@@ -348,13 +348,15 @@ def test_usage_alerts_once_per_level_then_when_it_resets(client, alerts):
     resets = (base + timedelta(hours=2)).timestamp()
     tick = lambda minutes: client.portal.call(alerts.tick, base + timedelta(minutes=minutes))  # noqa: E731
     spoken = lambda: [m["text"] for m in alerts.sent if m["type"] == "reply"]  # noqa: E731
+    # The break counts from the real clock: at 15:00 + 1 h it would speak up before noon.
+    alerts.preferences.update({"topics": {"breaks": False}}, save=False)
 
     alerts.reading["value"] = snapshot_with(50, resets)
     assert tick(0) is None
     alerts.reading["value"] = snapshot_with(83, resets)
     assert tick(1) == "usage:claude_code:five_hour:83"
     assert "Claude Code" in spoken()[-1] and "83" in spoken()[-1] and "cinque ore" in spoken()[-1]
-    assert tick(10) is None  # stessa soglia, stessa finestra: una volta sola
+    assert tick(10) is None  # same threshold, same window: once only
     alerts.reading["value"] = snapshot_with(96, resets)
     assert tick(20) == "usage:claude_code:five_hour:96"
     assert "quasi al limite" in spoken()[-1]
@@ -372,5 +374,5 @@ def test_usage_alerts_wait_for_you_and_respect_the_switch(client, alerts):
     alerts.preferences.update({"topics": {"usage": False}}, save=False)
     assert client.portal.call(alerts.tick, datetime.now().replace(hour=15)) is None
     alerts.preferences.update({"topics": {"usage": True}, "chatter": "off"}, save=False)
-    # Con le chiacchiere spente l'avviso arriva lo stesso: e' lavoro, come la batteria.
+    # With the chatter off the notification arrives anyway: it's work, like the battery.
     assert client.portal.call(alerts.tick, datetime.now().replace(hour=15)).startswith("usage:")

@@ -1,4 +1,4 @@
-"""Lip-sync: la timeline dei visemi dev'essere ordinata, disgiunta e a tempo."""
+"""Lip-sync: the viseme timeline must be ordered, disjoint and timed."""
 
 import numpy as np
 
@@ -16,7 +16,7 @@ def test_timeline_from_real_audio_is_ordered_and_disjoint():
     phones = phones_for(speech.text, speech.phonemes)
     timeline = build_timeline(speech.samples, speech.sample_rate, phones)
     frames = _frames(timeline)
-    assert frames, "nessun viseme per una frase vera"
+    assert frames, "no visemes for a real sentence"
     for (t0, d0, _, w0), (t1, _, _, _) in zip(frames, frames[1:]):
         assert t0 + d0 <= t1 + 1e-3
         assert 0.0 <= w0 <= 1.0
@@ -30,7 +30,7 @@ def test_letter_timings_become_phones():
     timings = phones_for_letters(chars, starts, ends)
     assert all(isinstance(phone, Phone) for phone, _, _ in timings)
     assert [start for _, start, _ in timings] == sorted(start for _, start, _ in timings)
-    # "a" apre la bocca piu' di "c"
+    # "a" opens the mouth more than "c"
     by_char = dict(zip(chars, (phone for phone, _, _ in timings)))
     assert by_char["a"].openness > by_char["c"].openness
 

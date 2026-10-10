@@ -1,11 +1,13 @@
 /**
- * La chat del pannello.
+ * The panel's chat.
  *
- * Il testo arriva a pezzi (`token`) mentre il cervello scrive: la bolla si
- * aggiorna al volo e il markdown viene reso quando serve. Gli errori non sono
- * piu' righe grigie da decifrare: sono schede con il motivo, un consiglio e un
- * bottone che porta dritto a dove si sistema.
+ * Text arrives in pieces (`token`) while the brain writes: the bubble
+ * updates on the fly and the markdown is rendered when needed. Errors are no
+ * longer grey lines to decipher: they're cards with the reason, a tip and a
+ * button that takes you straight to where it's fixed.
  */
+
+import { LOCALE, t, tx } from '../i18n.js';
 
 import { apiUrl } from '../config.js';
 import { el, iconButton, readSetting, writeSetting } from '../dom.js';
@@ -16,21 +18,21 @@ const HISTORY_KEY = 'dc:chat';
 const HISTORY_LIMIT = 200;
 
 const SUGGESTIONS = [
-  'Ciao! Cosa sai fare?',
-  'Che tempo fa domani?',
-  'Raccontami una cosa curiosa',
-  'Ricordami di fare una pausa tra 30 minuti',
+  t('Hi! What can you do?'),
+  t("What's the weather tomorrow?"),
+  t('Tell me something curious'),
+  t('Remind me to take a break in 30 minutes'),
 ];
 
 const SOURCE_TAB = { llm: 'llm', tts: 'tts', stt: 'stt' };
 
-/** "prima voce dopo 1,4 s · risposta completa in 5,2 s" */
+/** "first voice after 1.4 s · complete in 5.2 s" */
 function describeTimings({ firstText, firstVoice, total }) {
-  const seconds = (ms) => `${(ms / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })} s`;
+  const seconds = (ms) => `${(ms / 1000).toLocaleString(LOCALE, { maximumFractionDigits: 1 })} s`;
   const parts = [];
-  if (firstText != null) parts.push(`primo testo dopo ${seconds(firstText)}`);
-  if (firstVoice != null) parts.push(`prima voce dopo ${seconds(firstVoice)}`);
-  if (total != null) parts.push(`completa in ${seconds(total)}`);
+  if (firstText != null) parts.push(t('first text after {time}', { time: seconds(firstText) }));
+  if (firstVoice != null) parts.push(t('first voice after {time}', { time: seconds(firstVoice) }));
+  if (total != null) parts.push(t('complete in {time}', { time: seconds(total) }));
   return parts.join(' · ');
 }
 
@@ -52,19 +54,19 @@ export class ChatView {
     this.screenButton = root.querySelector('#btn-screen');
     this.fileInput = root.querySelector('#file-input');
     this.attachmentsEl = root.querySelector('#attachments');
-    /** File pronti da mandare col prossimo messaggio: `{name, path, screen}`. */
+    /** Files ready to go with the next message: `{name, path, screen}`. */
     this.attachments = [];
 
     this.mic.innerHTML = iconSvg('mic', 18);
     this.read.innerHTML = iconSvg('volume', 18);
-    this.newChat.append(icon('newChat', 16), el('span', {}, 'Nuova'));
+    this.newChat.append(icon('newChat', 16), el('span', {}, t('New')));
     this.attach.innerHTML = iconSvg('clip', 18);
-    this.screenButton.append(icon('screen', 16), el('span', {}, 'Schermo'));
+    this.screenButton.append(icon('screen', 16), el('span', {}, t('Screen')));
     this.screenButton.classList.toggle('hidden', !app.companion?.captureScreen);
 
     /** @type {{role: string, text: string, note?: string, hint?: string, source?: string, node?: HTMLElement}[]} */
     this.history = readSetting(HISTORY_KEY, []);
-    /** Risposta in corso, per turno del backend. */
+    /** The reply in progress, per backend turn. */
     this.pending = new Map();
     this.readMode = false;
     this.busy = 'idle';
@@ -87,9 +89,13 @@ export class ChatView {
 
   // ------------------------------------------------------------ composer
   _bind() {
-    this.input.addEventListener('input', () => this._autoGrow());
+    this.input.addEventListener('input', () => {
+      this._autoGrow();
+      // She watches you type (a nod at every key, like Blobby).
+      this.app.companion?.sendToPet?.({ type: 'typing' });
+    });
     this.input.addEventListener('keydown', (event) => {
-      // Invio manda, Maiusc+Invio va a capo.
+      // Enter sends, Shift+Enter starts a new line.
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         this.form.requestSubmit();
@@ -108,18 +114,18 @@ export class ChatView {
     this.read.addEventListener('click', () => {
       this.readMode = !this.readMode;
       this.read.classList.toggle('active', this.readMode);
-      this.input.placeholder = this.readMode ? 'Testo da farle leggere…' : 'Scrivile qualcosa…';
+      this.input.placeholder = this.readMode ? t('Text for her to read…') : t('Write her something…');
       this.input.focus();
     });
 
     this.mic.addEventListener('click', () => {
       if (!this.app.companion) {
-        this.app.toast('Il microfono si usa dalla finestra desktop.', 'warn');
+        this.app.toast(t('The microphone is used from the desktop window.'), 'warn');
         return;
       }
       if ((this.app.engines?.stt?.state ?? 'off') === 'off') {
         this.app.showTab('engines', { section: 'stt' });
-        this.app.toast("Scegli prima come deve ascoltarti.", 'warn');
+        this.app.toast(t('First choose how she should listen to you.'), 'warn');
         return;
       }
       this.app.companion.sendToPet({ type: 'mic' });
@@ -132,7 +138,7 @@ export class ChatView {
 
     this.chip.addEventListener('click', () => this.app.showTab('engines', { section: 'llm' }));
 
-    // File: graffetta, trascinamento sulla chat, screenshot.
+    // Files: paper clip, dragging onto the chat, screenshot.
     this.attach.addEventListener('click', () => this.fileInput.click());
     this.fileInput.addEventListener('change', () => {
       this.addFiles([...this.fileInput.files]);
@@ -155,8 +161,8 @@ export class ChatView {
   }
 
   /**
-   * In Electron il file ha un percorso vero: l'agente lo apre dove sta. Nel
-   * browser non c'e', quindi lo si carica sul backend (`/api/attachments`).
+   * In Electron the file has a real path: the agent opens it where it is. In
+   * the browser it doesn't, so it's uploaded to the backend (`/api/attachments`).
    */
   async addFiles(files) {
     for (const file of files) {
@@ -165,7 +171,7 @@ export class ChatView {
         try {
           const response = await fetch(apiUrl(`/api/attachments?name=${encodeURIComponent(file.name)}`), { method: 'POST', body: file });
           const data = await response.json();
-          if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+          if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
           path = data.path;
         } catch (error) {
           this.app.toast(`${file.name}: ${error.message}`, 'error');
@@ -181,11 +187,11 @@ export class ChatView {
   async addScreen() {
     try {
       const path = await this.app.companion.captureScreen();
-      this.attachments.push({ name: 'Schermo', path, screen: true });
+      this.attachments.push({ name: t('Screen'), path, screen: true });
       this._renderAttachments();
       this.input.focus();
     } catch (error) {
-      this.app.toast(`Non riesco a catturare lo schermo: ${error.message}`, 'error');
+      this.app.toast(t("Can't capture the screen: {error}", { error: error.message }), 'error');
     }
   }
 
@@ -199,7 +205,7 @@ export class ChatView {
           icon(item.screen ? 'screen' : 'clip', 13),
           el('span', {}, item.name),
           iconButton('close', {
-            title: 'Togli',
+            title: t('Remove'),
             size: 12,
             onClick: () => {
               this.attachments.splice(index, 1);
@@ -228,8 +234,8 @@ export class ChatView {
     this.input.value = '';
     this._autoGrow();
     if (this.readMode) {
-      // "say" non passa dal cervello e il backend non lo ripete come messaggio utente.
-      this.add({ role: 'say', text, note: 'letto ad alta voce' });
+      // "say" doesn't go through the brain and the backend doesn't echo it as a user message.
+      this.add({ role: 'say', text, note: t('read aloud') });
       this.socket.say(text);
     } else {
       this.socket.chat(text);
@@ -246,7 +252,7 @@ export class ChatView {
     const stop = this.busy !== 'idle' && !this.input.value.trim() && !this.attachments?.length;
     this.send.innerHTML = iconSvg(stop ? 'stop' : 'send', 17);
     this.send.classList.toggle('stop', stop);
-    this.send.title = stop ? 'Interrompi' : 'Invia (Invio)';
+    this.send.title = stop ? t('Stop') : t('Send (Enter)');
   }
 
   // ------------------------------------------------------------- backend
@@ -254,7 +260,7 @@ export class ChatView {
     const { socket, app } = this;
 
     app.on('busy', (busy) => {
-      if (busy === 'thinking' && this.busy !== 'thinking') this._setTypingLabel('sta pensando');
+      if (busy === 'thinking' && this.busy !== 'thinking') this._setTypingLabel(t('thinking'));
       this.busy = busy;
       this.typing.classList.toggle('hidden', busy !== 'thinking');
       this._renderSend();
@@ -267,13 +273,13 @@ export class ChatView {
     });
 
     socket.on('user', (message) => {
-      const files = (message.files ?? []).map((file) => (message.screen ? 'schermo' : file.name));
+      const files = (message.files ?? []).map((file) => (message.screen ? t('screen') : file.name));
       this.add({ role: 'user', text: message.text, note: files.length ? `📎 ${files.join(', ')}` : undefined });
     });
 
-    // L'agente usa un tool: la riga "sta pensando" dice cosa sta facendo.
+    // The agent uses a tool: the "thinking" line says what it's doing.
     socket.on('working', (message) => {
-      if (message.label) this._setTypingLabel(message.label);
+      if (message.label) this._setTypingLabel(tx(message.label));
     });
 
     socket.on('token', (message) => {
@@ -291,8 +297,8 @@ export class ChatView {
       const reply = this.pending.get(message.turn);
       this.pending.delete(message.turn);
       if (reply) {
-        // Il testo arrivato a pezzi resta quello mostrato (col suo markdown);
-        // la versione "pulita" del backend serve solo alla voce.
+        // The text that arrived in pieces stays the one shown (with its markdown);
+        // the backend's "clean" version is only for the voice.
         reply.text = reply.text.trim() || message.text;
         if (message.steps?.length) reply.steps = message.steps.map((step) => step.label);
         if (message.timings) reply.timings = message.timings;
@@ -305,18 +311,18 @@ export class ChatView {
       }
     });
 
-    socket.on('notice', (message) => this.add({ role: 'notice', text: message.message }));
+    socket.on('notice', (message) => this.add({ role: 'notice', text: tx(message.message) }));
     socket.on('error', (message) =>
       this.add({
         role: 'error',
-        text: message.message ?? 'Errore',
-        hint: message.hint,
+        text: tx(message.message) ?? t('Error'),
+        hint: tx(message.hint),
         source: message.source,
         action: message.action,
       }),
     );
     socket.on('transcript', (message) => {
-      if (!message.text?.trim()) this.app.toast('Non ho capito, puoi ripetere?', 'warn');
+      if (!message.text?.trim()) this.app.toast(t("I didn't catch that, can you repeat?"), 'warn');
     });
     socket.on('reset', () => this.clear());
   }
@@ -325,10 +331,10 @@ export class ChatView {
     const llm = engines?.llm;
     this.chip.querySelector('.dot').dataset.state = llm?.state ?? 'unknown';
     this.root.querySelector('#engine-chip-text').textContent = llm ? llm.label : '…';
-    this.chip.title = llm?.detail ? `${llm.label}: ${llm.detail}` : 'Cambia cervello';
+    this.chip.title = llm?.detail ? `${tx(llm.label)}: ${tx(llm.detail)}` : t('Change brain');
   }
 
-  // ------------------------------------------------------------ messaggi
+  // ------------------------------------------------------------ messages
   add(message) {
     this.history.push(message);
     this.messagesEl.append(this._node(message));
@@ -398,7 +404,7 @@ export class ChatView {
                   type: 'button',
                   onClick: () => this.app.showTab('engines', { section: SOURCE_TAB[message.source] ?? 'llm' }),
                 },
-                'Apri Motori',
+                t('Open Engines'),
                 icon('chevronRight', 14),
               )
             : null,
@@ -411,19 +417,19 @@ export class ChatView {
       return;
     }
     const bubble = el('div', { class: 'bubble' });
-    // Quanto ha fatto aspettare: al passaggio del mouse, per chi vuole saperlo.
+    // How long it made you wait: on mouse hover, for whoever wants to know.
     if (message.timings) bubble.title = describeTimings(message.timings);
     if (message.role === 'assistant') bubble.append(renderMarkdown(message.text));
     else bubble.textContent = message.text;
     node.append(bubble);
     if (message.steps?.length) {
-      // I passi dell'agente, chiusi: chi vuole sapere come ci e' arrivato li apre.
+      // The agent's steps, collapsed: whoever wants to know how it got there opens them.
       const count = message.steps.length;
       node.append(
         el(
           'details',
           { class: 'steps' },
-          el('summary', {}, count === 1 ? '1 passo' : `${count} passi`),
+          el('summary', {}, count === 1 ? t('1 step') : t('{n} steps', { n: count })),
           el('ol', {}, ...message.steps.map((step) => el('li', {}, step))),
         ),
       );
@@ -447,8 +453,8 @@ export class ChatView {
         'div',
         { class: 'empty-state' },
         el('div', { class: 'empty-art' }, icon('chat', 26)),
-        el('h2', {}, 'Parlale come a una persona'),
-        el('p', {}, 'Ti risponde a voce e qui per iscritto. Con un agente collegato può anche cercare, ricordare e fare cose per te.'),
+        el('h2', {}, t('Talk to her like a person')),
+        el('p', {}, t('She answers by voice and here in writing. With an agent connected she can also search, remember and do things for you.')),
         el('div', { class: 'suggestions' }, suggestions),
       ),
     );

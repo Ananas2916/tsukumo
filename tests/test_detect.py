@@ -1,8 +1,8 @@
-"""Riconoscimento dei cervelli installati e scelta automatica al primo avvio.
+"""Recognizing the installed brains and the automatic choice at first start.
 
-Nessun servizio vero: i servizi sono un piccolo server HTTP locale, i
-programmi sono l'interprete Python stesso, e il ``.env`` non viene mai
-scritto (``save_dotenv`` e' sostituito da un registratore).
+No real service: the services are a small local HTTP server, the
+programs are the Python interpreter itself, and the ``.env`` is never
+written (``save_dotenv`` is replaced by a recorder).
 """
 
 import asyncio
@@ -20,12 +20,12 @@ from backend.llm.ollama import OllamaClient
 
 
 # ---------------------------------------------------------------------------
-# Controlli singoli
+# Single checks
 # ---------------------------------------------------------------------------
 class _Handler(BaseHTTPRequestHandler):
     ROUTES = {"/health": 200, "/api/tags": 200, "/v1/models": 401}
 
-    def do_GET(self):  # noqa: N802 - nome imposto da http.server
+    def do_GET(self):  # noqa: N802 - name imposed by http.server
         self.send_response(self.ROUTES.get(self.path, 404))
         self.end_headers()
         self.wfile.write(b"{}")
@@ -60,18 +60,19 @@ def test_programs_are_found_without_running_them():
 
 def test_services_answer_on_their_own_paths(local_url):
     assert asyncio.run(detect.detect("ollama", {"OLLAMA_URL": local_url}))["found"] is True
-    # OpenClaw si scrive spesso con ws://: la sonda passa comunque da http.
+    # OpenClaw is often written with ws://: the probe still goes through http.
     ws_url = local_url.replace("http://", "ws://")
     assert asyncio.run(detect.detect("openclaw", {"OPENCLAW_URL": ws_url}))["found"] is True
-    # LM Studio con la chiave obbligatoria risponde 401: c'e', vuole solo la chiave.
+    # LM Studio with the mandatory key answers 401: it's there, it only wants the key.
     assert asyncio.run(detect.detect("openai", {"OPENAI_BASE_URL": f"{local_url}/v1"}))["found"] is True
-    # Un 404 e' un altro programma su quella porta, non il motore.
+    assert asyncio.run(detect.detect("g4f", {"G4F_BASE_URL": f"{local_url}/v1"}))["found"] is True
+    # A 404 is another program on that port, not the engine.
     other = asyncio.run(detect.detect("openai", {"OPENAI_BASE_URL": f"{local_url}/altro"}))
     assert other["found"] is False and "404" in other["detail"]
 
 
 def test_a_service_that_is_off_costs_at_most_a_second():
-    # Su Windows una porta chiusa di localhost ritenta la connessione per ~2 s.
+    # On Windows a closed localhost port retries the connection for ~2 s.
     started = time.perf_counter()
     result = asyncio.run(detect.detect("ollama", {"OLLAMA_URL": f"http://127.0.0.1:{_closed_port()}"}))
     assert result["found"] is False
@@ -98,7 +99,7 @@ def test_detect_all_runs_in_parallel_and_keeps_the_order(monkeypatch):
     result = asyncio.run(detect.detect_all(lambda provider: {}, detect.AUTO_ORDER))
     assert time.perf_counter() - started < 1.0
     assert list(result) == list(detect.AUTO_ORDER)
-    # Senza elenco: tutti i motori riconoscibili, anche gli agenti "a comando".
+    # Without a list: every recognizable engine, the "command" agents too.
     everything = asyncio.run(detect.detect_all(lambda provider: {}))
     assert set(everything) == set(detect.DETECTORS)
     assert {"antigravity", "cline", "gemini_cli"} <= set(everything)
@@ -116,21 +117,21 @@ def test_candidates_follow_the_preferred_order():
 
 
 # ---------------------------------------------------------------------------
-# Scelta automatica nel server
+# Automatic choice in the server
 # ---------------------------------------------------------------------------
 FAKE_DETECTED = {
-    "claude_code": {"found": False, "detail": "claude non e' nel PATH"},
-    "codex": {"found": False, "detail": "codex non trovato"},
-    "antigravity": {"found": False, "detail": "agy non trovato"},
+    "claude_code": {"found": False, "detail": "claude is not in the PATH"},
+    "codex": {"found": False, "detail": "codex not found"},
+    "antigravity": {"found": False, "detail": "agy not found"},
     "openclaw": {"found": True, "detail": "http://127.0.0.1:18789/health"},
     "ollama": {"found": True, "detail": "http://127.0.0.1:11434/api/tags"},
-    "openai": {"found": False, "detail": "non risponde"},
+    "openai": {"found": False, "detail": "not answering"},
 }
 
 
 @pytest.fixture
 def fake_pc(client, monkeypatch):
-    """Rilevamento finto e .env finto; alla fine il cervello torna ``mock``."""
+    """Fake detection and a fake .env; at the end the brain goes back to ``mock``."""
     saved: list[dict[str, str]] = []
 
     def fake_save_dotenv(updates, path=None):
@@ -163,7 +164,7 @@ def test_first_start_picks_the_first_engine_that_works(client, fake_pc, monkeypa
     original_replace = instance.replace_engine
 
     def replace_engine(kind, settings):
-        if settings.llm_backend == "openclaw":  # acceso ma senza token
+        if settings.llm_backend == "openclaw":  # on but without a token
             raise RuntimeError("Token OpenClaw non trovato")
         return original_replace(kind, settings)
 
@@ -180,7 +181,7 @@ def test_first_start_picks_the_first_engine_that_works(client, fake_pc, monkeypa
 
 
 def test_an_explicit_choice_is_never_overridden(client, fake_pc):
-    # conftest imposta DC_LLM_BACKEND=mock: come un .env scritto a mano.
+    # conftest sets DC_LLM_BACKEND=mock: like a hand-written .env.
     instance = server.app.state.companion
     llm = instance.llm
     client.portal.call(server._detect_engines)

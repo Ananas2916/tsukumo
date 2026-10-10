@@ -1,4 +1,4 @@
-"""Il turno completo: cervello -> frasi -> voce, errori e interruzioni."""
+"""The full turn: brain -> sentences -> voice, errors and interruptions."""
 
 import asyncio
 import time
@@ -61,7 +61,7 @@ class BrokenVoice:
     default_voice = "x"
 
     def synthesize(self, text, voice=None, speed=None):
-        raise RuntimeError("chiave API non valida")
+        raise RuntimeError("invalid API key")
 
     def voices(self):
         return ["x"]
@@ -98,8 +98,8 @@ def test_llm_failure_is_explained_not_silent():
     asyncio.run(companion.chat("ciao", emit))
     error = emit.of("error")[0]
     assert error["source"] == "llm" and error["action"] == "engines"
-    # Il vecchio messaggio era "LLM non raggiungibile ()": mai piu' vuoto.
-    assert "()" not in error["message"] and error["message"].strip().endswith("risposta")
+    # The old message was "LLM non raggiungibile ()": never empty again.
+    assert "()" not in error["message"] and error["message"].strip().endswith("no answer")
     assert emit.of("reply")[0]["failed"] is True
     assert companion.last_errors["llm"]
 
@@ -143,13 +143,13 @@ def test_muted_sends_captions_without_synthesis():
 
 
 def test_silent_turns_from_the_phone_do_not_speak():
-    # Scritto dal telefono: risposta solo testo, il PC a casa non parla.
+    # Written from the phone: text-only answer, the PC at home stays quiet.
     companion = _companion()
     phone, pc = Recorder(), Recorder()
 
     async def two_turns():
         await companion.chat("ciao", phone, silent=True)
-        # Il turno dopo, dal PC, ha di nuovo la voce.
+        # The next turn, from the PC, has the voice again.
         await companion.chat("ciao di nuovo", pc)
 
     asyncio.run(two_turns())
@@ -169,7 +169,7 @@ def test_agents_get_only_the_last_message():
 
 
 def test_describe_error_is_never_empty():
-    assert describe_error(TimeoutError()) == "Tempo scaduto: nessuna risposta"
+    assert describe_error(TimeoutError()) == "Timed out: no answer"
     assert describe_error(asyncio.TimeoutError())
-    assert "raggiungibile" in describe_error(ConnectionRefusedError(1225, ""))
+    assert "Unreachable" in describe_error(ConnectionRefusedError(1225, ""))
     assert describe_error(RuntimeError()) == "RuntimeError"

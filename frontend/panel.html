@@ -1,14 +1,14 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tsukumo - pannello</title>
+    <title>Tsukumo - panel</title>
     <link rel="stylesheet" href="./src/panel.css" />
   </head>
   <body>
     <div class="app">
-      <!-- Barra del titolo: trascinandola il pannello si stacca dal personaggio -->
+      <!-- Title bar: dragging it detaches the panel from the character -->
       <header class="titlebar">
         <div class="identity">
           <div id="badge" class="avatar-badge" data-state="unknown" aria-hidden="true">
@@ -17,7 +17,7 @@
           </div>
           <div class="titles">
             <strong>Tsukumo</strong>
-            <span id="agent-line" class="subtitle">Connessione…</span>
+            <span id="agent-line" class="subtitle" data-i18n>Connecting…</span>
           </div>
         </div>
         <div class="window-actions" id="window-actions"></div>
@@ -25,7 +25,7 @@
 
       <nav class="tabs" role="tablist" id="tabs"></nav>
 
-      <div id="now-playing" class="now-playing hidden" title="In riproduzione su Spotify">
+      <div id="now-playing" class="now-playing hidden" title="Playing on Spotify" data-i18n-attrs="title">
         <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
         <span id="now-playing-text" class="now-playing-text"></span>
       </div>
@@ -34,39 +34,40 @@
         <!-- Chat ------------------------------------------------------------>
         <section id="view-chat" class="view chat-view" role="tabpanel">
           <div class="chat-toolbar">
-            <button id="engine-chip" class="engine-chip" type="button" title="Cambia cervello">
+            <button id="engine-chip" class="engine-chip" type="button" title="Change brain" data-i18n-attrs="title">
               <span class="dot" data-state="unknown"></span>
               <span id="engine-chip-text">…</span>
             </button>
             <span class="spacer"></span>
-            <button id="btn-screen" class="ghost-btn hidden" type="button" title="Falle vedere lo schermo"></button>
-            <button id="btn-new-chat" class="ghost-btn" type="button" title="Dimentica la conversazione e ricomincia"></button>
+            <button id="btn-screen" class="ghost-btn hidden" type="button" title="Show her the screen" data-i18n-attrs="title"></button>
+            <button id="btn-new-chat" class="ghost-btn" type="button" title="Forget the conversation and start over" data-i18n-attrs="title"></button>
           </div>
           <div id="messages" class="messages" aria-live="polite"></div>
           <div class="composer-wrap">
-            <div id="typing" class="typing hidden"><i></i><i></i><i></i><span>sta pensando</span></div>
+            <div id="typing" class="typing hidden"><i></i><i></i><i></i><span data-i18n>thinking</span></div>
             <div id="attachments" class="attachments hidden"></div>
             <input id="file-input" type="file" multiple hidden />
             <form id="composer" class="composer" autocomplete="off">
-              <button id="btn-mic" class="composer-icon" type="button" title="Parla (Ctrl+Spazio)"></button>
-              <button id="btn-attach" class="composer-icon" type="button" title="Allega un file (o trascinalo qui, o su di lei)"></button>
-              <textarea id="input" rows="1" placeholder="Scrivile qualcosa…" aria-label="Messaggio"></textarea>
-              <button id="btn-read" class="composer-icon" type="button" title="Fai solo leggere il testo, senza passare dal cervello"></button>
-              <button id="btn-send" class="send" type="submit" title="Invia (Invio)"></button>
+              <button id="btn-mic" class="composer-icon" type="button" title="Talk (Ctrl+Space)" data-i18n-attrs="title"></button>
+              <button id="btn-attach" class="composer-icon" type="button" title="Attach a file (or drop it here, or on her)" data-i18n-attrs="title"></button>
+              <textarea id="input" rows="1" placeholder="Write her something…" aria-label="Message" data-i18n-attrs="placeholder,aria-label"></textarea>
+              <button id="btn-read" class="composer-icon" type="button" title="Just have the text read aloud, without the brain" data-i18n-attrs="title"></button>
+              <button id="btn-send" class="send" type="submit" title="Send (Enter)" data-i18n-attrs="title"></button>
             </form>
           </div>
         </section>
 
-        <!-- Personaggio ----------------------------------------------------->
+        <!-- Character -------------------------------------------------------->
         <section id="view-character" class="view scroll" role="tabpanel"></section>
 
-        <!-- Agenda: timer, promemoria, sveglie, azioni programmate ---------->
+        <!-- Agenda: timers, reminders, alarms, scheduled actions -------------->
         <section id="view-agenda" class="view scroll" role="tabpanel"></section>
 
-        <!-- Lavoro: consumi e avvisi degli agenti usati per conto tuo ------>
+
+        <!-- Work: usage and notifications of the agents you use on your own --->
         <section id="view-work" class="view scroll" role="tabpanel"></section>
 
-        <!-- Motori: disegnati leggendo GET /api/providers ------------------->
+        <!-- Engines: drawn by reading GET /api/providers --------------------->
         <section id="view-engines" class="view scroll" role="tabpanel"></section>
       </main>
     </div>

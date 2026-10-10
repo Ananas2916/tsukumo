@@ -1,19 +1,19 @@
-"""Chi e' lei e cosa sa di te, uguale per ogni cervello.
+"""Who she is and what she knows about you, the same for every brain.
 
-Cambiando cervello (Claude Code, Codex, OpenClaw, un modello locale) il tono
-e la memoria restavano quelli del cervello di turno: un giorno sapeva che ti
-chiami Filippo, il giorno dopo no. Qui stanno due cose che il companion
-aggiunge a ogni turno, qualunque sia il cervello:
+Changing brain (Claude Code, Codex, OpenClaw, a local model) the tone and the
+memory used to be those of the brain of the day: one day she knew your name,
+the next day she didn't. Here live two things the companion adds at every
+turn, whatever the brain:
 
-* la **personalita'**: nome e carattere, scelti nel pannello;
-* i **ricordi**: fatti brevi su di te ("lavora in Python", "ha un gatto che
-  si chiama Miso"). Entrano in tre modi: dici "ricordati che...", il
-  cervello ne annota uno con l'etichetta ``[[remember: ...]]`` quando gli
-  racconti qualcosa di duraturo, oppure li scrivi dal pannello.
+* the **personality**: name and character, chosen in the panel;
+* the **memories**: short facts about you ("works in Python", "has a cat
+  called Miso"). They come in three ways: you say "remember that...", the
+  brain notes one with the ``[[remember: ...]]`` tag when you tell it
+  something lasting, or you write them in the panel.
 
-Tutto resta in un file JSON nella cartella di stato, visibile e cancellabile
-dal pannello: niente parte verso servizi esterni se non dentro il messaggio
-al cervello che hai scelto tu.
+Everything stays in a JSON file in the state folder, visible and deletable
+from the panel: nothing leaves for external services except inside the
+message to the brain you chose.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_NAME = "Tsukumo"
 DEFAULT_TRAITS = "warm, concise and a little playful"
 
-#: Oltre questi limiti i ricordi piu' vecchi escono dal prompt (restano nel file).
+#: Beyond these limits the oldest memories leave the prompt (they stay in the file).
 MAX_FACTS_IN_PROMPT = 24
 MAX_PROMPT_CHARS = 1400
 MAX_FACT_CHARS = 200
@@ -46,7 +46,7 @@ class Fact:
     text: str
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     created: float = field(default_factory=time.time)
-    #: "user" (detto o scritto da te) o "brain" (annotato dal cervello).
+    #: "user" (said or written by you) or "brain" (noted by the brain).
     source: str = "user"
 
     def as_dict(self) -> dict[str, Any]:
@@ -54,7 +54,7 @@ class Fact:
 
 
 def _normal(text: str) -> str:
-    """Per confrontare due ricordi: minuscolo, senza accenti ne' punteggiatura."""
+    """To compare two memories: lowercase, no accents or punctuation."""
     decomposed = unicodedata.normalize("NFD", text.lower())
     plain = "".join(char for char in decomposed if not unicodedata.combining(char))
     return " ".join(re.findall(r"\w+", plain))
@@ -66,7 +66,7 @@ def _clean_fact(text: str) -> str:
 
 
 class MemoryStore:
-    """Personalita' e ricordi, salvati su disco a ogni modifica."""
+    """Personality and memories, saved to disk at every change."""
 
     def __init__(self, path: Path | None) -> None:
         self.path = path
@@ -76,14 +76,14 @@ class MemoryStore:
         self._lock = threading.Lock()
         self._load()
 
-    # ------------------------------------------------------------ disco
+    # ------------------------------------------------------------ disk
     def _load(self) -> None:
         if not self.path or not self.path.is_file():
             return
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Memoria non leggibile da %s: %s", self.path, exc)
+            logger.warning("Memory unreadable from %s: %s", self.path, exc)
             return
         persona = raw.get("persona") or {}
         self.name = str(persona.get("name") or DEFAULT_NAME)
@@ -102,9 +102,9 @@ class MemoryStore:
             temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
             os.replace(temporary, self.path)
         except OSError as exc:
-            logger.warning("Memoria non salvata: %s", exc)
+            logger.warning("Memory not saved: %s", exc)
 
-    # ------------------------------------------------------------ lettura
+    # ------------------------------------------------------------ reading
     def facts(self) -> list[Fact]:
         with self._lock:
             return list(self._facts)
@@ -116,7 +116,7 @@ class MemoryStore:
             "facts": [fact.as_dict() for fact in self.facts()],
         }
 
-    # ------------------------------------------------------------ modifiche
+    # ------------------------------------------------------------ changes
     def set_persona(self, name: str | None = None, traits: str | None = None) -> None:
         with self._lock:
             if name is not None:
@@ -126,7 +126,7 @@ class MemoryStore:
             self._save()
 
     def add(self, text: str, source: str = "user") -> Fact | None:
-        """Aggiunge un ricordo; ``None`` se e' vuoto o c'era gia'."""
+        """Adds a memory; ``None`` if it's empty or already there."""
         fact_text = _clean_fact(text)
         key = _normal(fact_text)
         if len(key) < 3:
@@ -135,7 +135,7 @@ class MemoryStore:
             for existing in self._facts:
                 old = _normal(existing.text)
                 if old == key or (len(old) > 12 and old in key):
-                    # Stesso ricordo, magari con un dettaglio in piu': tieni il piu' completo.
+                    # The same memory, maybe with one more detail: keep the most complete.
                     if len(key) > len(old):
                         existing.text = fact_text
                         self._save()
@@ -143,7 +143,7 @@ class MemoryStore:
             fact = Fact(fact_text, source=source)
             self._facts.append(fact)
             self._save()
-        logger.info("Ricordo nuovo (%s): %r", source, fact_text)
+        logger.info("New memory (%s): %r", source, fact_text)
         return fact
 
     def remove(self, fact_id: str) -> Fact | None:
@@ -156,7 +156,7 @@ class MemoryStore:
         return None
 
     def forget(self, text: str) -> Fact | None:
-        """Toglie il ricordo che somiglia di piu' a ``text`` (almeno meta' delle parole)."""
+        """Removes the memory most similar to ``text`` (at least half the words)."""
         wanted = set(_normal(text).split())
         if not wanted:
             return None
@@ -175,10 +175,10 @@ class MemoryStore:
 
     # ------------------------------------------------------------ prompt
     def directive(self, agent: bool) -> str:
-        """Personalita' e ricordi, da aggiungere ai vincoli del parlato.
+        """Personality and memories, to add to the speech constraints.
 
-        ``agent``: un agente ha gia' un suo carattere e i suoi strumenti; gli
-        si chiede solo di parlare come il personaggio.
+        ``agent``: an agent already has a character and tools of its own; it's only
+        asked to speak like the character.
         """
         if agent:
             parts = [f"You are the voice of {self.name}; speak with this personality: {self.traits}."]
@@ -199,7 +199,7 @@ class MemoryStore:
 
 
 # ---------------------------------------------------------------------------
-# Comandi a voce: "ricordati che...", "dimentica che...", "cosa ricordi di me?"
+# Voice commands: "remember that...", "forget that...", "what do you remember about me?"
 # ---------------------------------------------------------------------------
 _REMEMBER = re.compile(
     r"^\s*(?:(?:hey|ehi|ok)\s+\w+[,\s]+)?(?:ricordati|ricorda|tieni a mente|remember)\s+(?:che|that)\s+(?P<fact>.+?)\s*[.!]?\s*$",
@@ -209,8 +209,9 @@ _FORGET = re.compile(
     r"^\s*(?:dimentica|scordati|forget)\s+(?:che|that|di|about)\s+(?P<fact>.+?)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
-#: "Ricordati che domani alle 9 ho il dentista" e' un promemoria, non un ricordo:
-#: con un riferimento di tempo la frase passa al cervello, che sa programmarlo.
+#: "Remember that tomorrow at 9 I have the dentist" is a reminder, not a
+#: memory: with a time reference the sentence goes to the brain, which can
+#: schedule it.
 _TIMELY = re.compile(
     r"\b(?:oggi|domani|dopodomani|stasera|stanotte|stamattina|tra\s+\d+|fra\s+\d+|alle\s+\d|all'\d|"
     r"luned[iì]|marted[iì]|mercoled[iì]|gioved[iì]|venerd[iì]|sabato|domenica|"
@@ -222,7 +223,7 @@ _RECALL = re.compile(
     re.IGNORECASE,
 )
 
-#: Frasi di risposta ai comandi: italiano e inglese, il resto ripiega sull'inglese.
+#: Replies to the commands: Italian and English, the rest falls back on English.
 _REPLIES = {
     "it": {
         "saved": "Va bene, me lo ricordo.",
@@ -249,7 +250,7 @@ def _reply(language: str, key: str, **values: str) -> str:
 
 
 def memory_command(text: str, store: MemoryStore, language: str) -> str | None:
-    """Risposta a un comando sulla memoria, o ``None`` se non e' un comando."""
+    """Reply to a memory command, or ``None`` if it isn't a command."""
     code = "it" if language.startswith("it") else "en"
     match = _REMEMBER.match(text)
     if match and not _TIMELY.search(match.group("fact")):
@@ -267,7 +268,7 @@ def memory_command(text: str, store: MemoryStore, language: str) -> str | None:
 
 
 def fact_from_tag(tag: str) -> str | None:
-    """``[[remember: ...]]`` -> il fatto, oppure ``None`` se l'etichetta non e' un ricordo."""
+    """``[[remember: ...]]`` -> the fact, or ``None`` if the tag isn't a memory."""
     match = re.match(r"^\[\[\s*remember\s*:?\s*(?P<fact>.+?)\s*\]\]$", tag, re.IGNORECASE | re.DOTALL)
     if not match:
         return None

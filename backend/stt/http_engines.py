@@ -1,13 +1,13 @@
-"""Motori di riconoscimento che girano dietro un server HTTP.
+"""Speech-recognition engines running behind an HTTP server.
 
-Due varianti, stessa forma: si carica un WAV e torna del testo.
+Two variants, same shape: a WAV goes up and text comes back.
 
-* ``WhisperCppSTT`` parla con un server ``whisper.cpp`` locale — utile a chi
-  lo ha gia' in casa, magari compilato con accelerazione.
-* ``WhisperAPISTT`` parla con qualunque endpoint compatibile OpenAI
-  (``POST /audio/transcriptions``): l'API ufficiale, Groq, o un proxy.
+* ``WhisperCppSTT`` talks to a local ``whisper.cpp`` server — handy for
+  whoever already has one, maybe compiled with acceleration.
+* ``WhisperAPISTT`` talks to any OpenAI-compatible endpoint
+  (``POST /audio/transcriptions``): the official API, Groq, or a proxy.
 
-Entrambi sono client sincroni, perche' vengono chiamati dentro un thread pool.
+Both are synchronous clients, because they're called inside a thread pool.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class WhisperCppSTT(STTEngine):
-    """Client per un server whisper.cpp gia' in esecuzione."""
+    """Client for a whisper.cpp server that's already running."""
 
     name = "whisper_cpp"
 
@@ -54,7 +54,7 @@ class WhisperCppSTT(STTEngine):
         )
         if response.status_code >= 400:
             raise RuntimeError(
-                f"whisper.cpp ha risposto {response.status_code}: {response.text[:300]}"
+                f"whisper.cpp answered {response.status_code}: {response.text[:300]}"
             )
 
         payload = response.json()
@@ -70,7 +70,7 @@ class WhisperCppSTT(STTEngine):
 
 
 class WhisperAPISTT(STTEngine):
-    """Client per un endpoint di trascrizione compatibile OpenAI."""
+    """Client for an OpenAI-compatible transcription endpoint."""
 
     name = "openai_whisper_api"
 
@@ -110,7 +110,7 @@ class WhisperAPISTT(STTEngine):
         )
         if response.status_code >= 400:
             raise RuntimeError(
-                f"Il servizio di trascrizione ha risposto {response.status_code}: "
+                f"The transcription service answered {response.status_code}: "
                 f"{response.text[:300]}"
             )
 

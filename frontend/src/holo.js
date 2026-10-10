@@ -1,17 +1,16 @@
 /**
- * Pannello olografico: il "tablet" che tiene in mano mentre un agente legge
- * o cerca, e la "tastiera" su cui batte mentre scrive o esegue comandi.
+ * Holographic panel: the "tablet" she holds while an agent reads or
+ * searches, and the "keyboard" she types on while it writes or runs commands.
  *
- * Senza un oggetto le pose da lavoro (body.js, `_reading` e `_typing`) si
- * leggono male: mani al petto potrebbero voler dire qualunque cosa. Il
- * pannello e' disegnato su un canvas (righe che scorrono, tasti che si
- * accendono), segue le mani a ogni frame e compare/sparisce con lo stesso
- * peso della posa.
+ * Without an object the work poses (body.js, `_reading` and `_typing`) read
+ * badly: hands at the chest could mean anything. The panel is drawn on a
+ * canvas (scrolling lines, keys lighting up), follows the hands every frame
+ * and appears/disappears with the same weight as the pose.
  */
 
 import * as THREE from 'three';
 
-/** Lilla dell'interfaccia (theme.css, --accent) e un azzurro per le righe. */
+/** The interface's lilac (theme.css, --accent) and a light blue for the lines. */
 const ACCENT = [184, 160, 255];
 const LINE = [214, 236, 255];
 
@@ -36,7 +35,7 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-/** Una superficie disegnata su canvas, trasparente e senza ombre ne' tone mapping. */
+/** A surface drawn on a canvas, transparent, with no shadows or tone mapping. */
 class Surface {
   constructor(width, height, meters) {
     this.canvas = document.createElement('canvas');
@@ -67,7 +66,7 @@ class Surface {
 
 export class HoloPanel {
   /**
-   * @param {THREE.Object3D} parent dove appendere i pannelli (la scena)
+   * @param {THREE.Object3D} parent where to attach the panels (the scene)
    */
   constructor(parent) {
     this.tablet = new Surface(256, 176, 0.19);
@@ -83,7 +82,7 @@ export class HoloPanel {
   /**
    * @param {number} dt
    * @param {import('@pixiv/three-vrm').VRM | null} vrm
-   * @param {{reading: number, typing: number, taps: [number, number]} | null} work pesi delle pose
+   * @param {{reading: number, typing: number, taps: [number, number]} | null} work weights of the poses
    */
   update(dt, vrm, work) {
     this.time += dt;
@@ -94,7 +93,7 @@ export class HoloPanel {
     this.keyboard.mesh.visible = typing > 0.02 && Boolean(humanoid);
     if (!this.tablet.mesh.visible && !this.keyboard.mesh.visible) return;
 
-    // Il pannello va disegnato solo a 30 fps: e' un dettaglio, non deve costare.
+    // The panel is drawn at 30 fps only: it's a detail, it must not cost.
     this._redrawIn -= dt;
     const redraw = this._redrawIn <= 0;
     if (redraw) this._redrawIn = 1 / 30;
@@ -123,7 +122,7 @@ export class HoloPanel {
     head.getWorldPosition(_head);
     mesh.position.copy(mid);
     mesh.position.y += 0.035;
-    // Lo schermo guarda la sua faccia: lo vedi di sbieco, come un tablet vero.
+    // The screen faces her: you see it at an angle, like a real tablet.
     mesh.up.copy(_up.subVectors(_b, _a).cross(_toHead.subVectors(_head, mid)).normalize().negate());
     mesh.lookAt(_head);
     mesh.scale.setScalar(0.6 + 0.4 * weight);
@@ -139,19 +138,19 @@ export class HoloPanel {
       mesh.visible = false;
       return;
     }
-    // Sotto le dita, orientata come il bacino e inclinata verso chi guarda:
-    // perfettamente in piano si vedrebbe solo di taglio.
+    // Under the fingers, oriented like the pelvis and tilted towards the viewer:
+    // perfectly flat it would only be seen edge-on.
     mesh.position.copy(mid);
     mesh.position.y -= 0.03;
     hips.getWorldQuaternion(mesh.quaternion);
     mesh.rotateX(-Math.PI / 2 + 0.6);
     mesh.scale.setScalar(0.6 + 0.4 * weight);
     this.keyboard.material.opacity = weight;
-    // Un tasto si accende a ogni colpo delle dita, poi si spegne.
+    // A key lights up at each finger strike, then goes off.
     for (let i = 0; i < this._keys.length; i++) this._keys[i] = Math.max(0, this._keys[i] - dt * 5);
     for (const [side, tap] of taps.entries()) {
       const down = tap > 0.8;
-      // Un tasto per colpo: sul fronte di discesa, sinistra a sinistra e destra a destra.
+      // One key per strike: on the falling edge, left on the left and right on the right.
       if (down && !this._tapping[side]) this._keys[Math.floor(Math.random() * 3) * 10 + side * 5 + Math.floor(Math.random() * 5)] = 1;
       this._tapping[side] = down;
     }
@@ -170,7 +169,7 @@ export class HoloPanel {
     ctx.strokeStyle = rgba(ACCENT, 0.9);
     ctx.stroke();
 
-    // Righe di testo che scorrono verso l'alto.
+    // Lines of text scrolling upwards.
     const lineHeight = 16;
     const scroll = (this.time * 22) % lineHeight;
     const first = Math.floor((this.time * 22) / lineHeight);

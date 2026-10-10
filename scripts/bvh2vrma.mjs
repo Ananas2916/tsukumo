@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 /**
- * BVH -> VRMA: da motion capture a clip che Tsukumo sa suonare.
+ * BVH -> VRMA: from motion capture to a clip Tsukumo can play.
  *
  *   node scripts/bvh2vrma.mjs input.bvh [output.vrma] [--start 1.2] [--end 6.5] [--trim] [--free-facing]
  *
- * --trim toglie l'attesa immobile prima e dopo il gesto; --free-facing lascia
- * che si giri come l'attore (di norma resta rivolta verso di te).
+ * --trim removes the still wait before and after the gesture; --free-facing lets
+ * her turn like the actor (normally she keeps facing you).
  *
- * Il problema non e' il formato ma la posa di riposo. Una clip VRMA ha le ossa
- * a riposo in T-pose; un BVH no: a rotazioni zero lo scheletro puo' essere in
- * A-pose, in T-pose o (come nei dati Bandai Namco, esportati da Maya) tutto
- * piegato, con ogni osso lungo il proprio asse X. Convertire gli angoli
- * direttamente darebbe braccia e torsioni sbagliate.
+ * The problem isn't the format but the rest pose. A VRMA clip has its bones
+ * at rest in T-pose; a BVH doesn't: at zero rotations the skeleton can be in
+ * A-pose, in T-pose or (as in the Bandai Namco data, exported from Maya) all
+ * bent, with every bone along its own X axis. Converting the angles directly
+ * would give wrong arms and twists.
  *
- * Qui si usa il primo fotogramma, dove l'attore sta fermo in piedi, come
- * riferimento: per ogni osso si calcola la rotazione che lo porta da come sta
- * in quel fotogramma a come starebbe in T-pose (braccia in fuori, palmi in
- * giu', sguardo verso +Z), e la si applica a tutta la clip. Ossa senza una
- * direzione misurabile (testa, mani, punte dei piedi) seguono il genitore.
+ * Here the first frame, where the actor stands still, is the reference: for
+ * every bone we compute the rotation that takes it from how it is in that
+ * frame to how it would be in T-pose (arms out, palms down, looking towards
+ * +Z), and apply it to the whole clip. Bones without a measurable direction
+ * (head, hands, toes) follow their parent.
  *
- * Nomi delle ossa riconosciuti: Bandai Namco, Mixamo, CMU e i nomi "umani"
- * piu' comuni (vedi BONE_NAMES).
+ * Recognized bone names: Bandai Namco, Mixamo, CMU and the most common
+ * "human" names (see BONE_NAMES).
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -32,7 +32,7 @@ const THREE = await import(pathToFileURL(join(here, '..', 'frontend', 'node_modu
 const { Matrix4, Quaternion, Vector3 } = THREE;
 
 // ---------------------------------------------------------------------------
-// Nomi delle ossa
+// Bone names
 // ---------------------------------------------------------------------------
 const SIDE_NAMES = {
   Shoulder: ['shoulder{s}', '{side}shoulder', '{l}shoulder', '{l}collar', '{side}collar', 'clavicle{s}'],
@@ -62,7 +62,7 @@ for (const [part, patterns] of Object.entries(SIDE_NAMES)) {
   }
 }
 
-/** Genitore di ogni osso VRM (solo quelli che scriviamo). */
+/** The parent of every VRM bone (only those we write). */
 const PARENT = {
   hips: null,
   spine: 'hips',
@@ -88,7 +88,7 @@ const PARENT = {
   rightToes: 'rightFoot',
 };
 
-/** Direzione di ogni osso (verso il figlio) in T-pose, VRM 1.0: guarda +Z, la sinistra e' +X. */
+/** Direction of every bone (towards the child) in T-pose, VRM 1.0: looking at +Z, left is +X. */
 const T_DIRECTION = {
   hips: [0, 1, 0],
   spine: [0, 1, 0],
@@ -107,7 +107,7 @@ const T_DIRECTION = {
   rightLowerLeg: [0, -1, 0],
 };
 
-/** L'osso figlio che da' la direzione (se c'e' nel BVH). */
+/** The child bone that gives the direction (if it's in the BVH). */
 const DIRECTION_CHILD = {
   hips: ['spine', 'chest', 'upperChest', 'neck'],
   spine: ['chest', 'upperChest', 'neck'],
@@ -171,9 +171,9 @@ export function parseBVH(text) {
     return joint;
   }
 
-  if (next() !== 'HIERARCHY') throw new Error('BVH: manca HIERARCHY');
+  if (next() !== 'HIERARCHY') throw new Error('BVH: HIERARCHY missing');
   readJoint(null);
-  if (next() !== 'MOTION') throw new Error('BVH: manca MOTION');
+  if (next() !== 'MOTION') throw new Error('BVH: MOTION missing');
   next(); // Frames:
   const frameCount = Number(next());
   next(); // Frame
@@ -191,7 +191,7 @@ export function parseBVH(text) {
 
 const AXES = { X: new Vector3(1, 0, 0), Y: new Vector3(0, 1, 0), Z: new Vector3(0, 0, 1) };
 
-/** Rotazioni e posizioni nel mondo di ogni giunto, fotogramma per fotogramma. */
+/** World rotations and positions of every joint, frame by frame. */
 export function forwardKinematics(bvh, frame) {
   const world = new Map();
   let cursor = 0;
@@ -237,12 +237,12 @@ function mapBones(bvh) {
     }
   }
   for (const needed of ['hips', 'leftUpperLeg', 'rightUpperLeg', 'leftUpperArm', 'rightUpperArm']) {
-    if (!mapping[needed]) throw new Error(`Osso "${needed}" non trovato fra: ${bvh.joints.map((j) => j.name).join(', ')}`);
+    if (!mapping[needed]) throw new Error(`Bone "${needed}" not found among: ${bvh.joints.map((j) => j.name).join(', ')}`);
   }
   return mapping;
 }
 
-/** Base ortonormale (colonne: direzione dell'osso, riferimento, terzo asse). */
+/** Orthonormal basis (columns: the bone's direction, reference, third axis). */
 function basis(primary, reference) {
   const x = primary.clone().normalize();
   let ref = reference.clone();
@@ -259,10 +259,10 @@ function parentMapped(bone, mapping) {
 }
 
 /**
- * Toglie l'attesa ferma prima e dopo il gesto: nelle riprese l'attore sta
- * immobile qualche secondo prima del "via" e dopo lo "stop". Si misura quanto
- * si muovono tutte le ossa fotogramma per fotogramma e si tiene la parte
- * sopra il 12% del picco, con un margine di 0,4 s ai due lati.
+ * Removes the still wait before and after the gesture: in the takes the actor
+ * stands still a few seconds before "go" and after "stop". We measure how
+ * much all the bones move frame by frame and keep the part above 12% of the
+ * peak, with a margin of 0.4 s on both sides.
  */
 function trimStill(times, tracks, frameTime) {
   const bones = Object.keys(tracks);
@@ -272,7 +272,7 @@ function trimStill(times, tracks, frameTime) {
   for (let i = 1; i < count; i++) {
     for (const bone of bones) speed[i] += 1 - Math.abs(tracks[bone][i].dot(tracks[bone][i - 1]));
   }
-  // Media mobile su un terzo di secondo: un tremolio isolato non conta.
+  // Moving average over a third of a second: an isolated tremor doesn't count.
   const half = Math.max(1, Math.round(0.17 / frameTime));
   const smooth = speed.map((_, i) => {
     let sum = 0;
@@ -297,14 +297,14 @@ export function convert(bvh, { start = 0, end = Infinity, keepFacing = true, tri
   const worlds = bvh.frames.map((frame) => forwardKinematics(bvh, frame));
   const first = worlds[0];
 
-  // Unita': centimetri se i fianchi stanno oltre 20 unita' da terra.
+  // Units: centimetres if the hips are more than 20 units above the ground.
   const hipsHeight = first.get(mapping.hips).position.y;
   const scale = hipsHeight > 20 ? 0.01 : 1;
 
-  // Da che parte guarda nel primo fotogramma: quella rotazione sull'asse Y
-  // si toglie da tutta la clip, cosi' guarda sempre verso di te. Contano le
-  // spalle, non le gambe: in una posa "femminile" i fianchi sono girati di
-  // 50 gradi, ma ci si rivolge (e ci si inchina) dove guarda il busto.
+  // Which way she faces in the first frame: that rotation around the Y axis
+  // is removed from the whole clip, so she always faces you. The shoulders
+  // count, not the legs: in a "feminine" pose the hips are turned by 50
+  // degrees, but one faces (and bows) where the chest points.
   const leftOf = (l, r) => new Vector3().subVectors(first.get(mapping[l]).position, first.get(mapping[r]).position).setY(0).normalize();
   const left = leftOf('leftUpperArm', 'rightUpperArm').multiplyScalar(2).add(leftOf('leftUpperLeg', 'rightUpperLeg')).normalize();
   const forward = new Vector3().crossVectors(left, new Vector3(0, 1, 0)).normalize();
@@ -312,7 +312,7 @@ export function convert(bvh, { start = 0, end = Infinity, keepFacing = true, tri
 
   const ahead = new Vector3(0, 0, 1);
   const inverseHips = first.get(mapping.hips).rotation.clone().invert();
-  // Correzione di ogni osso: dal primo fotogramma alla T-pose (vedi in testa al file).
+  // Correction of every bone: from the first frame to the T-pose (see the top of the file).
   const toTPose = new Map();
   for (const bone of bones) {
     const child = (DIRECTION_CHILD[bone] ?? []).find((name) => mapping[name]);
@@ -323,18 +323,18 @@ export function convert(bvh, { start = 0, end = Infinity, keepFacing = true, tri
       continue;
     }
     const from = first.get(mapping[child]).position.clone().sub(first.get(mapping[bone]).position).applyQuaternion(yaw);
-    // Stesso riferimento (avanti, +Z) per le due basi: la rotazione che le
-    // allinea gira l'osso sulla sua direzione senza aggiungere torsioni.
+    // Same reference (forward, +Z) for both bases: the rotation that aligns
+    // them turns the bone around its direction without adding twists.
     const measured = basis(from, ahead);
     const wanted = basis(new Vector3(...target), ahead);
     const matrix = wanted.multiply(measured.invert());
     toTPose.set(bone, new Quaternion().setFromRotationMatrix(matrix));
   }
 
-  // L'attore puo' girarsi durante la ripresa (verso chi saluta, verso dove
-  // indica): una mascotte sulla scrivania deve restare rivolta verso di te.
-  // Si toglie la direzione dei fianchi mediata su un secondo: le rotazioni
-  // lente spariscono, i colpi d'anca di un ballo restano.
+  // The actor may turn during the take (towards whoever they greet, towards
+  // where they point): a desk mascot must keep facing you. The hips'
+  // direction averaged over a second is removed: slow rotations disappear,
+  // a dance's hip thrusts stay.
   const headings = worlds.map((world) => {
     const facing = ahead.clone().applyQuaternion(yaw.clone().multiply(world.get(mapping.hips).rotation).multiply(inverseHips).multiply(yaw.clone().invert()));
     return Math.atan2(facing.x, facing.z);
@@ -366,8 +366,8 @@ export function convert(bvh, { start = 0, end = Infinity, keepFacing = true, tri
     const facing = turn.multiply(yaw);
     const normalized = new Map();
     for (const bone of bones) {
-      // N = yaw * W_f * W_0^-1 * (yaw^-1) * S^-1: il movimento rispetto al primo
-      // fotogramma, espresso nello spazio "girato verso +Z", sopra la T-pose.
+      // N = yaw * W_f * W_0^-1 * (yaw^-1) * S^-1: the motion relative to the first
+      // frame, expressed in the "turned towards +Z" space, on top of the T-pose.
       const w = worlds[f].get(mapping[bone]).rotation.clone().multiply(inverseFirst.get(bone));
       const n = facing.clone().multiply(w).multiply(yaw.clone().invert()).multiply(toTPose.get(bone).clone().invert());
       normalized.set(bone, n);
@@ -376,7 +376,7 @@ export function convert(bvh, { start = 0, end = Infinity, keepFacing = true, tri
       const parent = parentMapped(bone, mapping);
       const local = parent ? normalized.get(parent).clone().invert().multiply(normalized.get(bone)) : normalized.get(bone).clone();
       local.normalize();
-      // Stessa rotazione, segno coerente col fotogramma prima: niente scatti nell'interpolazione.
+      // Same rotation, sign consistent with the previous frame: no jumps in the interpolation.
       const previous = tracks[bone][tracks[bone].length - 1];
       if (previous && previous.dot(local) < 0) local.set(-local.x, -local.y, -local.z, -local.w);
       tracks[bone].push(local);
@@ -385,7 +385,7 @@ export function convert(bvh, { start = 0, end = Infinity, keepFacing = true, tri
 
   if (trim) trimStill(times, tracks, bvh.frameTime);
 
-  // Scheletro in T-pose per i nodi del file (serve soprattutto l'altezza dei fianchi).
+  // T-pose skeleton for the file's nodes (mostly the hips' height is needed).
   const rest = {};
   for (const bone of bones) {
     const parent = parentMapped(bone, mapping);
@@ -407,7 +407,7 @@ export function convert(bvh, { start = 0, end = Infinity, keepFacing = true, tri
 }
 
 // ---------------------------------------------------------------------------
-// VRMA (glTF binario con VRMC_vrm_animation)
+// VRMA (binary glTF with VRMC_vrm_animation)
 // ---------------------------------------------------------------------------
 export function writeVRMA(result) {
   const { bones, times, tracks, rest } = result;
@@ -479,7 +479,7 @@ export function writeVRMA(result) {
 }
 
 // ---------------------------------------------------------------------------
-// Riga di comando
+// Command line
 // ---------------------------------------------------------------------------
 function parseArgs(argv) {
   const options = { files: [] };
@@ -497,12 +497,12 @@ function parseArgs(argv) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const { files, start, end, keepFacing, trim } = parseArgs(process.argv.slice(2));
   if (!files.length) {
-    console.log('Uso: node scripts/bvh2vrma.mjs input.bvh [output.vrma] [--start s] [--end s]');
+    console.log('Usage: node scripts/bvh2vrma.mjs input.bvh [output.vrma] [--start s] [--end s]');
     process.exit(1);
   }
   const [input, output = join(dirname(input), `${basename(input, extname(input))}.vrma`)] = files;
   const bvh = parseBVH(readFileSync(input, 'utf8'));
   const result = convert(bvh, { start, end, keepFacing, trim });
   writeFileSync(output, writeVRMA(result));
-  console.log(`${basename(output)}: ${result.bones.length} ossa, ${result.duration.toFixed(1)} s`);
+  console.log(`${basename(output)}: ${result.bones.length} bones, ${result.duration.toFixed(1)} s`);
 }

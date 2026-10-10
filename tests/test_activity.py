@@ -1,4 +1,4 @@
-"""Cosa fa un agente mentre lavora: tool -> frasi, eventi "working", "un attimo"."""
+"""What an agent does while it works: tools -> sentences, "working" events, "just a moment"."""
 
 import asyncio
 import json
@@ -27,7 +27,7 @@ class Recorder:
 
 
 class WorkingAgent(LLMClient):
-    """Un agente che usa qualche tool, aspetta, poi risponde."""
+    """An agent that uses a few tools, waits, then answers."""
 
     name = "worker"
     stateful = True
@@ -36,9 +36,9 @@ class WorkingAgent(LLMClient):
         self.wait = wait
 
     async def stream(self, messages):
-        self.report(Activity("read", "legge main.js", "src/main.js", "Read"))
-        self.report(Activity("read", "legge main.js", "src/main.js", "Read"))
-        self.report(Activity("run", "esegue git status", "git status", "Bash"))
+        self.report(Activity("read", "reads main.js", "src/main.js", "Read"))
+        self.report(Activity("read", "reads main.js", "src/main.js", "Read"))
+        self.report(Activity("run", "runs git status", "git status", "Bash"))
         await asyncio.sleep(self.wait)
         yield "Ho controllato, e' tutto a posto."
 
@@ -47,7 +47,7 @@ class WorkingAgent(LLMClient):
 
 
 # ---------------------------------------------------------------------------
-# Etichette
+# Labels
 # ---------------------------------------------------------------------------
 def test_command_words_see_through_shell_wrappers():
     assert _command_words("bash -lc 'git status --short'") == "git status"
@@ -57,19 +57,19 @@ def test_command_words_see_through_shell_wrappers():
 
 
 def test_claude_tools_become_short_sentences():
-    assert describe_claude_tool("Read", {"file_path": "C:\\repo\\frontend\\src\\main.js"}).label == "legge main.js"
+    assert describe_claude_tool("Read", {"file_path": "C:\\repo\\frontend\\src\\main.js"}).label == "reads main.js"
     assert describe_claude_tool("Edit", {"file_path": "/repo/a.py"}).kind == "write"
-    assert describe_claude_tool("WebFetch", {"url": "https://www.example.com/x"}).label == "apre example.com"
-    assert describe_claude_tool("mcp__github__create_issue", {}).label == "usa create issue (github)"
+    assert describe_claude_tool("WebFetch", {"url": "https://www.example.com/x"}).label == "opens example.com"
+    assert describe_claude_tool("mcp__github__create_issue", {}).label == "uses create issue (github)"
     long = describe_claude_tool("Grep", {"pattern": "x" * 200}).label
-    assert len(long) < 50 and long.endswith("…»")
+    assert len(long) < 50 and long.endswith("…”")
 
 
 def test_codex_items_and_openclaw_tools():
     change = describe_codex_item({"type": "file_change", "changes": [{"path": "src/app.py", "kind": "add"}]})
-    assert change.label == "crea app.py" and change.kind == "write"
+    assert change.label == "creates app.py" and change.kind == "write"
     assert describe_codex_item({"type": "reasoning", "text": "..."}) is None
-    assert describe_openclaw_tool("web_search", {"query": "meteo Milano"}).label == "cerca in rete «meteo Milano»"
+    assert describe_openclaw_tool("web_search", {"query": "meteo Milano"}).label == "searches the web for “meteo Milano”"
     assert describe_openclaw_tool("heartbeat_respond", {}) is None
 
 
@@ -81,7 +81,7 @@ def test_claude_parser_reports_tools_but_not_subagent_ones():
     tool = {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/x/README.md"}}
     lines = [
         _line(type="assistant", message={"id": "m1", "content": [tool]}, parent_tool_use_id=None),
-        # Lo stesso messaggio ripetuto non e' un secondo passo.
+        # The same message repeated isn't a second step.
         _line(type="assistant", message={"id": "m1", "content": [tool]}, parent_tool_use_id=None),
         _line(
             type="assistant",
@@ -91,7 +91,7 @@ def test_claude_parser_reports_tools_but_not_subagent_ones():
     ]
     for line in lines:
         assert parser.feed(line) == []
-    assert [a.label for a in parser.take_activities()] == ["legge README.md"]
+    assert [a.label for a in parser.take_activities()] == ["reads README.md"]
     assert parser.take_activities() == []
 
 
@@ -102,7 +102,7 @@ def test_codex_parser_reports_a_command_once():
     parser.feed(_line(type="item.completed", item={**item, "exit_code": 0}))
     text = parser.feed(_line(type="item.completed", item={"id": "item_2", "type": "agent_message", "text": "Fatto"}))
     assert text == ["Fatto"]
-    assert [a.label for a in parser.take_activities()] == ["esegue pytest"]
+    assert [a.label for a in parser.take_activities()] == ["runs pytest"]
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +114,9 @@ def test_turn_emits_working_steps_and_keeps_them_in_the_reply():
     companion.llm = WorkingAgent()
     asyncio.run(companion.chat("controlla il repo", emit))
     working = emit.of("working")
-    assert [w["label"] for w in working] == ["legge main.js", "esegue git status"]
+    assert [w["label"] for w in working] == ["reads main.js", "runs git status"]
     assert working[0]["kind"] == "read" and working[0]["turn"] == 1
-    assert [s["label"] for s in emit.of("reply")[0]["steps"]] == ["legge main.js", "esegue git status"]
+    assert [s["label"] for s in emit.of("reply")[0]["steps"]] == ["reads main.js", "runs git status"]
     assert companion.llm.on_activity is None
 
 

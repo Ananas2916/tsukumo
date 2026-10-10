@@ -1,0 +1,653 @@
+/* Tsukumo - the dashboard: dark-glass tiles in a grid, the chat on the
+   right and, above the text field, the corner where she sits. The
+   components (chat, card, badge, rows) are the panel's (panel.css). */
+
+body.dashboard {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(165, 139, 255, 0.1), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(243, 155, 212, 0.06), transparent 60%),
+    var(--bg);
+}
+
+.dash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* -------------------------------------------------------------- header --- */
+.dash-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 12px 20px;
+  -webkit-app-region: drag;
+}
+
+.dash-header button,
+.dash-header .now-playing {
+  -webkit-app-region: no-drag;
+}
+
+.dash-hello {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dash-hello strong {
+  display: block;
+  font: 600 19px/1.2 var(--font-display);
+}
+
+.dash-hello .subtitle {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* Her: the flame in her colour, with what she's wearing (panel/wardrobe-art.js). */
+.dash-logo {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  margin: -6px -2px -4px -6px;
+  filter: drop-shadow(0 0 10px rgba(165, 139, 255, 0.35));
+}
+
+.dash-logo svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* "Open at startup": a switch, not a label to decipher. */
+.start-chip {
+  gap: 8px;
+}
+
+.mini-switch {
+  position: relative;
+  width: 26px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  transition: background 0.15s ease;
+}
+
+.mini-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform 0.18s ease, background 0.15s ease;
+}
+
+.mini-switch.on {
+  background: var(--accent);
+}
+
+.mini-switch.on::after {
+  transform: translateX(11px);
+  background: #fff;
+}
+
+.dash-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-header .now-playing {
+  margin: 0;
+}
+
+.dash-min:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- body --- */
+.dash-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+  gap: 14px;
+  padding: 0 14px 14px;
+  min-height: 0;
+}
+
+/* The tiles fill the height: no empty band at the bottom. The week takes
+   what it needs, the other rows share the rest. */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto;
+  grid-auto-rows: minmax(min-content, 1fr);
+  align-content: stretch;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.widget {
+  min-width: 0;
+  background: var(--glass);
+  border-color: var(--line);
+}
+
+.w-calendar,
+.w-agents {
+  grid-column: 1 / -1;
+}
+
+.w-body {
+  min-width: 0;
+}
+
+/* The body fills the tile: empty states sit in the middle, not in a corner. */
+.widget .w-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.widget .w-body > .agenda-list {
+  flex: 1;
+}
+
+.w-free {
+  margin: auto;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.w-free strong {
+  font: 600 15px/1.25 var(--font-display);
+}
+
+.w-free small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.w-free-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  border-radius: 14px;
+  background: rgba(245, 196, 81, 0.12);
+  color: var(--warn);
+}
+
+.widget .card-head .ghost-btn {
+  padding: 4px 9px;
+}
+
+.w-week-title {
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------- week --- */
+.w-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.w-day {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 118px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.w-day.weekend {
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.w-day.today {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(165, 139, 255, 0.35);
+}
+
+.w-day.past {
+  opacity: 0.55;
+}
+
+.w-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 3px 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-transform: capitalize;
+}
+
+.w-day-head strong {
+  color: var(--text);
+  font: 600 15px/1 var(--font-display);
+}
+
+.w-day.today .w-day-head strong {
+  color: var(--accent);
+}
+
+.w-event {
+  --c: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  border-left: 3px solid var(--c);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+.w-event strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 600;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.w-event small,
+.w-event-time {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.w-event.kind-reminder,
+.w-event.kind-timer {
+  --c: var(--ok);
+}
+
+.w-event.done {
+  opacity: 0.55;
+}
+
+.w-event.cancelled strong {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* --------------------------------------------------------------- today --- */
+.w-next {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.w-next small {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.w-next strong {
+  font: 600 16px/1.25 var(--font-display);
+}
+
+.w-next span {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+/* Empty week: low columns and a line that says so. */
+.w-week.quiet .w-day {
+  min-height: 0;
+}
+
+.w-week-empty {
+  margin: 10px 2px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.w-next.quiet {
+  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.w-next.quiet small {
+  color: var(--text-2);
+}
+
+.w-next .badge {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.agenda-item.kind-reminder .agenda-icon {
+  background: rgba(61, 220, 151, 0.12);
+  color: #8ff0c4;
+}
+
+/* ------------------------------------------------------------- weather --- */
+.w-weather-now {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.w-weather-icon {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: rgba(92, 200, 255, 0.12);
+  color: #a3dfff;
+}
+
+.w-weather-icon.cond-clear {
+  background: rgba(245, 196, 81, 0.14);
+  color: var(--warn);
+}
+
+.w-weather-icon.cond-storm {
+  background: rgba(165, 139, 255, 0.16);
+  color: var(--accent);
+}
+
+.w-temp {
+  display: block;
+  font: 600 30px/1 var(--font-display);
+}
+
+.w-weather-now span {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.w-city {
+  align-self: flex-start;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.w-forecast {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.w-forecast-day {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+}
+
+.w-forecast-day small {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.w-forecast-day strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.w-rain {
+  color: var(--info);
+  font-size: 10.5px;
+}
+
+/* -------------------------------------------------------------- agents --- */
+.w-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 10px 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.w-agent + .w-agent {
+  margin-top: 6px;
+}
+
+.w-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.w-agent-head small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.w-agent-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.state-working .w-agent-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  animation: dash-pulse 1.6s ease-in-out infinite;
+}
+
+.state-waiting .w-agent-dot {
+  background: var(--warn);
+}
+
+.state-done .w-agent-dot {
+  background: var(--ok);
+}
+
+@keyframes dash-pulse {
+  50% {
+    box-shadow: 0 0 0 7px rgba(165, 139, 255, 0.05);
+  }
+}
+
+.w-since {
+  flex: none;
+}
+
+.w-agent-step,
+.w-agent-summary {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.w-agent-step {
+  color: var(--accent);
+}
+
+.w-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.w-tasks > small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.w-task {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.w-task span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.w-task .icon {
+  color: var(--muted);
+}
+
+.w-task.completed {
+  color: var(--muted);
+}
+
+.w-task.completed .icon {
+  color: var(--ok);
+}
+
+.w-task.in_progress {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.w-task.in_progress .icon {
+  color: var(--accent);
+}
+
+.w-limits {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.w-limit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 36px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+
+.w-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.w-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--accent-grad);
+}
+
+.w-bar i.high {
+  background: var(--danger);
+}
+
+/* ---------------------------------------------------------------- chat --- */
+.dash-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 10px;
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.dash-side .chat-view {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Her corner: her window sits on top of it, feet on the bottom. */
+.stage {
+  position: relative;
+  flex: none;
+  height: clamp(200px, 34vh, 330px);
+  margin: 0 12px 6px;
+  border-radius: 16px;
+  background: radial-gradient(60% 30% at 70% 100%, rgba(165, 139, 255, 0.18), transparent 70%);
+  pointer-events: none;
+}
+
+.stage.browser::after {
+  content: 'Qui c’è lei, nell’app desktop.';
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.stage-bubble {
+  position: absolute;
+  left: 0;
+  top: 18px;
+  max-width: 52%;
+  padding: 8px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px 14px 14px 4px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: var(--shadow-s);
+}
+
+/* ------------------------------------------------------------- narrow --- */
+@media (max-width: 1180px) {
+  .dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .w-week {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.w-free small {
+  max-width: 34ch;
+}
+
+.w-free-action {
+  margin-top: 8px;
+}

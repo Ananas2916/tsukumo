@@ -1,8 +1,8 @@
 /**
- * Mattoni matematici del movimento: curve, rumore, molle.
+ * Mathematical building blocks of motion: curves, noise, springs.
  *
- * Niente di specifico dei VRM: sono gli strumenti con cui body.js scrive ogni
- * strato dell'animazione senza scatti, qualunque sia il frame rate.
+ * Nothing VRM-specific: these are the tools body.js uses to write every
+ * layer of the animation without jerks, whatever the frame rate.
  */
 
 import * as THREE from 'three';
@@ -10,20 +10,20 @@ import * as THREE from 'three';
 export const TAU = Math.PI * 2;
 export const { clamp } = THREE.MathUtils;
 
-// Temporanei di basisQuat: niente allocazioni nel loop di rendering.
+// Temporaries for basisQuat: no allocations in the render loop.
 const _cross = new THREE.Vector3();
 const _basis = new THREE.Matrix4();
 
 export const smoothstep = (t) => t * t * (3 - 2 * t);
 
-/** Avvicinamento esponenziale indipendente dal frame rate. */
+/** Frame-rate independent exponential approach. */
 export function damp(current, target, rate, dt) {
   return current + (target - current) * (1 - Math.exp(-rate * dt));
 }
 
 /**
- * Valore di una curva a chiavi `[[u, valore], ...]` con raccordi morbidi:
- * e' il modo piu' compatto di scrivere un movimento "sale, resta, scende".
+ * Value of a keyed curve `[[u, value], ...]` with smooth joins: the most
+ * compact way to write a "rise, hold, fall" movement.
  */
 export function curve(u, keys) {
   if (u <= keys[0][0]) return keys[0][1];
@@ -37,7 +37,7 @@ export function curve(u, keys) {
   return keys[keys.length - 1][1];
 }
 
-/** Rumore morbido 1D: sinusoidi con frequenze non commensurabili, in -1..1. */
+/** Smooth 1D noise: sinusoids with incommensurable frequencies, in -1..1. */
 export function makeNoise(frequency) {
   const phase = [Math.random() * TAU, Math.random() * TAU, Math.random() * TAU];
   return (t) =>
@@ -49,8 +49,8 @@ export function makeNoise(frequency) {
 export const randomBetween = (min, max) => min + Math.random() * (max - min);
 
 /**
- * Molla smorzata critica, integrata in modo implicito: arriva al bersaglio
- * senza oscillare ed e' stabile anche se un frame dura molto.
+ * Critically damped spring, integrated implicitly: it reaches the target
+ * without oscillating and stays stable even if a frame lasts long.
  */
 export class Spring {
   constructor(omega, value = 0) {
@@ -71,7 +71,7 @@ export class Spring {
   }
 }
 
-/** Molla sottosmorzata: per i rimbalzi (atterraggi, sballottamenti). */
+/** Underdamped spring: for bounces (landings, jostling). */
 export class Wobble {
   constructor(omega, zeta) {
     this.omega = omega;
@@ -91,7 +91,7 @@ export class Wobble {
   }
 }
 
-/** Base ortonormale [x, y, x*y] come quaternione. */
+/** Orthonormal basis [x, y, x*y] as a quaternion. */
 export function basisQuat(x, y, target) {
   _cross.crossVectors(x, y);
   _basis.makeBasis(x, y, _cross);

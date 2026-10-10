@@ -1,4 +1,4 @@
-"""Conversazione piu' naturale: voce che parte prima, eco riconosciuta, tempi misurati."""
+"""A more natural conversation: the voice starts earlier, echo recognized, measured timings."""
 
 import asyncio
 
@@ -20,7 +20,7 @@ class Recorder:
 
 
 def test_first_clause_needs_a_real_clause():
-    assert first_clause("Allora, vediamo") is None  # troppo corto per partire
+    assert first_clause("Allora, vediamo") is None  # too short to start
     head, rest = first_clause("Ho guardato le previsioni per domani, e sembra che")
     assert head == "Ho guardato le previsioni per domani," and rest == "e sembra che"
     assert first_clause("una frase senza virgole che continua ancora") is None
@@ -53,4 +53,4 @@ def test_her_own_voice_is_recognised_as_echo():
     assert companion.is_echo("domani a milano piove quasi tutto il giorno")
     assert companion.is_echo("a Milano piove quasi tutto")
     assert not companion.is_echo("e a Roma invece com'è la situazione?")
-    assert not companion.is_echo("piove")  # una parola sola non basta per dirlo
+    assert not companion.is_echo("piove")  # a single word isn't enough to tell

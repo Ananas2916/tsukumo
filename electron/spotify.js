@@ -1,16 +1,16 @@
 /**
- * Cosa sta suonando Spotify, senza login e senza API web.
+ * What Spotify is playing, without login and without the web API.
  *
- * L'app desktop di Spotify mette nel titolo della sua finestra principale
- * "Artista - Titolo" mentre suona, e "Spotify" / "Spotify Premium" /
- * "Spotify Free" quando e' in pausa. Basta quindi trovare le finestre del
- * processo Spotify.exe e leggerne il titolo (funziona anche con la finestra
- * ridotta nell'area di notifica). Le API web con BPM ed "energy" delle tracce
- * non sono piu' disponibili per le app nuove: il ritmo lo ricava il renderer
- * ascoltando l'audio di sistema (vedi frontend/src/music.js).
+ * Spotify's desktop app puts "Artist - Title" in its main window's title
+ * while playing, and "Spotify" / "Spotify Premium" / "Spotify Free" when
+ * paused. So it's enough to find the windows of the Spotify.exe process and
+ * read their title (it works with the window minimized to the notification
+ * area too). The web APIs with the tracks' BPM and "energy" are no longer
+ * available to new apps: the rhythm is derived by the renderer listening to
+ * the system audio (see frontend/src/music.js).
  *
- * Modulo separato da desktop.js: se qualcosa qui fallisce, la fisica delle
- * finestre continua a funzionare.
+ * A module separate from desktop.js: if something here fails, the window
+ * physics keeps working.
  */
 
 let api = null;
@@ -36,7 +36,7 @@ function load() {
       CloseHandle: kernel32.func('bool __stdcall CloseHandle(intptr_t handle)'),
     };
   } catch (error) {
-    console.error('[spotify] rilevamento non disponibile (koffi):', error.message);
+    console.error('[spotify] detection unavailable (koffi):', error.message);
     api = false;
   }
   return api;
@@ -45,7 +45,7 @@ function load() {
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 const PAUSED_TITLE = /^Spotify( Premium| Free)?$/i;
 
-/** Nome dell'eseguibile per PID, in cache: i PID dei processi cambiano di rado. */
+/** Executable name by PID, cached: process PIDs rarely change. */
 const processNames = new Map();
 let processNamesAt = 0;
 
@@ -96,7 +96,7 @@ function status() {
       result.open = true;
       if (!PAUSED_TITLE.test(title) && title.includes(' - ') && !track) track = title;
     } catch {
-      /* finestra sparita mentre la leggevamo */
+      /* window gone while we were reading it */
     }
     return true;
   }, api.koffi.pointer(api.EnumProc));

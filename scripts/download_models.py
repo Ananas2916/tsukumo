@@ -1,13 +1,13 @@
 #!/usr/bin/env python
-"""Scarica i pesi di Kokoro TTS nella cartella ``models/``.
+"""Downloads the Kokoro TTS weights into the ``models/`` folder.
 
-Uso tipico::
+Typical use::
 
-    python scripts/download_models.py               # variante full (fp32)
-    python scripts/download_models.py --variant int8 # ~90 MB, piu' veloce su CPU
-    python scripts/download_models.py --force        # riscarica da zero
+    python scripts/download_models.py               # full variant (fp32)
+    python scripts/download_models.py --variant int8 # ~90 MB, faster on CPU
+    python scripts/download_models.py --force        # download again from scratch
 
-Il download supporta la ripresa (HTTP Range) se la connessione cade a meta'.
+The download resumes (HTTP Range) if the connection drops halfway.
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ MODELS_DIR = ROOT / "models"
 
 RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 
-#: Le tre varianti del modello. Il file delle voci e' lo stesso per tutte.
+#: The model's three variants. The voices file is the same for all of them.
 MODEL_VARIANTS: dict[str, tuple[str, int]] = {
-    # nome variante -> (file remoto, dimensione approssimativa in MB)
+    # variant name -> (remote file, approximate size in MB)
     "full": ("kokoro-v1.0.onnx", 326),
     "fp16": ("kokoro-v1.0.fp16.onnx", 169),
     "int8": ("kokoro-v1.0.int8.onnx", 92),
@@ -53,13 +53,13 @@ def human(size: float) -> str:
 
 
 def fetch(item: Download, force: bool = False) -> bool:
-    """Scarica un file con barra di avanzamento e ripresa. True se ok."""
+    """Downloads a file with a progress bar and resume. True if ok."""
     destination = item.destination
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
 
     if destination.is_file() and not force:
-        print(f"  [ok]  {destination.name} gia' presente ({human(destination.stat().st_size)})")
+        print(f"  [ok]  {destination.name} already there ({human(destination.stat().st_size)})")
         return True
 
     if force and partial.exists():
@@ -75,7 +75,7 @@ def fetch(item: Download, force: bool = False) -> bool:
 
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            # 206 = il server ha accettato la ripresa, 200 = riparte da zero.
+            # 206 = the server accepted the resume, 200 = it starts again from zero.
             mode = "ab" if response.status == 206 and resume_from else "wb"
             if mode == "wb":
                 resume_from = 0
@@ -96,10 +96,10 @@ def fetch(item: Download, force: bool = False) -> bool:
         print(f"\n  [!!]  HTTP {exc.code} su {item.url}", file=sys.stderr)
         return False
     except urllib.error.URLError as exc:
-        print(f"\n  [!!]  Rete non raggiungibile: {exc.reason}", file=sys.stderr)
+        print(f"\n  [!!]  Network unreachable: {exc.reason}", file=sys.stderr)
         return False
     except KeyboardInterrupt:
-        print("\n  [--]  Interrotto: il file .part viene conservato per la ripresa.")
+        print("\n  [--]  Interrupted: the .part file is kept for resuming.")
         raise
 
     shutil.move(str(partial), str(destination))
@@ -124,10 +124,10 @@ def main() -> int:
         "--variant",
         choices=sorted(MODEL_VARIANTS),
         default="full",
-        help="Precisione del modello ONNX (default: full)",
+        help="Precision of the ONNX model (default: full)",
     )
-    parser.add_argument("--dest", type=Path, default=MODELS_DIR, help="Cartella di destinazione")
-    parser.add_argument("--force", action="store_true", help="Riscarica anche se presente")
+    parser.add_argument("--dest", type=Path, default=MODELS_DIR, help="Destination folder")
+    parser.add_argument("--force", action="store_true", help="Download again even if present")
     args = parser.parse_args()
 
     model_file, model_mb = MODEL_VARIANTS[args.variant]
@@ -137,8 +137,8 @@ def main() -> int:
     print(f"Destinazione: {args.dest}")
 
     items = [
-        # Il modello viene salvato sempre come kokoro-v1.0.onnx: il backend
-        # cerca quel nome (sovrascrivibile con DC_KOKORO_MODEL).
+        # The model is always saved as kokoro-v1.0.onnx: the backend
+        # looks for that name (overridable with DC_KOKORO_MODEL).
         Download(f"{RELEASE}/{model_file}", args.dest / "kokoro-v1.0.onnx", model_mb),
         Download(f"{RELEASE}/{voices_file}", args.dest / voices_file, voices_mb),
     ]
@@ -148,10 +148,10 @@ def main() -> int:
         ok = fetch(item, force=args.force) and ok
 
     if ok:
-        print("\nFatto. Avvia il backend con:  python -m backend")
+        print("\nDone. Start the backend with:  python -m backend")
         return 0
 
-    print("\nDownload incompleto. Riprova, oppure scarica manualmente da:", file=sys.stderr)
+    print("\nDownload incomplete. Try again, or download it by hand from:", file=sys.stderr)
     print(f"  {RELEASE}", file=sys.stderr)
     return 1
 

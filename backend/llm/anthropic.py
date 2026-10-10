@@ -1,18 +1,17 @@
-"""Client per l'API Anthropic (modelli Claude).
+"""Client for the Anthropic API (Claude models).
 
-A differenza degli altri backend, che parlano tutti HTTP grezzo con ``httpx``,
-qui usiamo l'SDK ufficiale ``anthropic``: il formato dei messaggi e degli
-eventi di streaming e' suo e cambia nel tempo, quindi conviene lasciarglielo
-gestire. L'import e' pigro, cosi' chi non usa Claude non deve installarlo.
+Unlike the other backends, which all speak raw HTTP with ``httpx``, here we
+use the official ``anthropic`` SDK: the format of messages and streaming
+events is its own and changes over time, so it's better to let it handle
+them. The import is lazy, so whoever doesn't use Claude needn't install it.
 
-Due dettagli che valgono per il companion:
+Two details that matter for the companion:
 
-* il *system prompt* in questa API non e' un messaggio come gli altri ma un
-  parametro a se', quindi va estratto dalla cronologia;
-* i modelli recenti ragionano prima di rispondere. ``stream.text_stream``
-  emette **solo** il testo finale, mai i blocchi di pensiero: e' esattamente
-  il comportamento che ci serve, perche' il companion pronuncia ad alta voce
-  tutto quello che riceve.
+* the *system prompt* in this API isn't a message like the others but a
+  parameter of its own, so it must be pulled out of the history;
+* recent models reason before answering. ``stream.text_stream`` emits
+  **only** the final text, never the thinking blocks: exactly the behaviour
+  we need, because the companion speaks aloud everything it receives.
 """
 
 from __future__ import annotations
@@ -26,13 +25,13 @@ from .base import LLMClient, Message
 
 logger = logging.getLogger(__name__)
 
-#: Il companion risponde in poche frasi brevi: uno sforzo alto farebbe solo
-#: aspettare l'utente davanti a un personaggio immobile.
+#: The companion answers in a few short sentences: a high effort would only
+#: keep the user waiting in front of a motionless character.
 _EFFORT = "low"
 
 
 class AnthropicClient(LLMClient):
-    """Client per i modelli Claude tramite l'API ufficiale Anthropic."""
+    """Client for Claude models through the official Anthropic API."""
 
     name = "anthropic"
 
@@ -46,10 +45,10 @@ class AnthropicClient(LLMClient):
     ) -> None:
         try:
             from anthropic import AsyncAnthropic
-        except ImportError as exc:  # pragma: no cover - dipende dall'ambiente
+        except ImportError as exc:  # pragma: no cover - depends on the environment
             raise RuntimeError(
-                "Il backend Anthropic richiede il pacchetto 'anthropic'. "
-                "Installalo con: pip install anthropic"
+                "The Anthropic backend needs the 'anthropic' package. "
+                "Install it with: pip install anthropic"
             ) from exc
 
         self.model = model
@@ -63,7 +62,7 @@ class AnthropicClient(LLMClient):
     # ------------------------------------------------------------------
     @staticmethod
     def _split(messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
-        """Separa il system prompt dal resto della conversazione."""
+        """Separates the system prompt from the rest of the conversation."""
         system_parts: list[str] = []
         turns: list[dict[str, Any]] = []
         for message in messages:
@@ -84,7 +83,7 @@ class AnthropicClient(LLMClient):
             "max_tokens": self.max_tokens,
             "messages": turns,
         }
-        # Haiku 4.5 non accetta `effort` (risponde 400): li' si usa il default.
+        # Haiku 4.5 doesn't accept `effort` (it answers 400): the default is used there.
         if "haiku" not in self.model:
             payload["output_config"] = {"effort": _EFFORT}
         if system:
@@ -106,8 +105,8 @@ class AnthropicClient(LLMClient):
                 "model": self.model,
                 "error": str(exc),
                 "hint": (
-                    "Controlla la chiave API e il nome del modello. "
-                    "L'elenco aggiornato e' su docs.claude.com/en/docs/about-claude/models"
+                    "Check the API key and the model name. "
+                    "The up-to-date list is at docs.claude.com/en/docs/about-claude/models"
                 ),
             }
         return {

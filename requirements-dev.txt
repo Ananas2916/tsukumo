@@ -1,3 +1,3 @@
-# Solo per sviluppare: i test del backend (./start.ps1 -Test).
+# Development only: the backend tests (./start.ps1 -Test).
 -r requirements.txt
 pytest>=8

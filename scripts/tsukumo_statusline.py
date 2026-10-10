@@ -1,17 +1,17 @@
-"""Barra di stato di Claude Code: passa a Tsukumo i limiti del piano.
+"""Claude Code's status line: passes the plan's limits to Tsukumo.
 
-Claude Code lancia il comando di ``statusLine`` a ogni risposta, con un JSON
-sullo standard input che (per gli abbonati Pro e Max) contiene ``rate_limits``:
-quanto e' usata la finestra di 5 ore e quella di 7 giorni, e quando si
-azzerano. E' l'unico posto in cui Claude Code li rende disponibili: questo
-script li salva in ``state/claude_limits.json``, che il backend legge
-(``backend/usage.py``). Lo collega e lo scollega il pannello (backend/notify.py).
+Claude Code runs the ``statusLine`` command at every answer, with a JSON
+on standard input that (for Pro and Max subscribers) holds ``rate_limits``:
+how much of the 5-hour and the 7-day windows is used, and when they
+reset. It's the only place where Claude Code makes them available: this
+script saves them in ``state/claude_limits.json``, which the backend reads
+(``backend/usage.py``). The panel connects and disconnects it (backend/notify.py).
 
-Poi stampa la barra: quella che c'era prima, se c'era (``--then`` con la
-vecchia configurazione in base64, lanciata con lo stesso input), altrimenti
-una sua, compatta: modello, contesto, limiti.
+Then it prints the status line: the one there was before, if any (``--then``
+with the old configuration in base64, run with the same input), otherwise
+its own, compact: model, context, limits.
 
-Deve essere istantaneo e non fallire mai. Solo libreria standard.
+It must be instant and never fail. Standard library only.
 """
 
 from __future__ import annotations
@@ -30,12 +30,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tsukumo_notify import state_folders  # noqa: E402
 
 LIMITS_FILE = "claude_limits.json"
-#: Anche senza cambiamenti, ogni tanto si riscrive: "at" dice quanto e' fresca la lettura.
+#: Even without changes it's rewritten now and then: "at" says how fresh the reading is.
 REWRITE_EVERY = 60
 
 
 def target_folder() -> Path | None:
-    """Dove sta lo stato di Tsukumo: quello indicato, quello acceso, o il primo che esiste."""
+    """Where Tsukumo's state is: the one given, the one running, or the first that exists."""
     if os.environ.get("DC_STATE_DIR"):
         return Path(os.environ["DC_STATE_DIR"])
     folders = state_folders()
@@ -83,7 +83,7 @@ def own_line(payload: dict) -> str:
 
 
 def previous_line(encoded: str, raw: bytes) -> str:
-    """La barra di prima, lanciata come la lancerebbe Claude Code (su Windows con Git Bash)."""
+    """The previous status line, run as Claude Code would run it (on Windows with Git Bash)."""
     config = json.loads(base64.urlsafe_b64decode(encoded.encode()).decode("utf-8"))
     command = str(config.get("command") or "")
     if not command:
@@ -105,7 +105,7 @@ def main(argv: list[str]) -> int:
     try:
         save(payload)
     except Exception:
-        pass  # una lettura persa non deve mai rompere la barra
+        pass  # a lost reading must never break the status line
     line = ""
     if len(argv) > 2 and argv[1] == "--then":
         try:
@@ -114,7 +114,7 @@ def main(argv: list[str]) -> int:
             line = ""
     if not line:
         line = own_line(payload)
-    # Claude Code legge UTF-8; la console di Windows non lo sarebbe.
+    # Claude Code reads UTF-8; the Windows console wouldn't be.
     sys.stdout.buffer.write(line.encode("utf-8"))
     return 0
 

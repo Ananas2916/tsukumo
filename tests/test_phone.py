@@ -1,4 +1,4 @@
-"""Tsukumo sul telefono: Tailscale, il QR, la pagina solo testo (backend/phone.py)."""
+"""Tsukumo on the phone: Tailscale, the QR, the text-only page (backend/phone.py)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from backend import phone
 from backend.security import AccessPolicy, SecurityMiddleware
 
 HOST = "pc.tail1234.ts.net"
-#: Come arriva una richiesta da ``tailscale serve``: da 127.0.0.1, per conto del telefono.
+#: How a request arrives from ``tailscale serve``: from 127.0.0.1, on behalf of the phone.
 VIA_TAILSCALE = {"X-Forwarded-For": "100.101.102.103", "Tailscale-User-Login": "io@example.com"}
 
 
@@ -62,7 +62,7 @@ def _phone(policy: AccessPolicy) -> TestClient:
 
 
 # ---------------------------------------------------------------------------
-# Il guscio senza token, tutto il resto col token
+# The shell without a token, everything else with the token
 # ---------------------------------------------------------------------------
 def test_the_page_shell_loads_without_the_token(policy):
     client = _phone(policy)
@@ -89,7 +89,7 @@ def test_the_cookie_opens_the_websocket(policy):
 
 
 # ---------------------------------------------------------------------------
-# Tailscale, con una CLI finta
+# Tailscale, with a fake CLI
 # ---------------------------------------------------------------------------
 def _fake_cli(monkeypatch, status: dict, serve: dict | None = None) -> list[tuple[str, ...]]:
     calls: list[tuple[str, ...]] = []
@@ -138,7 +138,7 @@ def test_tailscale_serving_shows_the_qr(monkeypatch):
     page = phone.render_page(info, "segreto")
     assert "<svg" in page
     assert "Funnel" not in page
-    # Un'altra porta non e' il nostro backend.
+    # Another port isn't our backend.
     assert not asyncio.run(phone.tailscale_status(8771)).serving
 
 
@@ -178,7 +178,7 @@ def test_link_keeps_the_token_after_the_hash():
 
 
 # ---------------------------------------------------------------------------
-# Il server vero
+# The real server
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def tailscale_serving(monkeypatch):
@@ -193,10 +193,10 @@ def tailscale_serving(monkeypatch):
 
 @pytest.fixture
 def phone_client(client, tailscale_serving, monkeypatch):
-    """Il telefono attraverso ``tailscale serve``, sullo stesso backend del fixture ``client``."""
+    """The phone through ``tailscale serve``, on the same backend as the ``client`` fixture."""
     from backend import server
 
-    monkeypatch.setattr(server, "POLICY", server.POLICY)  # rimesso a posto alla fine
+    monkeypatch.setattr(server, "POLICY", server.POLICY)  # put back at the end
     server._trust_tailscale(tailscale_serving)
     return TestClient(server.app, base_url=f"https://{HOST}", client=("127.0.0.1", 50000), headers=VIA_TAILSCALE)
 
@@ -235,7 +235,7 @@ def test_the_phone_swaps_the_token_for_a_cookie(phone_client):
     assert ok.status_code == 200
     cookie = ok.headers["set-cookie"].lower()
     assert "httponly" in cookie and "secure" in cookie and "samesite=strict" in cookie
-    # Col cookie il WebSocket si apre, in modalita' solo testo.
+    # With the cookie the WebSocket opens, in text-only mode.
     with phone_client.websocket_connect(f"wss://{HOST}/ws?mode=text", headers=origin) as ws:
         assert ws.receive_json()["type"] == "hello"
 
@@ -247,7 +247,7 @@ def test_missed_replies_only_reach_a_phone_with_the_token(phone_client):
     with pytest.raises(WebSocketDisconnect):
         with phone_client.websocket_connect(f"wss://{HOST}/ws?mode=text") as ws:
             ws.receive_json()
-    # Un client senza browser: token nell'header, nessun Origin.
+    # A client without a browser: token in the header, no Origin.
     bearer = {"Authorization": f"Bearer {server.POLICY.token}"}
     with phone_client.websocket_connect(f"wss://{HOST}/ws?mode=text", headers=bearer) as ws:
         hello = ws.receive_json()
@@ -255,7 +255,7 @@ def test_missed_replies_only_reach_a_phone_with_the_token(phone_client):
 
 
 def test_the_phone_page_shell_is_served(phone_client):
-    # La build del frontend c'e' solo se e' stata fatta: senza, basta che non serva il token.
+    # The frontend build exists only if it was made: without it, it's enough that it needs no token.
     response = phone_client.get("/mobile.html")
     assert response.status_code in (200, 404)
     assert phone_client.get("/panel.html").status_code == 401
@@ -284,3 +284,40 @@ def test_text_only_clients_get_no_audio():
     assert pc_sent[0]["audio"] and pc_sent[0]["visemes"]
     assert phone_sent[0] == {"type": "speech", "text": "ciao"}
     assert phone_sent[1] == pc_sent[1]
+
+
+def test_the_pc_name_is_trusted_once_tailscale_connects_after_startup(monkeypatch):
+    """At boot Tsukumo starts before Tailscale: it retries until the name arrives."""
+    from backend import server
+
+    answers = [
+        phone.Tailscale(installed=True, detail="Tailscale e' spento o non hai fatto l'accesso."),
+        phone.Tailscale(installed=True, running=True),
+        phone.Tailscale(installed=True, running=True, hostname=HOST, serving=True),
+    ]
+    asked = []
+
+    async def status(port):
+        asked.append(port)
+        return answers[min(len(asked), len(answers)) - 1]
+
+    monkeypatch.setattr(phone, "tailscale_status", status)
+    monkeypatch.setattr(server, "POLICY", server.POLICY)  # put back at the end
+    assert not server.POLICY.host_allowed(HOST)
+    asyncio.run(server._detect_tailscale(first_delay=0.01, max_delay=0.02))
+    assert len(asked) == 3
+    assert server.POLICY.host_allowed(HOST)
+
+
+def test_without_tailscale_the_probe_gives_up(monkeypatch):
+    from backend import server
+
+    asked = []
+
+    async def status(port):
+        asked.append(port)
+        return phone.Tailscale(detail="Tailscale non e' installato su questo PC.")
+
+    monkeypatch.setattr(phone, "tailscale_status", status)
+    asyncio.run(server._detect_tailscale(first_delay=0.01))
+    assert len(asked) == 1

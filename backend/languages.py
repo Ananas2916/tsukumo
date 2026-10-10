@@ -1,16 +1,16 @@
-"""Lingua della voce e lingua delle risposte.
+"""The voice's language and the replies' language.
 
-Le due cose devono coincidere: una voce inglese che legge una risposta in
-italiano pronuncia tutto con l'accento e le regole sbagliate, ed e'
-incomprensibile. Ogni motore TTS sa dire che lingua parla una sua voce
-(``TTSEngine.language_of``): le voci Kokoro lo dicono con la prima lettera
-(``af_heart`` = American female, ``if_sara`` = Italian female...), quelle
-Microsoft e Google col prefisso (``it-IT-...``), le voci multilingua di
-ElevenLabs e OpenAI non ne hanno una sola.
+The two must match: an English voice reading an Italian reply pronounces
+everything with the wrong accent and rules, and is incomprehensible. Every
+TTS engine can tell which language one of its voices speaks
+(``TTSEngine.language_of``): Kokoro voices say it with the first letter
+(``af_heart`` = American female, ``if_sara`` = Italian female...), Microsoft
+and Google ones with the prefix (``it-IT-...``), the multilingual voices of
+ElevenLabs and OpenAI don't have a single one.
 
-Se nessuno ha scelto una voce, il companion parla la lingua del sistema
-operativo: con Windows in italiano la voce predefinita e' italiana, e di
-conseguenza anche le risposte, i versetti e i commenti.
+If nobody chose a voice, the companion speaks the operating system's
+language: with Windows in Italian the default voice is Italian, and so are
+the replies, the vocals and the comments.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import os
 import re
 import sys
 
-# Prima lettera della voce Kokoro -> (codice per il phonemizer, nome in inglese).
+# First letter of the Kokoro voice -> (code for the phonemizer, name in English).
 _VOICE_PREFIX = {
     "a": ("en-us", "English"),
     "b": ("en-gb", "English"),
@@ -35,7 +35,7 @@ _VOICE_PREFIX = {
 
 _NAMES = {code: name for code, name in _VOICE_PREFIX.values()}
 
-# Come si puo' scrivere una lingua in DC_REPLY_LANGUAGE o nel pannello.
+# How a language can be written in DC_REPLY_LANGUAGE or in the panel.
 _ALIASES = {
     "en": "English",
     "english": "English",
@@ -65,21 +65,21 @@ _ALIASES = {
 
 
 def is_kokoro_voice(voice: str | None) -> bool:
-    """``af_heart``, ``if_sara``...: prefisso lingua + genere + trattino basso."""
+    """``af_heart``, ``if_sara``...: language prefix + gender + underscore."""
     return bool(
         voice and len(voice) > 3 and voice[2] == "_" and voice[1] in "fm" and voice[0].lower() in _VOICE_PREFIX
     )
 
 
 def voice_language(voice: str | None, fallback: str) -> str:
-    """Codice lingua di una voce Kokoro (``if_sara`` -> ``it``), o ``fallback``."""
+    """Language code of a Kokoro voice (``if_sara`` -> ``it``), or ``fallback``."""
     if is_kokoro_voice(voice):
         return _VOICE_PREFIX[voice[0].lower()][0]  # type: ignore[index]
     return fallback
 
 
 def kokoro_voice_info(voice: str) -> dict[str, str] | None:
-    """Nome leggibile, lingua corta e genere di una voce Kokoro."""
+    """Readable name, short language and gender of a Kokoro voice."""
     if not is_kokoro_voice(voice):
         return None
     code = _VOICE_PREFIX[voice[0].lower()][0]
@@ -92,15 +92,15 @@ def kokoro_voice_info(voice: str) -> dict[str, str] | None:
 
 
 def language_name(code: str | None) -> str | None:
-    """``it`` / ``it-IT`` / ``italiano`` -> ``Italian``; ``None`` se sconosciuta."""
+    """``it`` / ``it-IT`` / ``italiano`` -> ``Italian``; ``None`` if unknown."""
     if not code:
         return None
     lowered = code.strip().lower()
     return _NAMES.get(lowered) or _ALIASES.get(lowered) or _ALIASES.get(lowered.split("-")[0])
 
 
-#: Voce Kokoro consigliata per lingua (la migliore del catalogo, femminile
-#: come la predefinita ``af_heart``).
+#: Recommended Kokoro voice per language (the best of the catalogue, female
+#: like the default ``af_heart``).
 KOKORO_DEFAULTS = {
     "en": "af_heart",
     "it": "if_sara",
@@ -112,13 +112,13 @@ KOKORO_DEFAULTS = {
     "hi": "hf_alpha",
 }
 
-#: Nomi di lingua che ``locale`` puo' restituire su Windows ("Italian_Italy").
+#: Language names ``locale`` may return on Windows ("Italian_Italy").
 _ENGLISH_NAMES = {name.lower(): code for code, name in _ALIASES.items() if len(code) == 2}
 _ENGLISH_NAMES.update({"chinese": "zh", "portuguese": "pt"})
 
 
 def short_language(code: str | None) -> str:
-    """``it-IT``, ``it_IT.UTF-8``, ``Italian_Italy``, ``cmn`` -> ``it``/``zh``; ``""`` se non si capisce."""
+    """``it-IT``, ``it_IT.UTF-8``, ``Italian_Italy``, ``cmn`` -> ``it``/``zh``; ``""`` if it can't tell."""
     if not code:
         return ""
     head = re.split(r"[-_.@ ]", code.strip().lower(), maxsplit=1)[0]
@@ -132,11 +132,10 @@ def short_language(code: str | None) -> str:
 
 
 def system_language() -> str:
-    """La lingua dell'interfaccia del sistema operativo, come codice corto (``it``).
+    """The operating system's interface language, as a short code (``it``).
 
-    ``DC_SYSTEM_LANGUAGE`` la forza. Su Windows si legge la lingua di
-    visualizzazione dell'utente; altrove le variabili ``LANG``/``LC_*``.
-    Se non si capisce: inglese.
+    ``DC_SYSTEM_LANGUAGE`` forces it. On Windows the user's display language is
+    read; elsewhere the ``LANG``/``LC_*`` variables. If it can't tell: English.
     """
     forced = short_language(os.environ.get("DC_SYSTEM_LANGUAGE"))
     if forced:
@@ -151,7 +150,7 @@ def system_language() -> str:
                 found = short_language(buffer.value)
                 if found:
                     return found
-        except Exception:  # pragma: no cover - dipende dal sistema
+        except Exception:  # pragma: no cover - depends on the system
             pass
     for variable in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
         found = short_language(os.environ.get(variable))
@@ -165,12 +164,12 @@ def system_language() -> str:
 
 
 def reply_language(setting: str | None, voice_code: str | None) -> str | None:
-    """In che lingua deve rispondere il companion.
+    """Which language the companion must answer in.
 
-    ``auto`` (default) = la lingua della voce, se la voce ne ha una sola;
-    ``same`` = la stessa lingua in cui scrive l'utente (restituisce ``None``,
-    come ``auto`` con una voce multilingua); altrimenti un codice o un nome di
-    lingua, anche in italiano ("inglese").
+    ``auto`` (default) = the voice's language, if the voice has a single one;
+    ``same`` = the same language the user writes in (returns ``None``, like
+    ``auto`` with a multilingual voice); otherwise a language code or name, in
+    Italian too ("inglese").
     """
     value = (setting or "auto").strip()
     lowered = value.lower()
@@ -182,7 +181,7 @@ def reply_language(setting: str | None, voice_code: str | None) -> str | None:
 
 
 def speech_directive(language: str | None) -> str:
-    """Vincoli per una risposta che verra' letta ad alta voce."""
+    """Constraints for a reply that will be read aloud."""
     if language:
         target = f"Always reply in {language}, whatever language the user writes in"
     else:

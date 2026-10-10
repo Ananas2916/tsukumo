@@ -1,18 +1,19 @@
-"""Versetti: brevi esclamazioni con la voce in uso ("Hii!", "Ehehe!", "Waah!").
+"""Vocals: short exclamations in the voice in use ("Hii!", "Ehehe!", "Waah!").
 
-Accompagnano i gesti del personaggio (saluto, carezza, spavento, caduta) e
-non passano dal cervello: sono frasi fisse, nella lingua della voce scelta,
-cosi' il saluto di una voce italiana e' "Ciao!" e non "Hii!" con l'accento.
+They go with the character's gestures (greeting, pat, fright, fall) and
+don't go through the brain: they're fixed phrases, in the chosen voice's
+language, so an Italian voice greets with "Ciao!" and not with an accented
+"Hii!".
 
-Le frasi sono corte e senza simboli strani: devono suonare bene con qualunque
-motore TTS, da Kokoro a ElevenLabs.
+The phrases are short and free of odd symbols: they must sound good with
+any TTS engine, from Kokoro to ElevenLabs.
 """
 
 from __future__ import annotations
 
 import random
 
-#: Evento -> lingua (codice ISO a due lettere) -> varianti.
+#: Event -> language (two-letter ISO code) -> variants.
 LINES: dict[str, dict[str, tuple[str, ...]]] = {
     "greet": {
         "en": ("Hii!", "Hi there!"),
@@ -125,7 +126,7 @@ LINES: dict[str, dict[str, tuple[str, ...]]] = {
         "ja": ("わぁー!",),
         "zh": ("啊!",),
     },
-    # Un agente lavora da un po' e non ha ancora detto niente (vedi pipeline).
+    # An agent has been working for a while and hasn't said anything yet (see pipeline).
     "working": {
         "en": ("One moment, I'm on it.", "Give me a second, I'm working on it."),
         "it": ("Un attimo, ci sto lavorando.", "Dammi un secondo, sto controllando."),
@@ -150,11 +151,11 @@ LINES: dict[str, dict[str, tuple[str, ...]]] = {
 
 EVENTS = frozenset(LINES)
 
-#: Se per una lingua manca l'evento, meglio un saluto nella lingua giusta che
-#: una frase inglese letta con la fonetica di un'altra lingua.
+#: If a language lacks the event, a greeting in the right language is better
+#: than an English phrase read with another language's phonetics.
 _FALLBACK_EVENT = {"morning": "greet", "evening": "greet", "night": "greet", "welcome": "greet"}
 
-#: Codici che i motori usano per la stessa lingua.
+#: Codes the engines use for the same language.
 _LANGUAGE_ALIASES = {"cmn": "zh", "yue": "zh", "jp": "ja"}
 
 
@@ -165,7 +166,7 @@ def language_key(language: str | None) -> str:
 
 
 def vocal_line(event: str, language: str | None, rng: random.Random | None = None) -> str:
-    """Una frase per ``event`` nella lingua della voce (inglese se non c'e')."""
+    """A phrase for ``event`` in the voice's language (English if there isn't one)."""
     if event not in LINES:
         raise KeyError(event)
     code = language_key(language)

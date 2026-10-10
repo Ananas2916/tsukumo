@@ -1,9 +1,10 @@
-"""Il meteo di dove sei, per commentarlo ("che bella giornata di sole!").
+"""The weather where you are, to comment on it ("what a sunny day!").
 
-Usa Open-Meteo: gratis, senza chiave, senza account. La posizione e' la citta'
-scritta nel pannello (geocoding di Open-Meteo) oppure, se e' vuota, quella
-approssimativa dell'indirizzo IP (get.geojs.io). Il risultato resta in memoria
-per mezz'ora: il companion non interroga il servizio piu' spesso di cosi'.
+It uses Open-Meteo: free, no key, no account. The position is the city
+written in the panel (Open-Meteo's geocoding) or, if it's empty, the
+approximate one of the IP address (get.geojs.io). The result stays in memory
+for half an hour: the companion doesn't query the service more often than
+that.
 """
 
 from __future__ import annotations
@@ -26,13 +27,15 @@ CACHE_SECONDS = 30 * 60
 @dataclass(frozen=True)
 class Weather:
     temperature: float
-    #: Temperatura percepita: e' quella che fa dire "che caldo" o "che freddo".
+    #: Apparent temperature: it's what makes you say "so hot" or "so cold".
     apparent: float
-    #: Codice WMO (0 sereno, 61 pioggia, 95 temporale...).
+    #: WMO code (0 clear, 61 rain, 95 thunderstorm...).
     code: int
     is_day: bool
     city: str = ""
     fetched_at: float = 0.0
+    #: The next days (today included), for the dashboard: date, min, max, code, rain %.
+    days: tuple[tuple[str, float, float, int, int], ...] = ()
 
     @property
     def condition(self) -> str:
@@ -41,7 +44,7 @@ class Weather:
 
     @property
     def feel(self) -> str:
-        """hot, cold o mild, sulla temperatura percepita."""
+        """hot, cold or mild, on the apparent temperature."""
         if self.apparent >= 30:
             return "hot"
         if self.apparent <= 5:
@@ -56,11 +59,15 @@ class Weather:
             "feel": self.feel,
             "isDay": self.is_day,
             "city": self.city,
+            "days": [
+                {"date": day, "min": round(low), "max": round(high), "condition": condition_of(code), "rain": rain}
+                for day, low, high, code, rain in self.days
+            ],
         }
 
 
 def condition_of(code: int) -> str:
-    """Codici meteo WMO -> una parola."""
+    """WMO weather codes -> one word."""
     if code in (0, 1):
         return "clear"
     if code in (2, 3):
@@ -77,7 +84,7 @@ def condition_of(code: int) -> str:
 
 
 class WeatherService:
-    """Meteo con cache; ``get`` non solleva mai (``None`` se non si sa)."""
+    """Weather with a cache; ``get`` never raises (``None`` if it isn't known)."""
 
     def __init__(self, client_factory=None) -> None:
         self._client_factory = client_factory or (lambda: httpx.AsyncClient(timeout=8.0))
@@ -97,7 +104,7 @@ class WeatherService:
                     return None
                 weather = await self._fetch(client, *location)
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-            logger.info("Meteo non disponibile: %s", exc)
+            logger.info("Weather unavailable: %s", exc)
             return self._cached
         self._cached, self._cached_for = weather, key
         return weather
@@ -110,7 +117,7 @@ class WeatherService:
             response.raise_for_status()
             results = response.json().get("results") or []
             if not results:
-                logger.info("Citta' non trovata per il meteo: %r", city)
+                logger.info("City not found for the weather: %r", city)
                 return None
             place = results[0]
             location = (float(place["latitude"]), float(place["longitude"]), str(place.get("name") or city))
@@ -129,11 +136,14 @@ class WeatherService:
                 "latitude": latitude,
                 "longitude": longitude,
                 "current": "temperature_2m,apparent_temperature,weather_code,is_day",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "forecast_days": 5,
                 "timezone": "auto",
             },
         )
         response.raise_for_status()
-        current = response.json()["current"]
+        data = response.json()
+        current = data["current"]
         return Weather(
             temperature=float(current["temperature_2m"]),
             apparent=float(current.get("apparent_temperature", current["temperature_2m"])),
@@ -141,4 +151,16 @@ class WeatherService:
             is_day=bool(current.get("is_day", 1)),
             city=city,
             fetched_at=time.time(),
+            days=forecast_days(data.get("daily") or {}),
         )
+
+
+def forecast_days(daily: dict[str, Any]) -> tuple[tuple[str, float, float, int, int], ...]:
+    """Open-Meteo's ``daily`` columns -> one row per day (incomplete rows are skipped)."""
+    columns = [daily.get(key) or [] for key in ("time", "temperature_2m_min", "temperature_2m_max", "weather_code", "precipitation_probability_max")]
+    days = []
+    for day, low, high, code, rain in zip(*columns):
+        if day is None or low is None or high is None:
+            continue
+        days.append((str(day), float(low), float(high), int(code or 0), int(rain or 0)))
+    return tuple(days)

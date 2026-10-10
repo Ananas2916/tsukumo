@@ -1,8 +1,8 @@
-"""Ambiente dei test: nessun modello, nessuna rete, niente .env dell'utente.
+"""The tests' environment: no models, no network, none of the user's .env.
 
-Le variabili vanno impostate *prima* di importare il backend: ``server.py``
-legge le impostazioni quando viene importato, e ``load_dotenv`` non
-sovrascrive cio' che c'e' gia' nell'ambiente.
+The variables must be set *before* importing the backend: ``server.py``
+reads the settings when it's imported, and ``load_dotenv`` doesn't
+overwrite what's already in the environment.
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ os.environ.update(
         "DC_LLM_FALLBACK": "0",
         "DC_TTS_FALLBACK": "1",
         "DC_STATUS_INTERVAL": "60",
-        # Niente ricerca dei motori installati: sonde vere e .env vero.
+        # No search for installed engines: real probes and a real .env.
         "DC_DETECT_ENGINES": "0",
-        # Niente commenti spontanei: meteo e notizie passano dalla rete.
+        # No spontaneous comments: weather and news go through the network.
         "DC_PROACTIVE": "0",
         "DC_LOG_LEVEL": "warning",
     }
@@ -39,20 +39,20 @@ os.environ.update(
 
 @pytest.fixture(scope="session")
 def client():
-    """Un solo avvio del server per tutti i test, come nel processo vero.
+    """One server start for all the tests, as in the real process.
 
-    Il monitor dei motori e' globale e lega i suoi Event al primo event loop:
-    un secondo TestClient (un altro loop) lo romperebbe.
+    The engine monitor is global and binds its Events to the first event loop:
+    a second TestClient (another loop) would break it.
     """
     from fastapi.testclient import TestClient
 
     from backend import server
 
     class LocalClient(TestClient):
-        """Come la shell Electron: dal PC stesso, verso 127.0.0.1 (vedi security.py)."""
+        """Like the Electron shell: from the PC itself, to 127.0.0.1 (see security.py)."""
 
         def websocket_connect(self, url, *args, **kwargs):
-            # Il TestClient manderebbe "Host: testserver" anche ai WebSocket.
+            # The TestClient would send "Host: testserver" to WebSockets too.
             if url.startswith("/"):
                 url = f"ws://127.0.0.1:8770{url}"
             return super().websocket_connect(url, *args, **kwargs)

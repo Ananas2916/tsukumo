@@ -1,16 +1,16 @@
 /**
- * Riproduzione dell'audio ricevuto dal backend.
+ * Playback of the audio received from the backend.
  *
- * Il backend manda una frase alla volta (`speech`), quindi qui teniamo una
- * coda: mentre la prima frase suona le successive vengono decodificate e
- * accodate, cosi' il parlato risulta continuo.
+ * The backend sends one sentence at a time (`speech`), so here we keep a
+ * queue: while the first sentence plays the next ones are decoded and
+ * queued, so the speech sounds continuous.
  *
- * Oltre a suonare, la classe misura il livello RMS istantaneo con un
- * AnalyserNode: e' quello che permette al lip-sync di restare agganciato al
- * volume reale anche se la timeline dei visemi sbanda di qualche millisecondo.
+ * Besides playing, the class measures the instantaneous RMS level with an
+ * AnalyserNode: that's what keeps the lip-sync locked to the real volume even
+ * if the viseme timeline drifts by a few milliseconds.
  */
 
-/** Converte il WAV in base64 ricevuto via WebSocket in un ArrayBuffer. */
+/** Converts the base64 WAV received over the WebSocket into an ArrayBuffer. */
 function base64ToArrayBuffer(base64) {
   const binary = window.atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -37,13 +37,13 @@ export class SpeechPlayer {
     this.clip = null;
     this.startedAt = 0;
     this.playing = false;
-    this.level = 0; // RMS lisciato, 0..1
+    this.level = 0; // smoothed RMS, 0..1
     this.volume = 1;
-    /** Incrementato a ogni stop(): invalida le decodifiche in volo. */
+    /** Incremented at every stop(): invalidates the decodes in flight. */
     this.generation = 0;
   }
 
-  /** Crea (una volta sola) il grafo WebAudio: source -> gain -> analyser -> out. */
+  /** Creates (once) the WebAudio graph: source -> gain -> analyser -> out. */
   ensureContext() {
     if (this.context) return this.context;
 
@@ -67,7 +67,7 @@ export class SpeechPlayer {
     return context;
   }
 
-  /** I browser bloccano l'audio finche' non c'e' un gesto dell'utente. */
+  /** Browsers block audio until there's a user gesture. */
   async resume() {
     const context = this.ensureContext();
     if (context.state === 'suspended') await context.resume();
@@ -80,7 +80,7 @@ export class SpeechPlayer {
   }
 
   /**
-   * Decodifica e accoda un messaggio `speech` del backend.
+   * Decodes and queues a `speech` message from the backend.
    * @param {{audio: string, visemes: Array, duration: number, text: string}} payload
    */
   async enqueue(payload) {
@@ -92,11 +92,11 @@ export class SpeechPlayer {
     try {
       buffer = await context.decodeAudioData(base64ToArrayBuffer(payload.audio));
     } catch (error) {
-      console.error('[audio] WAV non decodificabile', error);
+      console.error('[audio] WAV cannot be decoded', error);
       return;
     }
 
-    // Se nel frattempo e' arrivato uno stop(), scartiamo il risultato.
+    // If a stop() arrived in the meantime, we drop the result.
     if (generation !== this.generation) return;
 
     this.queue.push({ buffer, payload });
@@ -115,7 +115,7 @@ export class SpeechPlayer {
 
     const context = this.ensureContext();
     if (context.state === 'suspended') {
-      // Senza gesto utente non possiamo suonare: riproviamo appena si sblocca.
+      // Without a user gesture we can't play: retry as soon as it unlocks.
       context.resume().catch(() => {});
     }
 
@@ -139,7 +139,7 @@ export class SpeechPlayer {
     this.onClipStart(next.payload);
   }
 
-  /** Secondi trascorsi dall'inizio della clip corrente. */
+  /** Seconds since the start of the current clip. */
   get currentTime() {
     if (!this.playing || !this.context || !this.clip) return 0;
     const elapsed = this.context.currentTime - this.startedAt;
@@ -147,7 +147,7 @@ export class SpeechPlayer {
     return Math.max(0, Math.min(elapsed, duration));
   }
 
-  /** Svuota la coda e ferma la riproduzione immediatamente. */
+  /** Empties the queue and stops playback immediately. */
   stop() {
     this.generation += 1;
     this.queue.length = 0;
@@ -156,7 +156,7 @@ export class SpeechPlayer {
         this.source.onended = null;
         this.source.stop();
       } catch {
-        /* la sorgente poteva essere gia' finita */
+        /* the source may have already finished */
       }
     }
     this.source = null;
@@ -167,12 +167,12 @@ export class SpeechPlayer {
   }
 
   /**
-   * Aggiorna il livello RMS. Va chiamata una volta per frame dal render loop.
-   * @param {number} dt secondi trascorsi dall'ultimo frame
+   * Updates the RMS level. Call it once per frame from the render loop.
+   * @param {number} dt seconds since the last frame
    */
   update(dt) {
     if (!this.analyser || !this.playing) {
-      // Rilascio dolce quando non c'e' audio: evita scatti della mascella.
+      // Gentle release when there's no audio: avoids jaw jerks.
       this.level += (0 - this.level) * Math.min(1, dt * 12);
       return this.level;
     }
@@ -185,9 +185,9 @@ export class SpeechPlayer {
     }
     const rms = Math.sqrt(sum / this.timeDomain.length);
 
-    // Normalizzazione empirica: il parlato di Kokoro sta intorno a 0.06-0.25 RMS.
+    // Empirical normalization: Kokoro's speech sits around 0.06-0.25 RMS.
     const target = Math.min(1, rms * 4.2);
-    // Attacco rapido, rilascio piu' lento: la bocca apre subito e chiude morbida.
+    // Fast attack, slower release: the mouth opens at once and closes softly.
     const speed = target > this.level ? 26 : 11;
     this.level += (target - this.level) * Math.min(1, dt * speed);
     return this.level;

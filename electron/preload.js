@@ -1,16 +1,16 @@
 /**
- * Ponte sicuro fra le pagine e il processo main.
+ * Safe bridge between the pages and the main process.
  *
- * Con contextIsolation attivo le pagine non vedono ne' Node ne' Electron:
- * esponiamo solo i comandi che servono. Lo stesso preload serve le due
- * finestre; `role` dice quale delle due sta girando ('pet' o 'panel').
+ * With contextIsolation on the pages see neither Node nor Electron: we
+ * expose only the commands they need. The same preload serves every window;
+ * `role` says which one is running ('pet', 'panel' or 'dashboard').
  */
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const role = process.argv.find((arg) => arg.startsWith('--dc-role='))?.split('=')[1] ?? 'pet';
 
-/** Iscrizione a un canale del main; restituisce la funzione per disiscriversi. */
+/** Subscribes to a main channel; returns the function that unsubscribes. */
 function listen(channel, callback) {
   const handler = (_event, payload) => callback(payload);
   ipcRenderer.on(channel, handler);
@@ -21,8 +21,8 @@ contextBridge.exposeInMainWorld('companion', {
   isElectron: true,
   role,
 
-  // --- file e schermo -----------------------------------------------------
-  /** Percorso vero di un file trascinato (Electron 32 ha tolto `File.path`). */
+  // --- files and screen -------------------------------------------------------
+  /** Real path of a dropped file (Electron 32 removed `File.path`). */
   pathForFile: (file) => {
     try {
       return webUtils.getPathForFile(file) || null;
@@ -30,78 +30,85 @@ contextBridge.exposeInMainWorld('companion', {
       return null;
     }
   },
-  /** Screenshot dello schermo dove sta il cursore: restituisce il percorso del PNG. */
+  /** Screenshot of the screen the cursor is on: returns the PNG's path. */
   captureScreen: () => ipcRenderer.invoke('pet:capture-screen'),
 
-  // --- personaggio ------------------------------------------------------
+  // --- character -------------------------------------------------------------
   /**
-   * Comunica se il cursore e' sopra un pixel opaco del personaggio: il
-   * processo main lo traduce in click-through per pixel. Va chiamata solo
-   * quando il valore cambia (ci pensa il renderer).
+   * Says whether the cursor is over an opaque pixel of the character: the
+   * main process turns it into per-pixel click-through. Call it only when the
+   * value changes (the renderer takes care of it).
    */
   setInteractive: (value) => ipcRenderer.send('pet:set-interactive', value),
 
-  /** @returns {Promise<{x: number, y: number}>} posizione della finestra */
+  /** @returns {Promise<{x: number, y: number}>} position of the window */
   dragStart: () => ipcRenderer.invoke('pet:drag-start'),
   dragMove: (x, y) => ipcRenderer.send('pet:drag-move', { x, y }),
-  dragEnd: () => ipcRenderer.invoke('pet:drag-end'),
+  /** `velocity` `{vx, vy}` in px/s if you threw her (flame only), otherwise null. */
+  dragEnd: (velocity = null) => ipcRenderer.invoke('pet:drag-end', velocity),
 
-  /** Dove stanno piedi, seduta e asse del corpo, in frazioni della finestra. */
+  /** Where feet, seat and body axis are, as fractions of the window. */
   setAnchors: (anchors) => ipcRenderer.send('pet:anchors', anchors),
-  /** Sedersi, alzarsi o sdraiarsi sulla barra: `'sit' | 'stand' | 'lie' | 'side'`. */
+  /** Sit, stand up or lie down on the taskbar: `'sit' | 'stand' | 'lie' | 'side'`. */
   requestPosture: (posture) => ipcRenderer.invoke('pet:posture', posture),
-  /** Sprint della fiammella lungo la barra: `'dash' | 'lap'` o niente (a caso). Falso se non puo'. */
+  /** The flame's sprint along the taskbar: `'dash' | 'lap'` or nothing (random). False if she can't. */
   sprint: (kind) => ipcRenderer.invoke('pet:sprint', kind),
-  /** Rotellina: moltiplica la scala del personaggio. */
+  /** The menu island open or closed: the window widens around her. `{wide, shift}`. */
+  setIslandWide: (open) => ipcRenderer.invoke('pet:island', Boolean(open)),
+  /** How many pixels right of the window's centre she is (the island widened it on one side). */
+  onFrameShift: (callback) => listen('pet:frame-shift', callback),
+  /** The interface's language ('en' or 'it'): the tray menu and the dialogs follow it. */
+  setLanguage: (language) => ipcRenderer.send('app:language', String(language)),
+  /** Wheel: multiplies the character's scale. */
   scaleBy: (factor) => ipcRenderer.invoke('pet:scale-by', factor),
 
-  /** Cadute, atterraggi, finestre su cui e' seduta, bordi a cui e' aggrappata, sprint. */
+  /** Falls, landings, windows she sits on, edges she clings to, sprints. */
   onMotion: (callback) => listen('pet:motion', callback),
   /**
-   * Posizione del cursore relativa alla finestra, misurata dal processo main.
-   * Serve perche' in click-through la pagina non riceve eventi mouse: senza
-   * questo canale non potrebbe accorgersi di quando il cursore torna sopra
-   * il personaggio.
+   * Cursor position relative to the window, measured by the main process.
+   * Needed because in click-through the page receives no mouse events:
+   * without this channel it couldn't notice when the cursor comes back over
+   * the character.
    */
   onCursor: (callback) => listen('pet:cursor', callback),
-  /** Comandi mandati dal pannello (bocca, azioni, debug...). */
+  /** Commands sent by the panel (mouth, actions, debug...). */
   onCommand: (callback) => listen('pet:command', callback),
-  /** Un modello .vrm scelto dal pannello: `{name, data}`. */
+  /** A .vrm model chosen from the panel: `{name, data}`. */
   onModel: (callback) => listen('pet:model', callback),
-  /** Spotify: `{open, playing, artist, title}`, solo quando cambia. */
+  /** Spotify: `{open, playing, artist, title}`, only when it changes. */
   onMusic: (callback) => listen('pet:music', callback),
   /**
-   * Presenza: `{idle}` (secondi senza mouse ne' tastiera) ogni 5 s, oppure
-   * `{event}` per lock-screen, unlock-screen, suspend, resume.
+   * Presence: `{idle}` (seconds without mouse or keyboard) every 5 s, or
+   * `{event}` for lock-screen, unlock-screen, suspend, resume.
    */
   onPresence: (callback) => listen('pet:presence', callback),
-  /** Notifica di sistema (promemoria scattato, un agente che ha finito). */
+  /** System notification (a reminder went off, an agent is done). */
   notify: (title, body) => ipcRenderer.send('pet:notify', { title, body }),
 
-  // --- voce -------------------------------------------------------------
+  // --- voice -------------------------------------------------------------
   /**
-   * Push-to-talk con scorciatoia **globale**: arriva anche quando il
-   * companion non ha il fuoco, che e' tutto il punto di un tasto "parla".
-   * Il payload e' `{action: 'toggle'}`.
+   * Push-to-talk with a **global** shortcut: it arrives even when the
+   * companion doesn't have focus, which is the whole point of a "talk" key.
+   * The payload is `{action: 'toggle'}`.
    */
   onPushToTalk: (callback) => listen('voice:push-to-talk', callback),
-  /** Cambia il tasto del push-to-talk. @returns {Promise<{ok, key, error}>} */
+  /** Changes the push-to-talk key. @returns {Promise<{ok, key, error}>} */
   setPushToTalkKey: (key) => ipcRenderer.invoke('voice:set-key', key),
-  /** Stato del microfono, per l'icona nel tray e per il pannello. */
+  /** Microphone state, for the tray icon and the panel. */
   setVoiceState: (state) => ipcRenderer.send('voice:state', state),
   onVoiceCommand: (callback) => listen('voice:command', callback),
 
-  // --- pannello ---------------------------------------------------------
+  // --- panel ---------------------------------------------------------------
   togglePanel: (focus) => ipcRenderer.invoke('panel:toggle', focus),
   openPanel: (focus) => ipcRenderer.invoke('panel:open', focus),
   hidePanel: () => ipcRenderer.invoke('panel:hide'),
-  /** Il pannello dice quale scheda mostra: i dock evidenziano quella. */
+  /** The panel says which tab it shows: the docks highlight that one. */
   setPanelTab: (tab) => ipcRenderer.send('panel:tab', tab),
-  /** @returns {Promise<object>} scala, primo piano, fantasma, aggancio... */
+  /** @returns {Promise<object>} scale, always on top, ghost, docking... */
   getState: () => ipcRenderer.invoke('panel:state'),
   onState: (callback) => listen('panel:state', callback),
   onPetState: (callback) => listen('pet:state', callback),
-  /** Il main chiede al pannello di mostrare una scheda (e magari del testo). */
+  /** The main process asks the panel to show a tab (and maybe some text). */
   onFocus: (callback) => listen('panel:focus', callback),
 
   sendToPet: (command) => ipcRenderer.send('pet:command', command),
@@ -112,5 +119,15 @@ contextBridge.exposeInMainWorld('companion', {
   setDocked: (value) => ipcRenderer.invoke('panel:set-docked', value),
   setPanelPinned: (value) => ipcRenderer.invoke('panel:set-pinned', value),
   pickModel: () => ipcRenderer.invoke('pet:pick-model'),
+
+  // --- dashboard -------------------------------------------------------------
+  openDashboard: () => ipcRenderer.invoke('dashboard:open'),
+  /** "−": the dashboard closes and she goes back to the desktop. */
+  minimizeDashboard: () => ipcRenderer.invoke('dashboard:minimize'),
+  toggleMaximizeDashboard: () => ipcRenderer.invoke('dashboard:toggle-maximize'),
+  /** At startup: 'dashboard' or 'companion'. */
+  setStartWith: (value) => ipcRenderer.invoke('dashboard:start-with', value),
+  /** Where she is in the dashboard: `{x, y, width, height}` in page pixels. */
+  setDashboardStage: (rect) => ipcRenderer.send('dashboard:stage', rect),
   quit: () => ipcRenderer.invoke('app:quit'),
 });

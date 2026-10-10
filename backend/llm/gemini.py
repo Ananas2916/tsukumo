@@ -1,14 +1,14 @@
-"""Client per l'API Google Gemini.
+"""Client for the Google Gemini API.
 
-Il formato e' diverso da quello OpenAI in tre punti che contano qui:
+The format differs from OpenAI's in three points that matter here:
 
-* i turni si chiamano ``contents`` e il ruolo dell'assistente e' ``model``,
-  non ``assistant``;
-* il system prompt e' un campo a se' (``systemInstruction``);
-* lo streaming si ottiene con ``:streamGenerateContent?alt=sse``.
+* turns are called ``contents`` and the assistant's role is ``model``, not
+  ``assistant``;
+* the system prompt is a field of its own (``systemInstruction``);
+* streaming is obtained with ``:streamGenerateContent?alt=sse``.
 
-La chiave viaggia nell'header ``x-goog-api-key`` invece che nella query
-string, cosi' non finisce nei log del server.
+The key travels in the ``x-goog-api-key`` header instead of the query
+string, so it doesn't end up in the server's logs.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiClient(LLMClient):
-    """Client per i modelli Gemini di Google AI Studio."""
+    """Client for Google AI Studio's Gemini models."""
 
     name = "gemini"
 
@@ -50,7 +50,7 @@ class GeminiClient(LLMClient):
     # ------------------------------------------------------------------
     @staticmethod
     def _split(messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
-        """Separa il system prompt e traduce i ruoli nel dialetto di Gemini."""
+        """Separates the system prompt and translates the roles into Gemini's dialect."""
         system_parts: list[str] = []
         contents: list[dict[str, Any]] = []
         for message in messages:
@@ -80,7 +80,7 @@ class GeminiClient(LLMClient):
         ) as response:
             if response.status_code >= 400:
                 body = (await response.aread()).decode("utf-8", "replace")[:500]
-                raise RuntimeError(f"Gemini ha risposto {response.status_code}: {body}")
+                raise RuntimeError(f"Gemini answered {response.status_code}: {body}")
 
             async for line in response.aiter_lines():
                 line = line.strip()
@@ -92,7 +92,7 @@ class GeminiClient(LLMClient):
                 try:
                     chunk = json.loads(data)
                 except json.JSONDecodeError:
-                    logger.debug("Riga SSE non JSON ignorata: %r", data[:120])
+                    logger.debug("Non-JSON SSE line ignored: %r", data[:120])
                     continue
 
                 for candidate in chunk.get("candidates") or []:
@@ -113,7 +113,7 @@ class GeminiClient(LLMClient):
                 "ok": False,
                 "model": self.model,
                 "error": str(exc),
-                "hint": "Controlla la chiave API su aistudio.google.com/apikey.",
+                "hint": "Check the API key at aistudio.google.com/apikey.",
             }
         return {
             "backend": self.name,

@@ -1,4 +1,4 @@
-"""Il cervello delle chiacchiere: notizie e curiosita' scritte da un modello a parte."""
+"""The chatter brain: news and facts written by a separate model."""
 
 import dataclasses
 import random
@@ -20,7 +20,7 @@ from helpers import Scripted
 
 
 class Agent(Scripted):
-    """Come Claude Code: tiene la sessione da se'."""
+    """Like Claude Code: it keeps the session by itself."""
 
     stateful = True
 
@@ -56,7 +56,7 @@ def collect(stream):
 
 @pytest.fixture
 def rig(client, monkeypatch):
-    """Claude Code come cervello principale, un modello finto per le chiacchiere."""
+    """Claude Code as the main brain, a fake model for the chatter."""
     instance = server.app.state.companion
     sent = []
 
@@ -101,7 +101,7 @@ def test_the_news_is_written_by_the_chatter_brain_not_the_agent(client, rig):
     said = client.portal.call(engine.tick, datetime.now().replace(hour=18))
     assert said == "news:Scoperto un nuovo pianeta"
     assert built == [("openrouter", "a:free, b:free")]
-    assert agent.messages is None  # Claude Code non ha speso niente
+    assert agent.messages is None  # Claude Code spent nothing
     assert "Scoperto un nuovo pianeta" in chatter.messages[-1].content
     assert [m["text"] for m in sent if m["type"] == "reply"] == ["Hai visto? Hanno scoperto un nuovo pianeta!"]
 
@@ -113,8 +113,8 @@ def test_the_agent_hears_what_she_said_on_the_next_turn(client, rig):
     asked = agent.messages[-1].content
     assert "Hanno scoperto un nuovo pianeta" in asked and asked.endswith("dimmi di più")
     client.portal.call(lambda: instance.chat("grazie", server.hub.broadcast))
-    assert agent.messages[-1].content == "grazie"  # detto una volta sola
-    # E in chat resta la domanda dell'utente, non la nota per l'agente.
+    assert agent.messages[-1].content == "grazie"  # said once only
+    # And the chat keeps the user's question, not the note for the agent.
     assert [m["text"] for m in sent if m["type"] == "user"] == ["dimmi di più", "grazie"]
 
 
@@ -134,8 +134,8 @@ def test_a_failing_chatter_brain_stays_quiet(client, rig, monkeypatch):
     monkeypatch.setattr(proactive, "create_chatter_llm", lambda settings, engine, models="": broken)
     client.portal.call(engine.tick, datetime.now().replace(hour=18))
     assert broken.calls == 1
-    assert agent.messages is None  # niente ripiego sull'agente
-    assert not [m for m in sent if m["type"] == "error"]  # niente bolla rossa
+    assert agent.messages is None  # no falling back on the agent
+    assert not [m for m in sent if m["type"] == "error"]  # no red bubble
     assert "llm" not in instance.last_errors
     assert "429" in instance.last_errors["chatter"]
     assert "429" in engine.status()["brainError"]
@@ -145,12 +145,12 @@ def test_a_brain_that_cannot_start_means_no_chatter(client, rig, monkeypatch):
     engine, instance, agent, chatter, sent, built = rig
 
     def missing_key(settings, engine, models=""):
-        raise RuntimeError("Manca la chiave API di openrouter.")
+        raise RuntimeError("The openrouter API key is missing.")
 
     monkeypatch.setattr(proactive, "create_chatter_llm", missing_key)
     assert client.portal.call(engine.tick, datetime.now().replace(hour=18)) is None
     assert agent.messages is None
-    assert "chiave" in engine.status()["brainError"]
+    assert "API key" in engine.status()["brainError"]
 
 
 def test_without_a_choice_the_main_brain_writes(client, rig, monkeypatch):
@@ -168,7 +168,7 @@ def test_fallback_tries_the_next_model_only_before_the_first_words(client):
     half = FallbackLLM([Broken(after=["Ci"]), good], name="openrouter")
     with pytest.raises(RuntimeError):
         client.portal.call(collect(half.stream([])))
-    with pytest.raises(RuntimeError, match="Nessun modello"):
+    with pytest.raises(RuntimeError, match="No model answered"):
         client.portal.call(collect(FallbackLLM([Broken(), Broken()], name="openrouter").stream([])))
 
 
@@ -181,12 +181,12 @@ def test_create_chatter_llm_builds_a_queue_of_models():
     single = create_chatter_llm(settings, "openrouter", "a:free")
     assert isinstance(single, OpenAICompatibleClient) and single.model == "a:free"
     with pytest.raises(ValueError):
-        create_chatter_llm(settings, "claude_code")  # gli agenti no
-    # Senza chiave: tolta apposta, il .env di chi lancia i test potrebbe averla.
+        create_chatter_llm(settings, "claude_code")  # agents don't
+    # Without a key: removed on purpose, the .env of whoever runs the tests might have it.
     keyless = dataclasses.replace(
         base, provider_options={k: v for k, v in base.provider_options.items() if k != "OPENROUTER_API_KEY"}
     )
-    with pytest.raises(RuntimeError, match="chiave"):
+    with pytest.raises(RuntimeError, match="API key"):
         create_chatter_llm(keyless, "openrouter")
 
 

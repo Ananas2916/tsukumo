@@ -1,4 +1,4 @@
-"""Interfaccia comune ai motori di sintesi vocale."""
+"""Common interface of the speech-synthesis engines."""
 
 from __future__ import annotations
 
@@ -14,19 +14,19 @@ from ..languages import KOKORO_DEFAULTS, kokoro_voice_info, short_language
 
 @dataclass
 class Speech:
-    """Il risultato di una sintesi: audio + metadati utili al lip-sync."""
+    """The result of a synthesis: audio + metadata useful for the lip-sync."""
 
     samples: np.ndarray
     sample_rate: int
     text: str
-    #: Trascrizione IPA, se il motore riesce a fornirla (migliora il lip-sync).
+    #: IPA transcription, if the engine can provide it (it improves the lip-sync).
     phonemes: str | None = None
-    #: Timing esatti ``[(simbolo, inizio_s, fine_s), ...]``, se il modello li
-    #: espone: e' la sorgente migliore in assoluto per il lip-sync. Il simbolo
-    #: e' un fonema IPA (Kokoro) oppure gia' un ``Phone`` (le lettere con i
-    #: loro tempi che restituisce ElevenLabs, vedi ``phonemes.phones_for_letters``).
+    #: Exact timings ``[(symbol, start_s, end_s), ...]``, if the model exposes
+    #: them: by far the best source for the lip-sync. The symbol is an IPA
+    #: phoneme (Kokoro) or already a ``Phone`` (the letters with their times
+    #: ElevenLabs returns, see ``phonemes.phones_for_letters``).
     timings: list[tuple[Any, float, float]] | None = None
-    #: Informazioni libere per il debug (voce usata, engine, ...).
+    #: Free information for debugging (voice used, engine, ...).
     meta: dict = field(default_factory=dict)
 
     @property
@@ -38,18 +38,18 @@ class Speech:
 
 @dataclass
 class VoiceInfo:
-    """Una voce descritta abbastanza da poterla scegliere senza provarle tutte."""
+    """A voice described well enough to choose it without trying them all."""
 
     id: str
     name: str = ""
-    #: Codice lingua corto ("it", "en"...), vuoto se la voce e' multilingua.
+    #: Short language code ("it", "en"...), empty if the voice is multilingual.
     language: str = ""
-    #: "female", "male" oppure vuoto.
+    #: "female", "male" or empty.
     gender: str = ""
     description: str = ""
-    #: URL di un audio d'esempio, se il servizio lo offre (ElevenLabs).
+    #: URL of a sample, if the service offers one (ElevenLabs).
     preview: str = ""
-    #: Aggiunta dall'utente (voce clonata): il pannello offre di eliminarla.
+    #: Added by the user (cloned voice): the panel offers to delete it.
     removable: bool = False
 
     def as_dict(self) -> dict[str, Any]:
@@ -62,30 +62,30 @@ _LOCALE = re.compile(r"^([a-z]{2,3})[-_][A-Z]{2}")
 
 
 def locale_language(voice: str | None) -> str:
-    """``it-IT-ElsaNeural`` -> ``it``; stringa vuota se il nome non lo dice."""
+    """``it-IT-ElsaNeural`` -> ``it``; empty string if the name doesn't say."""
     match = _LOCALE.match(voice or "")
     return match.group(1) if match else ""
 
 
 def pcm16_to_float(data: bytes) -> np.ndarray:
-    """PCM 16 bit little endian (quello che restituiscono le API) in float32 -1..1."""
+    """16-bit little-endian PCM (what the APIs return) to float32 -1..1."""
     usable = len(data) - (len(data) % 2)
     return np.frombuffer(data[:usable], dtype="<i2").astype(np.float32) / 32768.0
 
 
 def silence(sample_rate: int, engine: str) -> Speech:
-    """Il risultato di una frase vuota."""
+    """The result of an empty sentence."""
     return Speech(samples=np.zeros(0, dtype=np.float32), sample_rate=sample_rate, text="", meta={"engine": engine})
 
 
 class TTSEngine(ABC):
-    """Contratto minimo che ogni backend TTS deve rispettare."""
+    """Minimal contract every TTS backend must follow."""
 
-    #: Nome breve dell'engine, esposto via /api/health.
+    #: Short name of the engine, exposed via /api/health.
     name: str = "tts"
-    #: Voce usata quando non ne viene chiesta una (o quella chiesta non esiste).
+    #: Voice used when none is asked for (or the requested one doesn't exist).
     default_voice: str = ""
-    #: Sa clonare una voce da un file audio (``add_voice`` / ``remove_voice``).
+    #: It can clone a voice from an audio file (``add_voice`` / ``remove_voice``).
     can_clone: bool = False
 
     @abstractmethod
@@ -95,18 +95,18 @@ class TTSEngine(ABC):
         voice: str | None = None,
         speed: float | None = None,
     ) -> Speech:
-        """Sintetizza ``text`` e restituisce audio mono float32 in -1..1."""
+        """Synthesizes ``text`` and returns mono float32 audio in -1..1."""
 
     @abstractmethod
     def voices(self) -> list[str]:
-        """Elenco degli id delle voci disponibili."""
+        """List of the available voice ids."""
 
     def voice_catalog(self) -> list[VoiceInfo]:
-        """Le voci con nome, lingua e genere, per il selettore del pannello.
+        """The voices with name, language and gender, for the panel's picker.
 
-        Il default ricava cio' che puo' dagli id: le voci Kokoro dicono lingua e
-        genere nelle prime due lettere (``if_sara``), quelle Microsoft e Google
-        nel prefisso (``it-IT-ElsaNeural``).
+        The default derives what it can from the ids: Kokoro voices say language and
+        gender in the first two letters (``if_sara``), Microsoft and Google ones in
+        the prefix (``it-IT-ElsaNeural``).
         """
         catalog = []
         for voice in self.voices():
@@ -118,11 +118,11 @@ class TTSEngine(ABC):
         return catalog
 
     def language_of(self, voice: str | None) -> str | None:
-        """Lingua che la voce sa pronunciare, o ``None`` se e' multilingua.
+        """The language the voice can pronounce, or ``None`` if it's multilingual.
 
-        Serve a decidere in che lingua deve rispondere il cervello: una voce
-        inglese che legge l'italiano e' incomprensibile, mentre una voce
-        multilingua (ElevenLabs, OpenAI) sta bene con qualunque lingua.
+        Needed to decide which language the brain must answer in: an English voice
+        reading Italian is incomprehensible, while a multilingual voice (ElevenLabs,
+        OpenAI) is fine with any language.
         """
         info = kokoro_voice_info(voice or "")
         if info:
@@ -132,12 +132,12 @@ class TTSEngine(ABC):
         return locale_language(voice) or None
 
     def voice_for_language(self, language: str, catalog: list[VoiceInfo] | None = None) -> str | None:
-        """Una voce di questo motore che parla ``language`` (``it``), o ``None``.
+        """A voice of this engine that speaks ``language`` (``it``), or ``None``.
 
-        Serve a partire nella lingua del sistema quando nessuno ha scelto una
-        voce. Se la predefinita parla gia' quella lingua, o e' multilingua,
-        resta lei. Fra le candidate si preferisce la voce consigliata (Kokoro),
-        poi una dello stesso genere della predefinita.
+        Needed to start in the system's language when nobody chose a voice. If the
+        default already speaks that language, or is multilingual, it stays. Among
+        the candidates the recommended voice is preferred (Kokoro), then one of the
+        same gender as the default.
         """
         code = short_language(language)
         if not code:
@@ -157,11 +157,11 @@ class TTSEngine(ABC):
         return matches[0].id
 
     def resolve_voice(self, requested: str | None) -> str:
-        """La voce richiesta se questo motore la conosce, altrimenti la sua predefinita.
+        """The requested voice if this engine knows it, otherwise its default.
 
-        Le voci sono specifiche del motore: ``af_heart`` e' un nome Kokoro e non
-        esiste su ElevenLabs. Passando da un motore all'altro la voce salvata
-        non deve far fallire la sintesi.
+        Voices are engine-specific: ``af_heart`` is a Kokoro name and doesn't exist
+        on ElevenLabs. Moving from one engine to another, the saved voice must not
+        make the synthesis fail.
         """
         if requested:
             known = self.voices()
@@ -170,18 +170,18 @@ class TTSEngine(ABC):
         return self.default_voice or (self.voices() or [""])[0]
 
     def check(self) -> dict[str, Any]:
-        """Verifica che il motore funzioni davvero (chiave valida, server acceso...).
+        """Checks that the engine really works (valid key, server on...).
 
-        Restituisce ``{"ok": bool, "detail": str, ...}``; i motori a consumo ci
-        aggiungono ``account`` con quanto resta del piano. Puo' fare rete: la
-        chiama il pannello quando premi "Verifica", mai il monitor.
+        Returns ``{"ok": bool, "detail": str, ...}``; pay-per-use engines add
+        ``account`` with how much of the plan is left. It may use the network: the
+        panel calls it when you press "Check", never the monitor.
         """
         voices = self.voices()
-        return {"ok": True, "detail": f"{len(voices)} voci disponibili"}
+        return {"ok": True, "detail": f"{len(voices)} voices available"}
 
     def phonemize(self, text: str, lang: str | None = None) -> str | None:
-        """Trascrizione IPA del testo, se il motore la espone."""
+        """IPA transcription of the text, if the engine exposes it."""
         return None
 
     def close(self) -> None:
-        """Rilascia eventuali risorse (sessioni ONNX, client HTTP, ...)."""
+        """Releases any resources (ONNX sessions, HTTP clients, ...)."""

@@ -1,4 +1,4 @@
-"""scripts/bvh2vrma.mjs: da un BVH in qualunque posa a una clip VRMA in T-pose."""
+"""scripts/bvh2vrma.mjs: from a BVH in any pose to a VRMA clip in T-pose."""
 
 import json
 import math
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _skeleton(facing: float) -> str:
-    """Scheletro in T-pose; ``facing`` = -1 lo gira di 180 gradi (guarda verso -Z)."""
+    """Skeleton in T-pose; ``facing`` = -1 turns it by 180 degrees (it faces -Z)."""
     s = facing
 
     def joint(name, x, y, z, body="", end=False):
@@ -42,13 +42,13 @@ def _skeleton(facing: float) -> str:
 
 
 def _bvh(facing: float) -> str:
-    channels = 6 + 3 * 20  # Hips con posizione, poi 20 giunti
+    channels = 6 + 3 * 20  # Hips with position, then 20 joints
     still = [0.0, 90.0, 0.0] + [0.0] * (channels - 3)
     raised = list(still)
-    # LeftArm e' il nono giunto (Hips 6 canali, poi 3 a testa): Z = -60 gradi alza il braccio.
+    # LeftArm is the ninth joint (Hips 6 channels, then 3 each): Z = -60 degrees raises the arm.
     order = ["Spine", "Spine1", "Neck", "Head", "LeftShoulder", "LeftArm"]
     index = 6 + 3 * order.index("LeftArm")
-    raised[index] = 60.0 * facing  # Zrotation: abbassata o alzata a seconda del verso
+    raised[index] = 60.0 * facing  # Zrotation: lowered or raised depending on the direction
     frames = [still, raised]
     motion = "MOTION\nFrames: 2\nFrame Time: 0.5\n" + "\n".join(" ".join(str(v) for v in row) for row in frames) + "\n"
     return _skeleton(facing) + motion
@@ -82,9 +82,9 @@ def test_mixamo_like_skeleton_becomes_a_vrma(tmp_path):
     document, binary = _convert(tmp_path, 1.0)
     bones = document["extensions"]["VRMC_vrm_animation"]["humanoid"]["humanBones"]
     assert {"hips", "spine", "chest", "neck", "head", "leftUpperArm", "rightLowerLeg", "leftToes"} <= set(bones)
-    # Primo fotogramma = T-pose: nessuna rotazione.
+    # First frame = T-pose: no rotation.
     assert _rotation(document, binary, "leftUpperArm", 0) == pytest.approx((0, 0, 0, 1), abs=1e-5)
-    # Poi il braccio sinistro ruota di 60 gradi attorno a Z.
+    # Then the left arm turns by 60 degrees around Z.
     x, y, z, w = _rotation(document, binary, "leftUpperArm", 1)
     assert (x, y) == pytest.approx((0, 0), abs=1e-4)
     assert abs(2 * math.degrees(math.atan2(z, w))) == pytest.approx(60, abs=0.5)

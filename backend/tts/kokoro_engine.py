@@ -1,7 +1,7 @@
-"""Motore Kokoro TTS in-process, basato su ``kokoro-onnx``.
+"""In-process Kokoro TTS engine, based on ``kokoro-onnx``.
 
-Gira interamente in locale: carica il modello ONNX (``kokoro-v1.0.onnx``) e il
-pacchetto di voci (``voices-v1.0.bin``) scaricati da ``scripts/download_models.py``.
+It runs entirely locally: it loads the ONNX model (``kokoro-v1.0.onnx``) and
+the voice pack (``voices-v1.0.bin``) downloaded by ``scripts/download_models.py``.
 """
 
 from __future__ import annotations
@@ -18,14 +18,14 @@ from .base import Speech, TTSEngine
 logger = logging.getLogger(__name__)
 
 DOWNLOAD_HINT = (
-    "Pesi Kokoro non trovati. Eseguili una volta con:\n"
+    "Kokoro weights not found. Run once:\n"
     "    python scripts/download_models.py\n"
-    "oppure imposta DC_KOKORO_MODEL / DC_KOKORO_VOICES sui percorsi corretti."
+    "or set DC_KOKORO_MODEL / DC_KOKORO_VOICES to the right paths."
 )
 
 
 class KokoroTTS(TTSEngine):
-    """Wrapper thread-safe attorno a ``kokoro_onnx.Kokoro``."""
+    """Thread-safe wrapper around ``kokoro_onnx.Kokoro``."""
 
     name = "kokoro"
 
@@ -43,16 +43,16 @@ class KokoroTTS(TTSEngine):
             raise FileNotFoundError(f"{DOWNLOAD_HINT}\nMancano: {names}")
 
         try:
-            from kokoro_onnx import Kokoro  # import pigro: pesa ~1 s
-        except ImportError as exc:  # pragma: no cover - dipende dall'ambiente
+            from kokoro_onnx import Kokoro  # lazy import: it weighs ~1 s
+        except ImportError as exc:  # pragma: no cover - depends on the environment
             raise RuntimeError(
-                "Il pacchetto 'kokoro-onnx' non e' installato. "
+                "The 'kokoro-onnx' package is not installed. "
                 "Esegui: pip install -r requirements.txt"
             ) from exc
 
-        logger.info("Carico Kokoro da %s", model_path)
+        logger.info("Loading Kokoro from %s", model_path)
         self._kokoro = Kokoro(str(model_path), str(voices_path))
-        self._lock = threading.Lock()  # onnxruntime + una sola sessione
+        self._lock = threading.Lock()  # onnxruntime + a single session
         self.default_voice = default_voice
         self.default_speed = default_speed
         self.language = language
@@ -68,7 +68,7 @@ class KokoroTTS(TTSEngine):
             if callable(getter):
                 try:
                     names = sorted(str(v) for v in getter())
-                except Exception:  # pragma: no cover - API opzionale
+                except Exception:  # pragma: no cover - optional API
                     names = []
             if not names:
                 raw = getattr(self._kokoro, "voices", None)
@@ -95,16 +95,16 @@ class KokoroTTS(TTSEngine):
 
         chosen_voice = voice or self.default_voice
         chosen_speed = float(speed if speed is not None else self.default_speed)
-        # La pronuncia segue la voce: if_sara legge in italiano anche se
-        # DC_LANGUAGE e' rimasto su en-us.
+        # The pronunciation follows the voice: if_sara reads in Italian even if
+        # DC_LANGUAGE stayed on en-us.
         lang = voice_language(chosen_voice, self.language)
 
         with self._lock:
             samples, sample_rate, timings = self._create(clean, chosen_voice, chosen_speed, lang)
 
         audio = np.asarray(samples, dtype=np.float32).reshape(-1)
-        # La trascrizione IPA serve solo se mancano i timing esatti: evitiamo
-        # di chiamare espeak per niente.
+        # The IPA transcription is needed only if the exact timings are missing: we
+        # avoid calling espeak for nothing.
         phonemes = None if timings else self.phonemize(clean, lang)
 
         return Speech(
@@ -122,12 +122,12 @@ class KokoroTTS(TTSEngine):
         )
 
     def _create(self, text: str, voice: str, speed: float, lang: str):
-        """Sintetizza chiedendo i tempi per fonema, con fallback su ``create``.
+        """Synthesizes asking for the per-phoneme timings, falling back on ``create``.
 
-        ``create_timed`` restituisce i timing solo se il modello ONNX espone
-        l'output delle durate; in caso contrario (o su versioni piu' vecchie
-        della libreria) ripieghiamo sulla sintesi normale e il tempismo viene
-        ricostruito dall'energia dell'audio.
+        ``create_timed`` returns the timings only if the ONNX model exposes the
+        durations output; otherwise (or on older versions of the library) we fall
+        back to the normal synthesis and the timing is rebuilt from the audio's
+        energy.
         """
         if not self._timed_broken:
             try:
@@ -141,12 +141,12 @@ class KokoroTTS(TTSEngine):
                 ]
                 if converted:
                     return samples, sample_rate, converted
-                # Nessun timing disponibile: inutile richiederli ogni volta.
+                # No timing available: no point asking for it every time.
                 self._timed_broken = True
-                logger.info("Il modello non espone le durate: uso l'allineamento sull'audio")
+                logger.info("The model doesn't expose the durations: using the alignment on the audio")
                 return samples, sample_rate, None
             except (AttributeError, TypeError) as exc:
-                logger.info("create_timed non disponibile (%s): uso create()", exc)
+                logger.info("create_timed unavailable (%s): using create()", exc)
                 self._timed_broken = True
 
         samples, sample_rate = self._kokoro.create(text, voice=voice, speed=speed, lang=lang)
@@ -154,11 +154,11 @@ class KokoroTTS(TTSEngine):
 
     # ------------------------------------------------------------------
     def phonemize(self, text: str, lang: str | None = None) -> str | None:
-        """Prova a ottenere l'IPA dal tokenizer interno di kokoro-onnx.
+        """Tries to get the IPA from kokoro-onnx's internal tokenizer.
 
-        L'API e' cambiata tra le versioni della libreria, quindi tentiamo le
-        firme note in ordine e memorizziamo l'eventuale fallimento per non
-        ripetere il tentativo a ogni frase.
+        The API changed between the library's versions, so we try the known
+        signatures in order and remember a failure so as not to retry at every
+        sentence.
         """
         if self._phonemizer_broken:
             return None
@@ -180,8 +180,8 @@ class KokoroTTS(TTSEngine):
                 result = attempt()
             except TypeError:
                 continue
-            except Exception as exc:  # pragma: no cover - espeak assente, ecc.
-                logger.warning("Phonemizer non disponibile (%s), uso il G2P interno", exc)
+            except Exception as exc:  # pragma: no cover - espeak missing, etc.
+                logger.warning("Phonemizer unavailable (%s), using the internal G2P", exc)
                 self._phonemizer_broken = True
                 return None
             if isinstance(result, (list, tuple)):

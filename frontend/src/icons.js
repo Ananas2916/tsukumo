@@ -1,6 +1,6 @@
 /**
- * Icone a tratto (24x24, stile Lucide), disegnate qui per non dipendere dalla
- * rete: la mascotte deve funzionare anche offline.
+ * Line icons (24x24, Lucide style), drawn here so as not to depend on the
+ * network: the mascot must work offline too.
  */
 
 const PATHS = {
@@ -14,10 +14,12 @@ const PATHS = {
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   chat: '<path d="M21 11.5a8.5 8.5 0 0 1-12.4 7.6L3 21l1.9-5.5A8.5 8.5 0 1 1 21 11.5z"/>',
   character: '<circle cx="12" cy="7.5" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
-  // La fiammella (flame.js): una goccia con due occhi.
+  // The flame (flame.js): a drop with two eyes.
   flame: '<path d="M12 2.5c3.6 4.2 6.5 7.7 6.5 11.5a6.5 6.5 0 0 1-13 0c0-3.8 2.9-7.3 6.5-11.5z"/><path d="M10 14.5v.5M14 14.5v.5"/>',
+  // The 3D body with the flame in its chest: entering it, or giving her one.
+  body: '<circle cx="12" cy="5.5" r="3"/><path d="M4.5 21.5v-3a7.5 7.5 0 0 1 15 0v3"/><path d="M12 12.5c1.2 1.4 2 2.5 2 3.6a2 2 0 0 1-4 0c0-1.1.8-2.2 2-3.6z"/>',
   bolt: '<path d="M13 2.5 4.5 13.5H11l-1 8 8.5-11H12z"/>',
-  // Quanto hanno consumato gli agenti: un contagiri.
+  // How much the agents have used: a rev counter.
   gauge: '<path d="M4.2 17.5a9 9 0 1 1 15.6 0"/><path d="m12 14 4-5"/><circle cx="12" cy="14" r="1.4"/>',
   briefcase: '<rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M8.5 7.5V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v2M3 13h18"/>',
   engines:
@@ -51,6 +53,15 @@ const PATHS = {
   smile: '<circle cx="12" cy="12" r="9.5"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>',
   moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  forward: '<path d="m9 18 6-6-6-6"/>',
+  circle: '<circle cx="12" cy="12" r="8"/>',
+  minimize: '<path d="M5 12h14"/>',
+  maximize: '<rect x="5" y="5" width="14" height="14" rx="2.5"/>',
+  dashboard: '<rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5" rx="2"/><rect x="13.5" y="11" width="7.5" height="10" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/>',
+  calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  rain: '<path d="M17.5 15H7a5 5 0 1 1 1-9.9A6 6 0 0 1 19.5 7a4 4 0 0 1-2 8z"/><path d="M8 19l-1 2M12 19l-1 2M16 19l-1 2"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   clip: '<path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
   screen: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
@@ -63,13 +74,16 @@ const PATHS = {
   gift: '<path d="M20 12v9H4v-9M2 7h20v5H2zM12 21V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>',
   repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
   wave: '<path d="M2 12h2M6 8v8M10 5v14M14 8v8M18 10v4M22 12h0"/>',
+  school: '<path d="M2 9.5 12 4.5l10 5-10 5z"/><path d="M6 11.5v4.5c3.5 2.5 8.5 2.5 12 0v-4.5M22 9.5v6"/>',
   book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
   sit: '<circle cx="12" cy="5" r="2.5"/><path d="M9 21v-5h6l2 5M9 16l1-7h4l1 7"/>',
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 16 0v-2a2 2 0 0 0-4 0"/>',
   dots: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  // The flame's wardrobe: a hanger.
+  hanger: '<path d="M10 6.5a2 2 0 1 1 2.6 1.9c-.4.1-.6.5-.6.9V10"/><path d="M12 10 3.6 15.6c-.9.6-.5 1.9.6 1.9h15.6c1.1 0 1.5-1.3.6-1.9z"/>',
 };
 
-/** Markup SVG di un'icona: le forme sono costanti, niente di iniettabile. */
+/** SVG markup of an icon: the shapes are constants, nothing injectable. */
 export function iconSvg(name, size = 18) {
   const body = PATHS[name] ?? PATHS.dots;
   return (
@@ -78,7 +92,7 @@ export function iconSvg(name, size = 18) {
   );
 }
 
-/** Nodo DOM di un'icona. */
+/** DOM node of an icon. */
 export function icon(name, size = 18) {
   const holder = document.createElement('span');
   holder.className = 'icon-holder';

@@ -1,29 +1,30 @@
 /**
- * Orchestrazione dell'input vocale.
+ * Orchestration of voice input.
  *
- * Tiene insieme tre cose che da sole non bastano: il microfono (`mic.js`), il
- * WebSocket verso il backend e lo stato del companion. La regola che le lega
- * e' una sola ma non e' ovvia: **mentre il companion parla il microfono non
- * ascolta**. Senza cuffie sentirebbe la propria voce, la scambierebbe per una
- * domanda e si risponderebbe da solo all'infinito.
+ * It ties together three things that aren't enough on their own: the
+ * microphone (`mic.js`), the WebSocket to the backend and the companion's
+ * state. The rule that binds them is a single one but not obvious: **while
+ * the companion speaks the microphone doesn't listen**. Without headphones
+ * it would hear its own voice, take it for a question and answer itself
+ * forever.
  *
- * L'eccezione e' voluta: in `push` (premi e parla) l'utente sta deliberatamente
- * tenendo premuto, quindi lo lasciamo interrompere — e' il modo naturale per
- * dire "basta, ascoltami".
+ * The exception is deliberate: in `push` (push to talk) the user is holding
+ * the key on purpose, so we let them interrupt — it's the natural way to
+ * say "stop, listen to me".
  *
- * Con "interrompila parlando" acceso (`bargeIn`) anche in ascolto continuo e a
- * chiamata il microfono resta aperto mentre lei parla, ma sorvegliato: serve
- * una voce forte e sostenuta (mic.js, `setGuarded`), e il backend scarta le
- * trascrizioni che sono la sua stessa voce (pipeline, `is_echo`).
+ * With "interrupt her by talking" on (`bargeIn`), in continuous and wake-word
+ * listening too the microphone stays open while she speaks, but guarded: it
+ * takes a loud, sustained voice (mic.js, `setGuarded`), and the backend
+ * drops transcriptions that are her own voice (pipeline, `is_echo`).
  */
 
 import { readSetting } from './dom.js';
 import { MIC_SETTING, VoiceInput, matchesWakeWord, toBase64 } from './mic.js';
 
-/** Chiave dell'impostazione "interrompila parlando" (vale per `vad` e `wake`). */
+/** Key of the "interrupt her by talking" setting (applies to `vad` and `wake`). */
 export const BARGE_IN_SETTING = 'dc:barge-in';
 
-/** I modi disponibili, nell'ordine in cui compaiono nel pannello. */
+/** The available modes, in the order they appear in the panel. */
 export const MODES = ['push', 'vad', 'wake'];
 
 export class VoiceController {
@@ -40,11 +41,11 @@ export class VoiceController {
     this.wakeWord = 'companion';
     this.enabled = false;
     this.interruptOnSpeech = true;
-    /** In ascolto continuo o a chiamata la si puo' interrompere parlando. */
+    /** In continuous or wake-word listening she can be interrupted by talking. */
     this.bargeIn = readSetting(BARGE_IN_SETTING, true);
-    /** Il companion sta parlando in questo momento. */
+    /** The companion is speaking right now. */
     this.speaking = false;
-    /** Il pannello sta provando il microfono: quello che senti non e' per lei. */
+    /** The panel is testing the microphone: what you hear isn't for her. */
     this.paused = false;
     this.deviceId = readSetting(MIC_SETTING, '');
     this._options = {};
@@ -62,7 +63,7 @@ export class VoiceController {
     return this.enabled && this.mic.active;
   }
 
-  /** Accende l'ascolto. Va invocato da un gesto dell'utente (permesso microfono). */
+  /** Turns listening on. Must be called from a user gesture (microphone permission). */
   async enable({ mode = this.mode, wakeWord = this.wakeWord, threshold, silenceSeconds } = {}) {
     this.mode = mode;
     this.wakeWord = wakeWord;
@@ -104,7 +105,7 @@ export class VoiceController {
     this.wakeWord = word;
   }
 
-  /** Cambia microfono; se sta gia' ascoltando lo riapre sul nuovo. */
+  /** Changes microphone; if already listening, reopens it on the new one. */
   async setDevice(deviceId) {
     this.deviceId = deviceId || '';
     if (!this.listening) return;
@@ -112,14 +113,14 @@ export class VoiceController {
     await this.enable({ mode: this.mode, wakeWord: this.wakeWord, ...this._options });
   }
 
-  /** Sospende l'ascolto mentre il pannello prova il microfono. */
+  /** Pauses listening while the panel tests the microphone. */
   setPaused(paused) {
     this.paused = Boolean(paused);
     this._applyMute();
   }
 
   /**
-   * Lo stato del companion cambia: qui decidiamo se il microfono deve tacere.
+   * The companion's state changes: here we decide whether the microphone must be quiet.
    * @param {'idle'|'thinking'|'speaking'} value
    */
   setCompanionState(value) {
@@ -127,28 +128,28 @@ export class VoiceController {
     this._applyMute();
   }
 
-  /** Accende o spegne "interrompila parlando". */
+  /** Turns "interrupt her by talking" on or off. */
   setBargeIn(enabled) {
     this.bargeIn = Boolean(enabled);
     this._applyMute();
   }
 
   _applyMute() {
-    // In `push` comanda l'utente: non silenziamo mai il suo pulsante.
+    // In `push` the user is in charge: we never mute their button.
     const handsFree = this.speaking && this.mode !== 'push';
     this.mic.setGuarded(handsFree && this.bargeIn && !this.paused);
     this.mic.setMuted(this.paused || (handsFree && !this.bargeIn));
   }
 
-  /** Premuto il tasto del push-to-talk. */
+  /** Push-to-talk key pressed. */
   pushStart() {
     if (!this.listening || this.mode !== 'push') return;
-    // Parlare sopra al companion significa volerlo interrompere.
+    // Talking over the companion means wanting to interrupt it.
     if (this.speaking && this.interruptOnSpeech) this.socket.cancel();
     this.mic.beginPush();
   }
 
-  /** Rilasciato il tasto del push-to-talk. */
+  /** Push-to-talk key released. */
   pushEnd() {
     if (this.mode !== 'push') return;
     this.mic.endPush();
@@ -159,7 +160,7 @@ export class VoiceController {
     this.onEvent({ type: 'activity', speaking });
   }
 
-  /** Qualcuno ha parlato sopra di lei (ascolto sorvegliato): si ferma e ascolta. */
+  /** Someone talked over her (guarded listening): she stops and listens. */
   _onBargeIn() {
     if (!this.interruptOnSpeech) return;
     this.socket.cancel();
@@ -175,17 +176,17 @@ export class VoiceController {
       return;
     }
 
-    // Nel modo a chiamata non sappiamo se la frase e' per noi finche' non e'
-    // trascritta: la mandiamo senza farla rispondere e decidiamo dopo, in
+    // In wake-word mode we don't know whether the sentence is for us until it's
+    // transcribed: we send it without a reply and decide later, in
     // `handleTranscript`.
     this._pendingWake = true;
     this.socket.voice(audio, false);
   }
 
   /**
-   * Da agganciare al messaggio `transcript` del backend.
-   * Nel modo a chiamata e' qui che si decide se la frase era rivolta a noi.
-   * @returns {boolean} true se la frase e' stata inoltrata come domanda
+   * To be hooked to the backend's `transcript` message.
+   * In wake-word mode this is where we decide whether the sentence was for us.
+   * @returns {boolean} true if the sentence was forwarded as a question
    */
   handleTranscript(text, echo = false) {
     if (this.mode !== 'wake' || !this._pendingWake) return false;
@@ -201,7 +202,7 @@ export class VoiceController {
       return false;
     }
     if (!stripped.trim()) {
-      // Ha detto solo il nome: rispondiamo come a una chiamata.
+      // Only her name was said: we answer as to a call.
       this.onEvent({ type: 'summoned' });
       this.socket.chat('?');
       return true;

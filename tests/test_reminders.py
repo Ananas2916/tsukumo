@@ -1,4 +1,4 @@
-"""Timer e promemoria: frasi naturali, etichette del cervello, archivio, comandi."""
+"""Timers and reminders: natural sentences, the brain's tags, store, commands."""
 
 import json
 from datetime import datetime, timedelta
@@ -12,14 +12,16 @@ from backend.reminders import (
     announcement,
     command_reply,
     confirmation,
+    confirmations,
     from_tag,
     parse_duration,
     parse_request,
+    parse_requests,
     second_person,
     speak_duration,
 )
 
-NOW = datetime(2026, 9, 26, 1, 12)  # un sabato all'una di notte
+NOW = datetime(2026, 9, 26, 1, 12)  # a Saturday at one in the morning
 
 
 @pytest.mark.parametrize(
@@ -38,6 +40,13 @@ NOW = datetime(2026, 9, 26, 1, 12)  # un sabato all'una di notte
         ("ricordami lunedì alle 10 di pagare la bolletta", "reminder", "28/09 10:00", "pagare la bolletta", "it"),
         ("ricordami tra un'ora e mezza di togliere il bucato", "reminder", "26/09 02:42", "togliere il bucato", "it"),
         ("ricordami tra 2 ore e 10 minuti di spegnere il forno", "reminder", "26/09 03:22", "spegnere il forno", "it"),
+        # The day comes from "tra", the hour from the time: "alle 10" doesn't stay in the text.
+        ("ricordami tra 2 giorni alle 10 dell'esame di analisi", "reminder", "28/09 10:00", "dell'esame di analisi", "it"),
+        ("fra una settimana alle 18:30 ricordami la palestra", "reminder", "03/10 18:30", "la palestra", "it"),
+        # "di sera" belongs to the time: it doesn't end up in the reminder text.
+        ("ricordami tra 2 giorni alle 9 di sera di chiamare Marco", "reminder", "28/09 21:00", "chiamare Marco", "it"),
+        ("remind me in 2 days at 7 in the morning to run", "reminder", "28/09 07:00", "run", "en"),
+        ("remind me in 3 days at 9am to renew the passport", "reminder", "29/09 09:00", "renew the passport", "en"),
         ("all'una e mezza ricordami di dormire", "reminder", "26/09 01:30", "dormire", "it"),
         ("svegliami alle 7 e mezza", "alarm", "26/09 07:30", "", "it"),
         ("remind me to stretch in 20 minutes", "reminder", "26/09 01:32", "stretch", "en"),
@@ -56,16 +65,57 @@ def test_natural_requests(phrase, kind, due, text, language):
     "phrase",
     [
         "dimmi una barzelletta",
-        "dimmi cosa fare domani",  # "dimmi" + solo una data: non e' un promemoria
+        "dimmi cosa fare domani",  # "dimmi" + only a date: not a reminder
         "devo studiare",
         "quanti giorni mancano a natale?",
         "che tempo fa domani?",
-        "timer",  # senza durata
-        "ricordami di chiamare il 1/1/2020",  # nel passato
+        "timer",  # no duration
+        "ricordami di chiamare il 1/1/2020",  # in the past
+        "come aggiungo un evento al calendario domani?",  # a question, not a request
+        "cosa ho in agenda giovedì?",
     ],
 )
 def test_ordinary_sentences_are_not_reminders(phrase):
     assert parse_request(phrase, NOW) is None
+
+
+@pytest.mark.parametrize(
+    ("phrase", "explicit", "dues", "text"),
+    [
+        # Said in chat from the phone: "agenda"/"calendario" count as much as "ricordami".
+        (
+            "aggiungi al calendario un evento reti logiche compito e trovare compagno mettilo per giovedi venerdi sabato e domenica",
+            False,
+            ["01/10 09:00", "02/10 09:00", "03/10 09:00", "27/09 09:00"],
+            "reti logiche compito e trovare compagno",
+        ),
+        ("ricordami giovedì e venerdì alle 18 di andare in palestra", False, ["01/10 18:00", "02/10 18:00"], "andare in palestra"),
+        ("add the exam to my calendar on friday and saturday", False, ["02/10 09:00", "03/10 09:00"], "the exam"),
+        # The Agenda's field is already a request: the day is enough.
+        ("reti logiche compito giovedì, venerdì, sabato e domenica", True, ["01/10 09:00", "02/10 09:00", "03/10 09:00", "27/09 09:00"], "reti logiche compito"),
+        ("domani dentista", True, ["27/09 09:00"], "dentista"),
+        # A later date is part of the thing to remember, not of the list.
+        ("ricordami domani di preparare la riunione di lunedì", False, ["27/09 09:00"], "preparare la riunione di lunedì"),
+        # Every day already repeats by itself.
+        ("ogni giorno ricordami di bere lunedì e martedì alle 9", False, ["28/09 09:00"], "bere"),
+    ],
+)
+def test_one_phrase_several_days(phrase, explicit, dues, text):
+    requests = parse_requests(phrase, NOW, explicit=explicit)
+    assert sorted(request.due.strftime("%d/%m %H:%M") for request in requests) == sorted(dues)
+    assert {request.text for request in requests} == {text}
+
+
+def test_agenda_field_still_needs_a_day():
+    assert parse_requests("riunione", NOW, explicit=True) == []
+    assert parse_request("giovedì riunione", NOW) is None  # in chat, without "ricordami", the brain decides
+
+
+def test_several_days_are_confirmed_together():
+    requests = parse_requests("ricordami giovedì e venerdì alle 18 di andare in palestra", NOW)
+    reminders = [request.to_reminder() for request in requests]
+    assert confirmations(reminders, NOW) == "Va bene, giovedì 1 e venerdì 2 alle 18:00 ti ricordo di andare in palestra."
+    assert confirmations(reminders[:1], NOW) == confirmation(reminders[0], NOW)
 
 
 def test_every_day_repeats_from_the_next_occurrence():
@@ -148,7 +198,7 @@ def test_commands_cancel_remaining_and_list():
 
 
 def test_daily_reminder_keeps_the_wall_clock_across_dst(tmp_path):
-    """Una sveglia delle 7 resta alle 7 anche dopo il cambio dell'ora (25 ottobre 2026 in Italia)."""
+    """A 7 o'clock alarm stays at 7 even after the clock change (25 October 2026 in Italy)."""
     from datetime import datetime
 
     from backend.reminders import Reminder, ReminderStore
@@ -159,3 +209,24 @@ def test_daily_reminder_keeps_the_wall_clock_across_dst(tmp_path):
     store.done(reminder, now=due + 1)
     following = datetime.fromtimestamp(store.get(reminder.id).due)
     assert (following.year, following.month, following.day, following.hour, following.minute) == (2026, 10, 25, 7, 0)
+
+
+@pytest.mark.parametrize(
+    ("phrase", "due", "text"),
+    [
+        # From the phone, on 6 October: "il 31" without a month and "aggiungi" without "calendario".
+        ("Aggiungi il 31 Cinema con Giulia", "31/10 09:00", "Cinema con Giulia"),
+        ("segna il 3 alle 18 dentista", "03/10 18:00", "dentista"),
+        ("puoi aggiungere il 15 esame di analisi?", "15/10 09:00", "esame di analisi"),
+        ("ricordami il 30 di pagare l'affitto", "30/09 09:00", "pagare l'affitto"),
+    ],
+)
+def test_day_of_month_alone_and_add_first(phrase, due, text):
+    # NOW is Saturday 26 September: September has no 31st, so it's 31 October.
+    [request] = parse_requests(phrase, NOW)
+    assert (request.due.strftime("%d/%m %H:%M"), request.text) == (due, text)
+
+
+@pytest.mark.parametrize("phrase", ["il 31% delle persone", "aggiungi il sale", "ho preso 28 il 31 maggio", "come aggiungo il 31 al calendario?"])
+def test_numbers_that_are_not_requests(phrase):
+    assert parse_requests(phrase, NOW) == []

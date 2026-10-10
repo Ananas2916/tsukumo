@@ -1,4 +1,4 @@
-"""File allegati e screenshot: agli agenti i percorsi, ai modelli il contenuto."""
+"""Attached files and screenshots: paths for agents, content for models."""
 
 import base64
 from pathlib import Path
@@ -43,7 +43,7 @@ def files(tmp_path):
 
 def test_prepare_keeps_only_real_files(files, tmp_path):
     note, image, blob = files
-    found = prepare([str(note), str(image), str(blob), str(tmp_path / "manca.txt"), "", 42])
+    found = prepare([str(note), str(image), str(blob), str(tmp_path / "missing.txt"), "", 42])
     assert [(item.name, item.kind) for item in found] == [("appunti.md", "text"), ("foto.png", "image"), ("archivio.zip", "other")]
     assert found[1].mime == "image/png"
 
@@ -77,7 +77,7 @@ def test_agents_get_permission_to_read_the_files(tmp_path):
     codex = CodexClient(command="codex", cwd=str(tmp_path))
     codex.executable = "codex"
     argv = codex.build_argv(("a.png", "b.png"))
-    # -i prende piu' valori: subito dopo le immagini deve venire un'altra opzione.
+    # -i takes several values: right after the images another option must follow.
     assert argv[argv.index("-i") : argv.index("-i") + 4] == ["-i", "a.png", "-i", "b.png"]
     assert argv[argv.index("b.png") + 1].startswith("-") and argv[-1] == "-"
 

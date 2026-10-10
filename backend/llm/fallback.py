@@ -1,9 +1,8 @@
-"""Piu' modelli in fila: se uno non risponde prova il successivo.
+"""Several models in a row: if one doesn't answer, try the next.
 
-Serve soprattutto ai modelli gratuiti (OpenRouter ``:free`` e simili): li
-condividono tutti, e a volte il fornitore risponde 429 "rate-limited
-upstream" per qualche minuto. Con due o tre modelli in fila il commento
-arriva lo stesso.
+Mostly for free models (OpenRouter ``:free`` and the like): everyone shares
+them, and sometimes the provider answers 429 "rate-limited upstream" for a
+few minutes. With two or three models in a row the comment arrives anyway.
 """
 
 from __future__ import annotations
@@ -18,15 +17,15 @@ logger = logging.getLogger(__name__)
 
 
 class FallbackLLM(LLMClient):
-    """Prova i client in ordine, passando al successivo solo prima del primo frammento.
+    """Tries the clients in order, moving to the next only before the first chunk.
 
-    A risposta iniziata un errore resta un errore: ricominciare con un altro
-    modello farebbe sentire due frasi attaccate a meta'.
+    Once the reply has started an error stays an error: starting again with
+    another model would make two sentences sound glued halfway.
     """
 
     def __init__(self, clients: list[LLMClient], name: str) -> None:
         if not clients:
-            raise ValueError("Serve almeno un modello")
+            raise ValueError("At least one model is needed")
         self.clients = clients
         self.name = name
 
@@ -43,9 +42,9 @@ class FallbackLLM(LLMClient):
                 if produced:
                     raise
                 model = getattr(client, "model", "") or client.name
-                logger.info("%s non ha risposto (%s): provo il prossimo", model, describe_error(exc))
+                logger.info("%s didn't answer (%s): trying the next one", model, describe_error(exc))
                 errors.append(f"{model}: {describe_error(exc)}")
-        raise RuntimeError("Nessun modello ha risposto. " + " | ".join(errors))
+        raise RuntimeError("No model answered. " + " | ".join(errors))
 
     async def health(self) -> dict[str, Any]:
         return await self.clients[0].health()

@@ -1,7 +1,8 @@
-' Avvia Tsukumo senza terminale: doppio click (o il collegamento sul
-' desktop). Electron mostra subito il personaggio con un biglietto d'attesa,
-' avvia da solo il backend Python e scrive tutto in logs\companion.log:
-' se qualcosa non parte, il motivo e' li' (o nel biglietto stesso).
+' Starts Tsukumo without a terminal: double click (or the desktop
+' shortcut). Electron shows the character right away with a waiting card,
+' starts the Python backend by itself and writes everything to
+' logs\companion.log: if something doesn't start, the reason is there (or on
+' the card itself).
 
 Option Explicit
 
@@ -15,23 +16,23 @@ electronExe = electronDir & "\node_modules\electron\dist\electron.exe"
 logDir = root & "\logs"
 
 If Not fso.FileExists(electronExe) Then
-    MsgBox "Electron non e' installato." & vbCrLf & vbCrLf & _
-        "Esegui una volta:  .\start.ps1 -Setup", vbExclamation, "Tsukumo"
+    MsgBox "Electron is not installed." & vbCrLf & vbCrLf & _
+        "Run once:  .\start.ps1 -Setup", vbExclamation, "Tsukumo"
     WScript.Quit 1
 End If
 If Not fso.FileExists(root & "\frontend\dist\index.html") Then
-    MsgBox "L'interfaccia non e' compilata." & vbCrLf & vbCrLf & _
-        "Esegui una volta:  .\start.ps1 -Setup", vbExclamation, "Tsukumo"
+    MsgBox "The interface is not built." & vbCrLf & vbCrLf & _
+        "Run once:  .\start.ps1 -Setup", vbExclamation, "Tsukumo"
     WScript.Quit 1
 End If
 If Not fso.FolderExists(logDir) Then fso.CreateFolder logDir
 
-' Se questa variabile e' impostata Electron parte come Node e non apre finestre.
+' With this variable set Electron starts as Node and opens no windows.
 On Error Resume Next
 shell.Environment("Process").Remove "ELECTRON_RUN_AS_NODE"
 On Error GoTo 0
 
-' Il processo figlio eredita l'ambiente di questo script: cosi' sa dove scrivere.
+' The child process inherits this script's environment: that's how it knows where to write.
 shell.Environment("Process")("DC_LOG_FILE") = logDir & "\companion.log"
 
 shell.CurrentDirectory = electronDir

@@ -1,7 +1,7 @@
-"""Agenti da riga di comando: parser degli eventi e gestione dei processi.
+"""Command-line agents: event parsers and process handling.
 
-Le righe JSON qui sotto sono ridotte da quelle stampate davvero da
-``claude -p --output-format stream-json`` e ``codex exec --json`` (settembre 2026).
+The JSON lines below are trimmed from those really printed by
+``claude -p --output-format stream-json`` and ``codex exec --json`` (September 2026).
 """
 
 import asyncio
@@ -56,7 +56,7 @@ def test_claude_partial_messages_are_read_once():
             event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": "ao"}},
             parent_tool_use_id=None,
         ),
-        # Il riepilogo arriva di nuovo intero: non va letto due volte.
+        # The summary comes again in full: it must not be read twice.
         _line(type="assistant", message={"id": "m1", "content": [{"type": "text", "text": "Ciao"}]}, parent_tool_use_id=None),
         _line(type="result", subtype="success", is_error=False, result="Ciao", session_id=SID),
     ]
@@ -70,7 +70,7 @@ def test_claude_without_partials_and_after_a_tool_starts_a_new_sentence():
     lines = [
         _line(type="assistant", message={"id": "m1", "content": [{"type": "text", "text": "Controllo il meteo."}]}),
         _line(type="assistant", message={"id": "m1", "content": [{"type": "tool_use", "name": "WebSearch"}]}),
-        # I sotto-agenti non parlano con te.
+        # Sub-agents don't talk to you.
         _line(type="assistant", message={"id": "x", "content": [{"type": "text", "text": "segreto"}]}, parent_tool_use_id="t1"),
         _line(type="assistant", message={"id": "m2", "content": [{"type": "text", "text": "Domani piove."}]}),
         _line(type="result", subtype="success", is_error=False, result="Domani piove.", session_id=SID),
@@ -136,18 +136,18 @@ def test_stream_process_streams_lines_and_reports_failures():
     with pytest.raises(AgentError, match="rotto"):
         asyncio.run(collect([sys.executable, "-c", "import sys; sys.stderr.write('rotto'); sys.exit(3)"]))
 
-    with pytest.raises(AgentError, match="secondi"):
+    with pytest.raises(AgentError, match="seconds"):
         asyncio.run(collect([sys.executable, "-c", "import time; time.sleep(30)"], timeout=1))
 
 
 def test_missing_program_is_reported_clearly():
     client = CommandAgentClient("programma-che-non-esiste-davvero --x")
     health = asyncio.run(client.health())
-    assert health["ok"] is False and "non trovato" in health["error"]
+    assert health["ok"] is False and "not found" in health["error"]
 
 
 # ---------------------------------------------------------------------------
-# Antigravity: righe ridotte da quelle di `agy --output-format stream-json` 1.2.13
+# Antigravity: lines trimmed from those of `agy --output-format stream-json` 1.2.13
 # ---------------------------------------------------------------------------
 CONV = "e4d9734f-b475-41c1-8c14-b59c45d621b5"
 
@@ -180,8 +180,8 @@ def test_antigravity_text_tools_and_conversation():
     parser = AntigravityStreamParser()
     assert _feed(parser, lines) == "Guardo la cartella.\nSono dieci file.\n"
     assert parser.conversation_id == CONV and parser.finished and parser.error is None
-    # Il comando si racconta una volta sola; "wait" e' di servizio.
-    assert [activity.label for activity in parser.take_activities()] == ["esegue Get-ChildItem"]
+    # The command is told once; "wait" is housekeeping.
+    assert [activity.label for activity in parser.take_activities()] == ["runs Get-ChildItem"]
 
 
 def test_antigravity_denied_tools_and_failures():
@@ -201,7 +201,7 @@ def test_antigravity_denied_tools_and_failures():
     _feed(failed, [_line(event="result", result={"status": "ERROR", "error": "quota esaurita"})])
     assert failed.error == "quota esaurita"
 
-    # Interrotta a meta' risposta: l'errore vale anche se un pezzo di testo e' arrivato.
+    # Interrupted halfway through the answer: the error counts even if some text arrived.
     cut = AntigravityStreamParser()
     _feed(
         cut,
@@ -214,8 +214,8 @@ def test_antigravity_denied_tools_and_failures():
 
 
 def test_antigravity_ignores_an_old_error_after_a_complete_answer():
-    # Righe vere di agy 1.2.16 riprendendo una conversazione interrotta due giorni prima:
-    # la risposta arriva intera, ma il riepilogo resta in ERROR a ogni turno.
+    # Real agy 1.2.16 lines resuming a conversation interrupted two days earlier:
+    # the answer arrives in full, but the summary stays at ERROR on every turn.
     interrupted = "The stream was interrupted. Please continue the task you were working on."
     lines = [
         _line(event="init", conversation_id=CONV, init={"cwd": "C:\\Users\\filip"}),
@@ -251,12 +251,12 @@ def test_antigravity_argv_attaches_the_prompt(tmp_path):
     assert argv[argv.index("--conversation") + 1] == CONV
     assert "--dangerously-skip-permissions" in argv
     assert argv[argv.index("--add-dir") + 1] == "C:/allegati"
-    # Attaccato al flag: un messaggio che comincia con "-" non diventa un'opzione.
+    # Attached to the flag: a message starting with "-" doesn't become an option.
     assert argv[-1] == "--print=-ciao & dir"
 
 
 def test_antigravity_runs_without_its_self_updater(tmp_path, monkeypatch):
-    # L'aggiornatore di agy apre una console visibile: nei turni del companion e' spento.
+    # agy's updater opens a visible console: it's off in the companion's turns.
     seen = {}
 
     async def fake_stream(argv, **kwargs):
@@ -287,7 +287,7 @@ def test_npm_shim_is_unwrapped(tmp_path):
     )
     assert unwrap_npm_shim(str(shim)) == [str(tmp_path / "node.exe"), str(script)]
 
-    # Col .cmd sbucciato il messaggio puo' stare negli argomenti, senza cmd.exe.
+    # With the .cmd peeled off the message can sit in the arguments, without cmd.exe.
     client = CommandAgentClient(f'"{shim}" -p {{prompt}}', name="gemini_cli", label="Gemini CLI")
     argv, stdin_text = client.build("ciao & dir")
     assert argv == [str(tmp_path / "node.exe"), str(script), "-p", "ciao & dir"] and stdin_text is None
@@ -300,7 +300,7 @@ def test_npm_shim_is_unwrapped(tmp_path):
 
 
 def test_command_agent_remembers_the_last_exchanges():
-    # Il "programma" risponde con l'ultima riga di quello che riceve.
+    # The "program" answers with the last line of what it gets.
     script = "import sys; print(sys.stdin.read().strip().splitlines()[-1].upper())"
     client = CommandAgentClient(f'"{sys.executable}" -c "{script}"', name="cline", label="Cline")
 

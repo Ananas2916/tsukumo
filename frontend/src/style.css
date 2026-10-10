@@ -1,5 +1,6 @@
-/* Tsukumo - la finestra del personaggio. Quasi tutto invisibile finche' non
-   serve: lei, i dock ad arco col tasto destro, una bolla quando parla. */
+/* Tsukumo - the character's window. Almost everything invisible until it's
+   needed: her, the right-click menu (the flame's island, the body's arc
+   docks), a bubble when she speaks. */
 
 @import './theme.css';
 
@@ -23,7 +24,7 @@ body {
   cursor: default;
 }
 
-/* Fuori da Electron la trasparenza non serve: c'e' uno sfondo. */
+/* Outside Electron transparency isn't needed: there's a background. */
 body.opaque-bg {
   background: radial-gradient(900px 560px at 50% 15%, #1d1b2b 0%, #0c0c11 70%);
 }
@@ -142,7 +143,7 @@ body.pet-mode.dragging #stage {
   color: var(--muted);
 }
 
-/* Bottone attivo (la scheda aperta nel pannello): come "home" nell'immagine. */
+/* Active button (the tab open in the panel): like "home" in the reference image. */
 .nav-btn.active {
   background: rgba(255, 255, 255, 0.2);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
@@ -158,7 +159,7 @@ body.pet-mode.dragging #stage {
   animation: throb 0.9s ease-in-out infinite;
 }
 
-/* Anelli di stato */
+/* Status rings */
 .ring {
   position: absolute;
   inset: -3px;
@@ -225,12 +226,592 @@ body.pet-mode.dragging #stage {
   transform: translate(-50%, 0);
 }
 
-/* --------------------------------------------------------------- bolla --- */
+/* ------------------------------------------------------ the flame's island --- */
+/* Black like Coucou's, under the canvas: the flame is drawn on top, in the
+   slot left of the card. 288 px wide with the window at 300 px, and it
+   scales with her (--k). */
+#island {
+  --tint: 165, 139, 255;
+  position: fixed;
+  left: 50%;
+  bottom: 6px;
+  /* As wide as the window (widened while it's open), in design pixels. */
+  width: calc(var(--iw, 300px) - 12px);
+  transform: translateX(-50%) scale(var(--k, 1));
+  transform-origin: 50% 100%;
+  pointer-events: none;
+}
+
+/* While the island is open clicks go to its buttons, not to the canvas. */
+body.island-open #stage {
+  pointer-events: none;
+}
+
+.island {
+  position: relative;
+  padding: 8px;
+  border-radius: 26px;
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #f2f2f5;
+  transform-origin: var(--ox, 50%) var(--oy, 100%);
+  transform: scale(0.08);
+  opacity: 0;
+  /* It closes going back into her, faster than it opens. */
+  transition:
+    transform 0.3s cubic-bezier(0.5, 0, 0.75, 0),
+    opacity 0.18s ease 0.12s;
+}
+
+/* It opens like a drop spreading out, with a small bounce. */
+.island.open {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    transform 0.5s cubic-bezier(0.2, 1.3, 0.35, 1),
+    opacity 0.14s ease;
+}
+
+.island-top,
+.island-card,
+.island-pills {
+  opacity: 0;
+  transform: translateY(5px);
+  transition:
+    opacity 0.1s ease,
+    transform 0.1s ease;
+}
+
+.island.open .island-top,
+.island.open .island-card,
+.island.open .island-pills {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.24s ease var(--delay),
+    transform 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) var(--delay);
+}
+
+.island-top {
+  --delay: 0.12s;
+}
+
+.island-card {
+  --delay: 0.17s;
+}
+
+.island-pills {
+  --delay: 0.22s;
+}
+
+/* At the top: the tabs on the left, the tools on the right. */
+.island-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2px 8px;
+}
+
+.island-group {
+  display: flex;
+  gap: 2px;
+}
+
+.island-icon {
+  width: 34px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 15px;
+  background: transparent;
+  color: #d4d4dc;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.island-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.island-icon.active {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.island-icon.off {
+  color: #6f6f7a;
+}
+
+.island-icon.on {
+  background: rgba(92, 200, 255, 0.16);
+  color: var(--info);
+}
+
+/* The card: her on the left (the canvas fills the empty slot), then what she's doing. */
+.island-card {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  height: 124px;
+  padding: 10px 12px 10px 2px;
+  border-radius: 20px;
+  background:
+    radial-gradient(90px 80px at 50px 62%, rgba(var(--tint), 0.22), rgba(var(--tint), 0) 75%),
+    #131317;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.island-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.island-slot {
+  flex: none;
+  width: 92px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.island-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.island-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.island-dot {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot, var(--muted));
+  box-shadow: 0 0 6px var(--dot, transparent);
+}
+
+/* The brain's name before the model: the model shrinks first, and if it
+   doesn't fit at all it disappears instead of becoming "o…". */
+.island-title {
+  flex-wrap: wrap;
+  row-gap: 0;
+  height: 17px;
+  overflow: hidden;
+}
+
+.island-title strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: 650 13.5px/1.2 var(--font-display);
+  color: #fff;
+}
+
+.island-title small {
+  flex: 0 1 auto;
+  min-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: #8a8a95;
+}
+
+/* Wide (the window has widened): more room for her and for the words, like Coucou's island. */
+.island.wide {
+  padding: 10px;
+  border-radius: 28px;
+}
+
+.island.wide .island-card {
+  height: 136px;
+  gap: 12px;
+  padding: 12px 16px 12px 4px;
+  border-radius: 22px;
+  background:
+    radial-gradient(110px 96px at 64px 62%, rgba(var(--tint), 0.24), rgba(var(--tint), 0) 75%),
+    #131317;
+}
+
+.island.wide .island-slot {
+  width: 118px;
+}
+
+.island.wide .island-info {
+  gap: 8px;
+}
+
+.island.wide .island-title {
+  height: 19px;
+}
+
+.island.wide .island-title strong {
+  font-size: 15px;
+}
+
+.island.wide .island-title small {
+  font-size: 12px;
+}
+
+.island.wide .island-steps li {
+  font-size: 12.5px;
+}
+
+.island.wide .island-icon {
+  width: 38px;
+  height: 32px;
+}
+
+/* The closet: instead of brain and steps, what she can wear. */
+.island-closet {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: default;
+}
+
+.island-closet-head {
+  overflow: hidden;
+  color: #8a8a95;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.island-closet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 4px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.island-outfit {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.island-outfit svg {
+  width: 88%;
+  height: 88%;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.island-outfit:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.island-outfit:hover svg {
+  transform: translateY(-2px) rotate(-5deg);
+}
+
+.island-outfit.on {
+  border-color: rgba(var(--tint), 0.9);
+  background: rgba(var(--tint), 0.16);
+}
+
+.island-pill.active {
+  background: rgba(var(--tint), 0.18);
+  border-color: rgba(var(--tint), 0.5);
+}
+
+/* Narrow (docked in the dashboard): the Wardrobe stays just an icon. */
+.island:not(.wide) .island-pill[data-id='wardrobe'] {
+  width: 30px;
+  justify-content: center;
+  padding: 0;
+}
+
+.island:not(.wide) .island-pill[data-id='wardrobe'] .island-pill-label {
+  display: none;
+}
+
+/* The agent's steps, like Coucou's list: done, in progress, done. */
+.island-steps {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.island-steps li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #f2f2f5;
+  white-space: nowrap;
+}
+
+.island-steps li.past {
+  color: #8a8a95;
+}
+
+.island-steps li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.island-steps i {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #0b0b0e;
+}
+
+.island-steps i.ok {
+  background: var(--ok);
+}
+
+.island-steps i.ok .icon {
+  stroke-width: 3.2;
+}
+
+.island-steps i.spin {
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #fff;
+  animation: spin-full 0.8s linear infinite;
+}
+
+.island-steps i.off {
+  background: var(--danger);
+}
+
+.island-steps i.wait {
+  border: 2px solid rgba(255, 255, 255, 0.25);
+}
+
+.island-steps i.none {
+  visibility: hidden;
+}
+
+/* The closest usage limit: label, percentage and a small bar. */
+.island-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8a8a95;
+  font: 11px/1.2 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.island-usage-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.island-usage-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.island-usage-head b {
+  color: #e6e6ec;
+  font-weight: 600;
+}
+
+.island-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.island-bar i {
+  display: block;
+  width: var(--used, 0%);
+  height: 100%;
+  border-radius: 2px;
+  background: var(--bar, var(--ok));
+}
+
+/* The pills: the body, the dance (only while music plays), quit. */
+.island-pills {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.island-pill {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 15px;
+  background: #131317;
+  color: #e8e8ee;
+  font: 600 12px/1 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.island-pill:hover {
+  background: #1e1e25;
+}
+
+.island-pill-icon {
+  display: grid;
+  place-items: center;
+  color: #c9c9d2;
+}
+
+.island-pill.power {
+  margin-left: auto;
+  width: 30px;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+}
+
+.island-pill.power .island-pill-label:empty {
+  display: none;
+}
+
+.island-pill.power:hover,
+.island-pill.power.confirm {
+  color: var(--danger);
+  background: rgba(255, 107, 129, 0.14);
+}
+
+.island-pill.power:hover .island-pill-icon,
+.island-pill.power.confirm .island-pill-icon {
+  color: var(--danger);
+}
+
+.island-pill.power.confirm {
+  width: auto;
+  padding: 0 12px 0 9px;
+  animation: throb 0.9s ease-in-out infinite;
+}
+
+/* Three dancing bars: she's dancing to Spotify. */
+.island-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 13px;
+  height: 12px;
+}
+
+.island-eq b {
+  flex: 1;
+  height: 40%;
+  border-radius: 1px;
+  background: var(--pink);
+  animation: eq 0.9s ease-in-out infinite;
+}
+
+.island-eq b:nth-child(2) {
+  animation-delay: -0.3s;
+}
+
+.island-eq b:nth-child(3) {
+  animation-delay: -0.6s;
+}
+
+@keyframes eq {
+  50% {
+    height: 100%;
+  }
+}
+
+/* The name of the button under the cursor, above the island. */
+.island-caption {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: 280px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(10, 10, 12, 0.94);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.3;
+  text-align: center;
+  transform: translate(-50%, 4px);
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.island-caption.shown {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island,
+  .island.open {
+    transition: opacity 0.15s ease;
+    transform: none;
+  }
+}
+
+/* -------------------------------------------------------------- bubble --- */
 .bubble {
   position: fixed;
   left: 50%;
   top: 10px;
   transform: translateX(-50%);
+  /* With left: 50% the "natural" width would stop at half the window: the
+     text would wrap early. It widens as far as needed, within the limit. */
+  width: max-content;
   max-width: min(94%, 420px);
   padding: 8px 13px;
   background: var(--glass-strong);
@@ -258,12 +839,12 @@ body.pet-mode.dragging #stage {
   transform: rotate(45deg);
 }
 
-/* ------------------------------------------ file trascinato su di lei --- */
+/* --------------------------------------------- file dragged onto her --- */
 .drop-target #stage {
   filter: drop-shadow(0 0 10px rgba(165, 139, 255, 0.85));
 }
 
-/* ------------------------------------------------------------- sonno --- */
+/* --------------------------------------------------------------- sleep --- */
 .zzz {
   position: fixed;
   left: 0;
@@ -325,7 +906,7 @@ body.pet-mode.dragging #stage {
   }
 }
 
-/* -------------------------------------------------------------- avvisi --- */
+/* ------------------------------------------------------------- notices --- */
 .toast {
   position: fixed;
   left: 50%;
@@ -343,7 +924,7 @@ body.pet-mode.dragging #stage {
   animation: pop 0.2s ease;
 }
 
-/* La fiammella vive in fondo alla finestra: gli avvisi vanno in cima, a non coprirla. */
+/* The flame lives at the bottom of the window: notices go at the top, so they don't cover her. */
 body.flame-form .toast {
   top: 12px;
   bottom: auto;
@@ -354,7 +935,7 @@ body.flame-form .toast {
   color: #ffd5dc;
 }
 
-/* ------------------------------------------------ chat (solo nel browser) --- */
+/* -------------------------------------------- chat (browser only) --- */
 .composer {
   position: fixed;
   left: 50%;
@@ -394,7 +975,7 @@ body.flame-form .toast {
   cursor: pointer;
 }
 
-/* ----------------------------------------------------------- overlay --- */
+/* ------------------------------------------------------------- overlay --- */
 .overlay {
   position: fixed;
   inset: auto 8px 8px;
@@ -446,7 +1027,7 @@ body.flame-form .toast {
   border-color: var(--danger);
 }
 
-/* ------------------------------------------------------------- debug --- */
+/* --------------------------------------------------------------- debug --- */
 .debug {
   position: fixed;
   top: 8px;
@@ -499,7 +1080,7 @@ body.flame-form .toast {
   color: var(--muted);
 }
 
-/* ----------------------------------------------------------- animazioni --- */
+/* ---------------------------------------------------------- animations --- */
 @keyframes spin {
   to {
     transform: rotate(270deg);

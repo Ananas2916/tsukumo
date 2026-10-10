@@ -1,8 +1,8 @@
-"""Client per un LLM locale servito da Ollama (https://ollama.com).
+"""Client for a local LLM served by Ollama (https://ollama.com).
 
-Usa l'endpoint ``/api/chat`` in modalita' streaming (NDJSON): ogni riga e' un
-oggetto JSON con un frammento di testo, cosi' il companion puo' iniziare a
-parlare prima che la risposta sia completa.
+It uses the ``/api/chat`` endpoint in streaming mode (NDJSON): every line is
+a JSON object with a piece of text, so the companion can start speaking
+before the reply is complete.
 """
 
 from __future__ import annotations
@@ -34,14 +34,14 @@ class OllamaClient(LLMClient):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.temperature = temperature
-        # connect breve (per accorgersi subito che Ollama e' spento),
-        # read lungo (la generazione puo' richiedere decine di secondi).
+        # short connect (to notice right away that Ollama is off),
+        # long read (generation can take tens of seconds).
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout, connect=5.0),
         )
-        # Su Windows un connect verso una porta chiusa costa ~2 s: teniamo in
-        # cache l'esito negativo per non rallentare chi interroga /api/health
-        # in polling (lo fa la shell Electron all'avvio).
+        # On Windows a connect to a closed port costs ~2 s: we cache the negative
+        # result so as not to slow down whoever polls /api/health (the Electron
+        # shell does at startup).
         self._health_cache: tuple[float, dict[str, Any]] | None = None
         self._health_ttl = 5.0
 
@@ -61,7 +61,7 @@ class OllamaClient(LLMClient):
         ) as response:
             if response.status_code >= 400:
                 body = (await response.aread()).decode("utf-8", "replace")[:500]
-                raise RuntimeError(f"Ollama ha risposto {response.status_code}: {body}")
+                raise RuntimeError(f"Ollama answered {response.status_code}: {body}")
 
             async for line in response.aiter_lines():
                 line = line.strip()
@@ -70,7 +70,7 @@ class OllamaClient(LLMClient):
                 try:
                     chunk: dict[str, Any] = json.loads(line)
                 except json.JSONDecodeError:
-                    logger.debug("Riga non JSON ignorata: %r", line[:120])
+                    logger.debug("Non-JSON line ignored: %r", line[:120])
                     continue
 
                 if chunk.get("error"):
@@ -98,12 +98,12 @@ class OllamaClient(LLMClient):
                 "ok": False,
                 "model": self.model,
                 "error": str(exc),
-                "hint": "Avvia Ollama con 'ollama serve' oppure usa DC_LLM_BACKEND=mock",
+                "hint": "Start Ollama with 'ollama serve' or use DC_LLM_BACKEND=mock",
             }
             self._health_cache = (time.monotonic(), result)
             return result
 
-        # Ollama elenca i modelli come "nome:tag": accettiamo anche il solo nome.
+        # Ollama lists models as "name:tag": we accept the bare name too.
         loaded = any(
             name == self.model or name.split(":", 1)[0] == self.model.split(":", 1)[0]
             for name in available
@@ -114,7 +114,7 @@ class OllamaClient(LLMClient):
             "model": self.model,
             "modelAvailable": loaded,
             "models": available,
-            "hint": None if loaded else f"Scarica il modello con: ollama pull {self.model}",
+            "hint": None if loaded else f"Download the model with: ollama pull {self.model}",
         }
         self._health_cache = (time.monotonic(), result)
         return result

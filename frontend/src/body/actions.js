@@ -1,5 +1,5 @@
 /**
- * Azioni spontanee e gesti del parlato (vedi body.js per le convenzioni sugli assi).
+ * Spontaneous actions and speech gestures (see body.js for the axis conventions).
  */
 
 import { BOOTH_ACTIONS } from './booth.js';
@@ -7,13 +7,14 @@ import { SIDES } from './constants.js';
 import { curve, TAU } from './motion.js';
 
 /**
- * Azioni: movimenti a durata fissa sovrapposti alla postura. `run` riceve la
- * posa, l'avanzamento `u` (0..1), il peso, il tempo trascorso in secondi,
- * l'azione e il corpo. `idle` (peso di estrazione) le rende candidate come
- * gesti spontanei; `modes` dice in quali modalita' del corpo hanno senso.
+ * Actions: fixed-length movements layered over the posture. `run` receives
+ * the pose, the progress `u` (0..1), the weight, the elapsed time in
+ * seconds, the action and the body. `idle` (draw weight) makes them
+ * candidates as spontaneous gestures; `modes` says in which body modes they
+ * make sense.
  */
 export const ACTIONS = {
-  /** Si stiracchia: braccia al cielo, sulle punte, occhi chiusi. */
+  /** Stretches: arms to the sky, on tiptoe, eyes closed. */
   stretch: {
     duration: 4,
     idle: 1,
@@ -21,7 +22,7 @@ export const ACTIONS = {
     run(pose, u, w) {
       const up = curve(u, [[0, 0], [0.3, 1], [0.64, 1], [0.94, 0]]) * w;
       const peak = curve(u, [[0.2, 0], [0.36, 1], [0.6, 1], [0.76, 0]]) * w;
-      // Braccia a V e non dritte in verticale: resta tutto dentro l'inquadratura.
+      // Arms in a V rather than straight up: everything stays inside the frame.
       pose.reach('left', 'head', [0.13, 0.3, 0.02], [1, 0.2, -0.4], up);
       pose.reach('right', 'head', [0.13, 0.3, 0.02], [1, 0.2, -0.4], up);
       pose.both('Hand', 0, 0, 0.35, up);
@@ -38,7 +39,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Si guarda intorno: prima da una parte, poi dall'altra. */
+  /** Looks around: first to one side, then to the other. */
   lookAround: {
     duration: 4.8,
     idle: 1.4,
@@ -57,7 +58,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Si sistema i capelli dietro l'orecchio, inclinando la testa verso la mano. */
+  /** Tucks her hair behind the ear, tilting the head towards the hand. */
   hairTuck: {
     duration: 3.2,
     idle: 1.2,
@@ -77,7 +78,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Mani dietro la schiena, dondolando piano sui talloni. */
+  /** Hands behind the back, gently rocking on the heels. */
   handsBehind: {
     duration: 6.5,
     idle: 1,
@@ -97,7 +98,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Canticchia: ondeggia a tempo, testa che segue, sorriso a occhi chiusi. */
+  /** Hums: sways in time, the head following, smiling with closed eyes. */
   hum: {
     duration: 5.5,
     idle: 1,
@@ -106,7 +107,7 @@ export const ACTIONS = {
       const on = curve(u, [[0, 0], [0.12, 1], [0.86, 1], [1, 0]]) * w;
       const beat = Math.sin(t * TAU * 0.8) * on;
       const bounce = Math.abs(Math.sin(t * TAU * 0.8)) * on;
-      // Da seduta il bacino resta dov'e': ondeggia solo il busto.
+      // Sitting, the pelvis stays put: only the torso sways.
       if (body.mode === 'stand') {
         pose.hips.x += 0.02 * beat;
         pose.hips.y -= 0.006 * bounce;
@@ -120,7 +121,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Inclina la testa, incuriosito. */
+  /** Tilts the head, curious. */
   headTilt: {
     duration: 2.8,
     idle: 1.2,
@@ -135,7 +136,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Da seduta: dondola le gambe piu' forte, contenta. */
+  /** Sitting: swings her legs harder, happy. */
   swingLegs: {
     duration: 4.5,
     idle: 1.3,
@@ -152,7 +153,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Sbadiglia: mano davanti alla bocca, testa all'indietro, occhi chiusi. Da assonnata. */
+  /** Yawns: hand in front of the mouth, head back, eyes closed. When drowsy. */
   yawn: {
     duration: 3.4,
     modes: ['stand', 'sit'],
@@ -161,7 +162,7 @@ export const ACTIONS = {
       const s = action.sign;
       const open = curve(u, [[0, 0], [0.2, 0.35], [0.42, 1], [0.66, 1], [0.86, 0]]) * w;
       const hand = curve(u, [[0.08, 0], [0.3, 1], [0.72, 1], [0.92, 0]]) * w;
-      // Il bersaglio e' il polso: sotto il mento, cosi' le dita coprono la bocca.
+      // The target is the wrist: under the chin, so the fingers cover the mouth.
       pose.reach(side, 'head', [0.02, -0.07, 0.13], [1, -1, -0.2], hand, 0.4);
       pose.fingers[side] -= 0.5 * hand;
       pose.add('head', -0.18 * open, 0, 0.07 * s * open);
@@ -174,17 +175,17 @@ export const ACTIONS = {
     },
   },
 
-  /** Bussa sul vetro dello schermo, verso di te: promemoria e notifiche. */
+  /** Knocks on the screen glass, towards you: reminders and notifications. */
   knock: {
     duration: 1.9,
-    // Una reazione: la voce che parte subito dopo non la interrompe.
+    // A reaction: the voice starting right after doesn't interrupt it.
     reaction: true,
     modes: ['stand', 'sit'],
     run(pose, u, w, t, action) {
       const side = action.sign > 0 ? 'left' : 'right';
       const s = action.sign;
       const up = curve(u, [[0, 0], [0.22, 1], [0.72, 1], [0.95, 0]]) * w;
-      // Due colpi: il pugno va avanti e torna (u 0.30 e 0.40, cioe' ~0.55 s e ~0.75 s).
+      // Two knocks: the fist goes forward and back (u 0.30 and 0.40, i.e. ~0.55 s and ~0.75 s).
       const tap = (curve(u, [[0.26, 0], [0.3, 1], [0.34, 0]]) + curve(u, [[0.36, 0], [0.4, 1], [0.44, 0]])) * w;
       pose.reach(side, 'head', [0.1, 0.0, 0.34 + 0.05 * tap], [1, -1, -0.1], up, 0.3);
       pose.fingers[side] += 0.9 * up;
@@ -195,7 +196,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Che caldo: si fa aria con la mano davanti al viso. */
+  /** So hot: she fans herself with her hand in front of her face. */
   fanSelf: {
     duration: 3.4,
     modes: ['stand', 'sit'],
@@ -215,14 +216,14 @@ export const ACTIONS = {
     },
   },
 
-  /** Che freddo: si stringe le braccia e trema. */
+  /** So cold: she hugs her arms and shivers. */
   shiver: {
     duration: 3.2,
     modes: ['stand', 'sit'],
     run(pose, u, w, t) {
       const hug = curve(u, [[0, 0], [0.15, 1], [0.85, 1], [1, 0]]) * w;
       const tremble = Math.sin(t * TAU * 9) * hug;
-      // Ogni mano sul braccio opposto (x negativa = verso l'altro lato).
+      // Each hand on the opposite arm (negative x = towards the other side).
       pose.reach('left', 'upperChest', [-0.03, -0.04, 0.12], [1, -0.6, -0.3], hug, 1.3);
       pose.reach('right', 'upperChest', [-0.03, -0.07, 0.15], [1, -0.6, -0.3], hug, 1.3);
       pose.fingers.left += 0.3 * hug;
@@ -236,7 +237,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Le hai fatto girare il cursore intorno: le gira la testa. */
+  /** You spun the cursor around her: her head spins. */
   dizzy: {
     duration: 2.8,
     reaction: true,
@@ -261,7 +262,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Troppi colpetti: incrocia le braccia, gira la testa e mette il broncio. */
+  /** Too many pokes: she folds her arms, turns her head away and sulks. */
   pout: {
     duration: 3.4,
     reaction: true,
@@ -282,7 +283,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Saluta con la mano: parte quando il modello compare. */
+  /** Waves her hand: starts when the model appears. */
   wave: {
     duration: 2.9,
     modes: ['stand', 'sit'],
@@ -300,7 +301,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Carezza sulla testa: si rannicchia contenta. */
+  /** Pat on the head: she snuggles up, happy. */
   pat: {
     duration: 1.9,
     reaction: true,
@@ -311,7 +312,7 @@ export const ACTIONS = {
       pose.add('neck', 0.06 * on, 0, 0);
       pose.add('spine', 0.04 * on, 0, 0);
       pose.both('Shoulder', 0, 0, 0.09, on);
-      // Mani giunte davanti, un po' timida (da sdraiata restano dove sono).
+      // Hands joined in front, a little shy (lying down they stay where they are).
       if (body.mode !== 'lie' && body.mode !== 'side') {
         pose.reach('left', 'hips', [-0.02, 0.02, 0.16], [1, -1, 0], 0.7 * on, 0.3);
         pose.reach('right', 'hips', [-0.02, 0.02, 0.16], [1, -1, 0], 0.7 * on, 0.3);
@@ -321,7 +322,7 @@ export const ACTIONS = {
     },
   },
 
-  /** Toccata sul corpo: sobbalza all'indietro, poi si ricompone. */
+  /** Touched on the body: she jumps back, then composes herself. */
   flinch: {
     duration: 1.3,
     reaction: true,
@@ -342,12 +343,12 @@ export const ACTIONS = {
   },
 };
 
-// Ciao sbucando, la V, la pistola, giravolta, pose da modella, squat (booth.js).
+// Peek-a-boo hello, the V, the finger gun, twirl, model poses, squat (booth.js).
 Object.assign(ACTIONS, BOOTH_ACTIONS);
 
 /**
- * Gesti mentre parla, scelti a ogni frase. Le coordinate sono per il lato
- * sinistro e specchiate per il destro.
+ * Gestures while she speaks, chosen at every sentence. Coordinates are for
+ * the left side and mirrored for the right.
  */
 export const GESTURES = {
   explainLeft: [{ side: 'left', offset: [0.14, -0.2, 0.22], pole: [0.5, -1, -0.4], twist: 1.5 }],
@@ -356,6 +357,6 @@ export const GESTURES = {
     { side: 'left', offset: [0.2, -0.17, 0.2], pole: [0.8, -1, -0.3], twist: 1.4 },
     { side: 'right', offset: [0.2, -0.17, 0.2], pole: [0.8, -1, -0.3], twist: 1.4 },
   ],
-  // Il bersaglio e' il polso: le dita arrivano ~15 cm oltre, sul cuore.
+  // The target is the wrist: the fingers reach ~15 cm further, onto the heart.
   chest: [{ side: 'right', offset: [0.02, -0.05, 0.12], pole: [0.9, -1, -0.1], twist: 0.6 }],
 };

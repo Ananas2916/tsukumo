@@ -1,11 +1,12 @@
-"""Voci in rete con una chiave API: OpenAI, Azure, Google Cloud, Cartesia.
+"""Online voices with an API key: OpenAI, Azure, Google Cloud, Cartesia.
 
-Stesso schema per tutti: si chiede audio **PCM grezzo** (o un WAV, che la
-libreria standard sa leggere) perche' il progetto non ha un decoder MP3, e la
-verifica del pannello fa una chiamata leggera che dice subito se la chiave e'
-buona, prima di sentire la prima frase fallire.
+The same pattern for all: we ask for **raw PCM** audio (or a WAV, which the
+standard library can read) because the project has no MP3 decoder, and the
+panel's check makes a light call that says right away whether the key is
+good, before hearing the first sentence fail.
 
-ElevenLabs sta nel suo modulo perche' fa di piu' (tempi per lettera, quota).
+ElevenLabs is in its own module because it does more (per-letter timings,
+quota).
 """
 
 from __future__ import annotations
@@ -30,23 +31,23 @@ _RATE = 24000
 def _status_error(service: str, response: httpx.Response) -> RuntimeError:
     known = {
         400: "richiesta rifiutata",
-        401: "chiave API non valida",
+        401: "invalid API key",
         402: "credito esaurito",
-        403: "chiave senza permessi per questo servizio",
-        404: "voce o modello inesistente",
+        403: "key without permissions for this service",
+        404: "voice or model doesn't exist",
         429: "troppe richieste o quota esaurita",
     }
-    reason = known.get(response.status_code, f"errore {response.status_code}")
+    reason = known.get(response.status_code, f"error {response.status_code}")
     body = response.text.strip().replace("\n", " ")[:240]
     return RuntimeError(f"{service}: {reason}" + (f" — {body}" if body else ""))
 
 
 def _network_error(service: str, exc: Exception) -> str:
-    return f"{service} non raggiungibile: {str(exc) or type(exc).__name__}"
+    return f"{service} unreachable: {str(exc) or type(exc).__name__}"
 
 
 def _wav_to_float(data: bytes) -> tuple[np.ndarray, int]:
-    """WAV PCM 16 bit (quello di Google con LINEAR16) in float32 mono."""
+    """16-bit PCM WAV (Google's with LINEAR16) to mono float32."""
     with wave.open(io.BytesIO(data)) as reader:
         rate = reader.getframerate()
         channels = reader.getnchannels()
@@ -58,7 +59,7 @@ def _wav_to_float(data: bytes) -> tuple[np.ndarray, int]:
 
 
 # ---------------------------------------------------------------------------
-# OpenAI (e qualunque server /v1/audio/speech)
+# OpenAI (and any /v1/audio/speech server)
 # ---------------------------------------------------------------------------
 OPENAI_VOICES = (
     "alloy", "ash", "ballad", "cedar", "coral", "echo", "fable",
@@ -67,7 +68,7 @@ OPENAI_VOICES = (
 
 
 class OpenAITTS(TTSEngine):
-    """``POST /audio/speech`` con ``response_format=pcm`` (24 kHz, 16 bit, mono)."""
+    """``POST /audio/speech`` with ``response_format=pcm`` (24 kHz, 16 bit, mono)."""
 
     name = "openai_tts"
 
@@ -98,8 +99,8 @@ class OpenAITTS(TTSEngine):
         if self._voices is None:
             self._voices = list(OPENAI_VOICES)
             if not self._official:
-                # Un server compatibile (Kokoro-FastAPI, openedai-speech...) ha
-                # le sue voci: se sa elencarle, meglio quelle.
+                # A compatible server (Kokoro-FastAPI, openedai-speech...) has its own
+                # voices: if it can list them, better those.
                 try:
                     response = self._client.get(f"{self.base_url}/audio/voices", timeout=5.0)
                     if response.status_code < 400:
@@ -112,20 +113,20 @@ class OpenAITTS(TTSEngine):
         return list(self._voices)
 
     def language_of(self, voice: str | None) -> str | None:
-        # Le voci OpenAI parlano la lingua del testo; quelle di un server
-        # compatibile potrebbero essere voci Kokoro, che invece ne hanno una.
+        # OpenAI voices speak the text's language; a compatible server's could be
+        # Kokoro voices, which instead have one.
         return None if self._official else super().language_of(voice)
 
     def check(self) -> dict[str, Any]:
         if not self._official:
-            return {"ok": True, "detail": f"{len(self.voices())} voci sul server"}
+            return {"ok": True, "detail": f"{len(self.voices())} voices on the server"}
         try:
             response = self._client.get(f"{self.base_url}/models", timeout=10.0)
         except httpx.HTTPError as exc:
             return {"ok": False, "detail": _network_error("OpenAI", exc)}
         if response.status_code >= 400:
             return {"ok": False, "detail": str(_status_error("OpenAI", response))}
-        return {"ok": True, "detail": "Chiave valida", "voices": [VoiceInfo(id=v).as_dict() for v in self.voices()]}
+        return {"ok": True, "detail": "Valid key", "voices": [VoiceInfo(id=v).as_dict() for v in self.voices()]}
 
     def synthesize(self, text: str, voice: str | None = None, speed: float | None = None) -> Speech:
         clean = (text or "").strip()
@@ -162,7 +163,7 @@ class OpenAITTS(TTSEngine):
 # Azure Speech
 # ---------------------------------------------------------------------------
 class AzureTTS(TTSEngine):
-    """REST di Azure Speech con SSML e ``raw-24khz-16bit-mono-pcm``."""
+    """Azure Speech's REST with SSML and ``raw-24khz-16bit-mono-pcm``."""
 
     name = "azure"
 
@@ -205,7 +206,7 @@ class AzureTTS(TTSEngine):
                 self._error = None
             except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                 self._error = str(exc) if isinstance(exc, RuntimeError) else _network_error("Azure", exc)
-                logger.warning("Voci Azure non disponibili: %s", self._error)
+                logger.warning("Azure voices unavailable: %s", self._error)
                 return [VoiceInfo(id=self.default_voice, language=locale_language(self.default_voice))]
         return list(self._catalog)
 
@@ -223,7 +224,7 @@ class AzureTTS(TTSEngine):
             return {"ok": False, "detail": self._error}
         return {
             "ok": True,
-            "detail": f"{len(catalog)} voci nell'area {self.region}",
+            "detail": f"{len(catalog)} voices in the {self.region} region",
             "voices": [voice.as_dict() for voice in catalog],
         }
 
@@ -267,7 +268,7 @@ class AzureTTS(TTSEngine):
 # Google Cloud Text-to-Speech
 # ---------------------------------------------------------------------------
 class GoogleTTS(TTSEngine):
-    """``text:synthesize`` con ``LINEAR16`` (un WAV) e chiave API."""
+    """``text:synthesize`` with ``LINEAR16`` (a WAV) and an API key."""
 
     name = "google_tts"
     base_url = "https://texttospeech.googleapis.com/v1"
@@ -308,7 +309,7 @@ class GoogleTTS(TTSEngine):
                 self._error = None
             except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                 self._error = str(exc) if isinstance(exc, RuntimeError) else _network_error("Google", exc)
-                logger.warning("Voci Google non disponibili: %s", self._error)
+                logger.warning("Google voices unavailable: %s", self._error)
                 return [VoiceInfo(id=self.default_voice, language=locale_language(self.default_voice))]
         return list(self._catalog)
 
@@ -320,7 +321,7 @@ class GoogleTTS(TTSEngine):
         catalog = self.voice_catalog()
         if self._error:
             return {"ok": False, "detail": self._error}
-        return {"ok": True, "detail": f"{len(catalog)} voci", "voices": [voice.as_dict() for voice in catalog]}
+        return {"ok": True, "detail": f"{len(catalog)} voices", "voices": [voice.as_dict() for voice in catalog]}
 
     def synthesize(self, text: str, voice: str | None = None, speed: float | None = None) -> Speech:
         clean = (text or "").strip()
@@ -353,7 +354,7 @@ class GoogleTTS(TTSEngine):
 # Cartesia
 # ---------------------------------------------------------------------------
 class CartesiaTTS(TTSEngine):
-    """``/tts/bytes`` con contenitore ``raw`` e ``pcm_s16le``."""
+    """``/tts/bytes`` with the ``raw`` container and ``pcm_s16le``."""
 
     name = "cartesia"
     base_url = "https://api.cartesia.ai"
@@ -404,7 +405,7 @@ class CartesiaTTS(TTSEngine):
                 self._error = None
             except (httpx.HTTPError, RuntimeError, ValueError) as exc:
                 self._error = str(exc) if isinstance(exc, RuntimeError) else _network_error("Cartesia", exc)
-                logger.warning("Voci Cartesia non disponibili: %s", self._error)
+                logger.warning("Cartesia voices unavailable: %s", self._error)
                 return [VoiceInfo(id=self.default_voice)] if self.default_voice else []
         return list(self._catalog)
 
@@ -419,7 +420,7 @@ class CartesiaTTS(TTSEngine):
         catalog = self.voice_catalog()
         if self._error:
             return {"ok": False, "detail": self._error}
-        return {"ok": True, "detail": f"{len(catalog)} voci", "voices": [voice.as_dict() for voice in catalog]}
+        return {"ok": True, "detail": f"{len(catalog)} voices", "voices": [voice.as_dict() for voice in catalog]}
 
     def synthesize(self, text: str, voice: str | None = None, speed: float | None = None) -> Speech:
         clean = (text or "").strip()
@@ -427,7 +428,7 @@ class CartesiaTTS(TTSEngine):
             return silence(_RATE, self.name)
         chosen = voice or self.default_voice
         if not chosen:
-            raise RuntimeError("Cartesia: scegli una voce nel pannello (premi Verifica per l'elenco)")
+            raise RuntimeError("Cartesia: choose a voice in the panel (press Check for the list)")
         body: dict[str, Any] = {
             "model_id": self.model,
             "transcript": clean,

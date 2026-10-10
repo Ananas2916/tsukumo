@@ -1,13 +1,13 @@
 /**
- * Il DOM della finestra del personaggio, in un posto solo.
+ * The DOM of the character's window, in one place.
  *
- * L'interfaccia e' volutamente quasi invisibile, in stile mascotte da
- * scrivania: normalmente si vede solo lei. Il tasto destro apre i dock ai
- * suoi lati (hud.js), la chat e le impostazioni stanno nel pannello a parte,
- * le spie si fanno vedere solo quando qualcosa non va.
+ * The interface is meant to be almost invisible, desktop-mascot style:
+ * normally you only see her. Right-click opens the menu around her (hud.js),
+ * chat and settings live in the separate panel, the indicators show up only
+ * when something is wrong.
  *
- * `main.js` non tocca mai direttamente gli elementi: chiama i metodi di questa
- * classe e registra i callback (`onSend`, `onContextMenu`, ...).
+ * `main.js` never touches the elements directly: it calls this class's
+ * methods and registers the callbacks (`onSend`, `onContextMenu`, ...).
  */
 
 import { VISEME_KEYS } from './config.js';
@@ -42,15 +42,15 @@ export class UI {
       this.bars.set(bar.dataset.viseme, bar);
     });
 
-    // Callback impostati da main.js.
+    // Callbacks set by main.js.
     this.onSend = () => {};
     this.onStop = () => {};
     this.onModelFile = () => {};
-    /** Tasto destro: apre/chiude i dock. */
+    /** Right-click: opens/closes the menu. */
     this.onContextMenu = () => {};
-    /** Doppio click o iniziare a scrivere: apre la chat (col primo tasto dentro). */
+    /** Double click or starting to type: opens the chat (with the first key inside). */
     this.onOpenChat = null;
-    /** Esc: il primo pezzo di interfaccia aperto si chiude, altrimenti zitta. */
+    /** Esc: the first open piece of interface closes, otherwise she goes quiet. */
     this.onEscape = () => false;
 
     this._bubbleTimer = null;
@@ -81,7 +81,7 @@ export class UI {
       event.target.value = '';
     });
 
-    // Trascina un .vrm sulla finestra per caricarlo al volo.
+    // Drop a .vrm on the window to load it on the fly.
     window.addEventListener('dragover', (event) => event.preventDefault());
     window.addEventListener('drop', (event) => {
       event.preventDefault();
@@ -96,7 +96,7 @@ export class UI {
         else this.onStop();
         return;
       }
-      // Basta iniziare a scrivere per aprire la chat.
+      // Just start typing to open the chat.
       const typing = document.activeElement === elements.input;
       if (!typing && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
         if (this.onOpenChat) {
@@ -129,7 +129,7 @@ export class UI {
     this.elements.fileInput.click();
   }
 
-  // ----------------------------------------------------------------- bolla
+  // ---------------------------------------------------------------- bubble
   showBubble(text, durationMs = 4200) {
     const { bubble } = this.elements;
     bubble.textContent = text;
@@ -188,9 +188,9 @@ export class UI {
   }
 
   /**
-   * Il cursore e' sopra un elemento "solido" dell'interfaccia?
-   * Serve al click-through per pixel: dock, bolle e pannelli devono restare
-   * cliccabili anche dove il personaggio non c'e'.
+   * Is the cursor over a "solid" element of the interface?
+   * Needed by per-pixel click-through: menus, bubbles and panels must stay
+   * clickable even where the character isn't.
    */
   isOverSolidUI(x, y) {
     const element = document.elementFromPoint(x, y);

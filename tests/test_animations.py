@@ -1,4 +1,4 @@
-"""Clip .vrma: la cartella viene elencata con l'URL da cui caricarle."""
+""".vrma clips: the folder is listed with the URL to load them from."""
 
 from backend import server
 

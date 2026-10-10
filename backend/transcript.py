@@ -1,15 +1,15 @@
-"""Gli ultimi messaggi della chat, per chi si ricollega.
+"""The last chat messages, for whoever reconnects.
 
-Il telefono perde la connessione appena Safari mette la pagina in background:
-una risposta che arriva dopo non la vede mai.
-Qui teniamo in memoria le ultime battute (domande e risposte, niente audio)
-e le rimandiamo nel ``hello``: chi si ricollega recupera quello che si e'
-perso.
+The phone loses the connection as soon as Safari puts the page in the
+background: a reply arriving later is never seen.
+Here we keep the last lines in memory (questions and replies, no audio) and
+send them again in the ``hello``: whoever reconnects gets back what they
+missed.
 
-Ogni battuta ha un ``seq`` crescente, che viaggia anche nei broadcast
-``user`` e ``reply``: il client ricorda l'ultimo visto e prende solo quelle
-dopo, senza doppioni. E' in millisecondi dall'epoch, cosi' resta crescente
-anche dopo un riavvio del backend.
+Every line has a growing ``seq``, which also travels in the ``user`` and
+``reply`` broadcasts: the client remembers the last one seen and takes only
+the later ones, without duplicates. It's in milliseconds since the epoch, so
+it keeps growing across backend restarts too.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import time
 from collections import deque
 from typing import Any, Callable
 
-#: Quante battute si tengono: bastano per qualche turno perso, e il hello resta leggero.
+#: How many lines are kept: enough for a few lost turns, and the hello stays light.
 KEEP = 30
 
 
@@ -29,7 +29,7 @@ class Transcript:
         self._last = 0
 
     def observe(self, message: dict[str, Any]) -> dict[str, Any]:
-        """Annota un messaggio in uscita; se e' una battuta, lo rimanda col suo ``seq``."""
+        """Notes an outgoing message; if it's a chat line, sends it back with its ``seq``."""
         kind = message.get("type")
         if kind == "reset":
             self._entries.clear()
@@ -54,7 +54,7 @@ class Transcript:
             if not text and not files:
                 return None
             return {"role": "user", "text": text, "files": files, "turn": message.get("turn")}
-        # "said" e' il PC che ripete una frase a voce, non una risposta della chat.
+        # "said" is the PC repeating a sentence aloud, not a chat reply.
         if kind == "reply" and text and not message.get("said"):
             entry = {"role": "assistant", "text": text, "turn": message.get("turn")}
             for flag in ("cancelled", "proactive"):

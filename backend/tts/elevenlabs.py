@@ -1,16 +1,16 @@
-"""Sintesi tramite l'API di ElevenLabs.
+"""Synthesis through the ElevenLabs API.
 
-Tre scelte che contano:
+Three choices that matter:
 
-* ``output_format=pcm_24000``: ElevenLabs di default restituisce MP3 e il
-  progetto non ha un decoder audio. Il PCM grezzo a 16 bit si converte in
-  float32 con una riga di numpy.
-* l'endpoint ``with-timestamps``: oltre all'audio restituisce l'inizio e la
-  fine di ogni lettera. E' quello che serve per un lip-sync preciso quanto
-  quello di Kokoro invece dell'allineamento stimato sull'energia. Se il
-  modello scelto non lo supporta, si ripiega sull'endpoint semplice.
-* la verifica legge ``/user/subscription``: e' un servizio a consumo, e il
-  pannello mostra quanti caratteri restano nel mese prima che finiscano.
+* ``output_format=pcm_24000``: by default ElevenLabs returns MP3 and the
+  project has no audio decoder. Raw 16-bit PCM converts to float32 with one
+  line of numpy.
+* the ``with-timestamps`` endpoint: besides the audio it returns the start
+  and end of every letter. That's what a lip-sync as precise as Kokoro's
+  needs, instead of the alignment estimated on the energy. If the chosen
+  model doesn't support it, it falls back to the plain endpoint.
+* the check reads ``/user/subscription``: it's a pay-per-use service, and the
+  panel shows how many characters are left in the month before they run out.
 """
 
 from __future__ import annotations
@@ -29,14 +29,14 @@ logger = logging.getLogger(__name__)
 
 _SAMPLE_RATE = 24000
 _BASE_URL = "https://api.elevenlabs.io/v1"
-#: Solo questi modelli accettano ``language_code``: agli altri va tolto o rispondono 400.
+#: Only these models accept ``language_code``: for the others it must be removed or they answer 400.
 _LANGUAGE_MODELS = {"eleven_flash_v2_5", "eleven_turbo_v2_5"}
-#: Intervallo di velocita' accettato dall'API.
+#: Speed range accepted by the API.
 _SPEED_RANGE = (0.7, 1.2)
 
 
 class ElevenLabsTTS(TTSEngine):
-    """Client per le voci di ElevenLabs."""
+    """Client for the ElevenLabs voices."""
 
     name = "elevenlabs"
 
@@ -62,10 +62,10 @@ class ElevenLabsTTS(TTSEngine):
         self._client = httpx.Client(timeout=timeout, headers={"xi-api-key": api_key})
         self._catalog: list[VoiceInfo] | None = None
         self._catalog_error: str | None = None
-        #: Diventa False al primo rifiuto dell'endpoint con i tempi.
+        #: Becomes False at the first refusal of the endpoint with the timings.
         self._timestamps = True
 
-    # ------------------------------------------------------------------ voci
+    # ------------------------------------------------------------------ voices
     def voice_catalog(self) -> list[VoiceInfo]:
         if self._catalog is None:
             try:
@@ -76,7 +76,7 @@ class ElevenLabsTTS(TTSEngine):
                 self._catalog_error = None
             except Exception as exc:
                 self._catalog_error = _error_text(exc)
-                logger.warning("Elenco voci ElevenLabs non disponibile: %s", self._catalog_error)
+                logger.warning("ElevenLabs voice list unavailable: %s", self._catalog_error)
                 return [VoiceInfo(id=self.default_voice)]
         return list(self._catalog)
 
@@ -84,15 +84,15 @@ class ElevenLabsTTS(TTSEngine):
         return [voice.name or voice.id for voice in self.voice_catalog()] or [self.default_voice]
 
     def _voice_id(self, voice: str) -> str:
-        """L'API vuole l'id: il pannello puo' salvare il nome, per leggibilita'."""
+        """The API wants the id: the panel may save the name, for readability."""
         for info in self.voice_catalog():
             if voice in (info.id, info.name):
                 return info.id
         return voice
 
     def language_of(self, voice: str | None) -> str | None:
-        # Le voci ElevenLabs parlano ogni lingua dei modelli multilingua: la
-        # lingua e' quella forzata nel pannello, se c'e'.
+        # ElevenLabs voices speak every language of the multilingual models: the
+        # language is the one forced in the panel, if any.
         return self.language or None
 
     def resolve_voice(self, requested: str | None) -> str:
@@ -100,15 +100,15 @@ class ElevenLabsTTS(TTSEngine):
             return requested
         return self.default_voice
 
-    # -------------------------------------------------------------- verifica
+    # -------------------------------------------------------------- check
     def check(self) -> dict[str, Any]:
         result: dict[str, Any] = {"ok": True}
         try:
             response = self._client.get(f"{self.base_url}/user/subscription", timeout=10.0)
         except httpx.HTTPError as exc:
-            return {"ok": False, "detail": f"ElevenLabs non raggiungibile: {_error_text(exc)}"}
+            return {"ok": False, "detail": f"ElevenLabs unreachable: {_error_text(exc)}"}
         if response.status_code == 401:
-            return {"ok": False, "detail": "Chiave API non valida"}
+            return {"ok": False, "detail": "Invalid API key"}
         if response.status_code < 400:
             data = response.json()
             used = int(data.get("character_count") or 0)
@@ -122,17 +122,17 @@ class ElevenLabsTTS(TTSEngine):
                 "resetsAt": int(reset) if reset else None,
                 "unit": "caratteri",
             }
-        # Una chiave con permessi ridotti puo' non leggere l'abbonamento (403)
-        # ma sintetizzare lo stesso: lo si vede dalle voci.
+        # A key with reduced permissions may not read the subscription (403) but
+        # synthesize all the same: the voices show it.
         self._catalog = None
         catalog = self.voice_catalog()
         if self._catalog_error:
             return {"ok": False, "detail": self._catalog_error}
-        result["detail"] = f"{len(catalog)} voci nel tuo account"
+        result["detail"] = f"{len(catalog)} voices in your account"
         result["voices"] = [voice.as_dict() for voice in catalog]
         return result
 
-    # ------------------------------------------------------------- sintesi
+    # ------------------------------------------------------------- synthesis
     def synthesize(
         self,
         text: str,
@@ -167,7 +167,7 @@ class ElevenLabsTTS(TTSEngine):
                 timings = _alignment_timings(payload.get("alignment") or payload.get("normalized_alignment"))
             elif response.status_code in (400, 404, 422):
                 logger.warning(
-                    "ElevenLabs non da' i tempi per %s (%s): uso l'endpoint semplice",
+                    "ElevenLabs gives no timings for %s (%s): using the plain endpoint",
                     self.model,
                     response.status_code,
                 )
@@ -247,8 +247,8 @@ def _status_message(response: httpx.Response) -> str:
             detail = detail.get("message") or detail.get("status")
     except ValueError:
         detail = response.text[:200]
-    known = {401: "chiave API non valida", 402: "crediti esauriti", 429: "troppe richieste o quota finita"}
-    reason = known.get(response.status_code) or f"errore {response.status_code}"
+    known = {401: "invalid API key", 402: "crediti esauriti", 429: "troppe richieste o quota finita"}
+    reason = known.get(response.status_code) or f"error {response.status_code}"
     return f"ElevenLabs: {reason}" + (f" ({detail})" if detail else "")
 
 

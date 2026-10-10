@@ -1,13 +1,14 @@
 /**
- * Un aiuto minimo per costruire il DOM senza innerHTML: tutto il testo che
- * arriva da agenti, servizi e utente finisce in nodi di testo, mai in markup.
+ * A minimal helper to build the DOM without innerHTML: all text coming from
+ * agents, services and the user ends up in text nodes, never in markup.
  */
 
+import { t } from './i18n.js';
 import { icon } from './icons.js';
 
 /**
- * `el('button', {class: 'x', onClick: fn, dataset: {id: 1}}, 'testo', nodo)`.
- * Gli attributi `null`/`undefined`/`false` vengono saltati.
+ * `el('button', {class: 'x', onClick: fn, dataset: {id: 1}}, 'text', node)`.
+ * `null`/`undefined`/`false` attributes are skipped.
  */
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -40,7 +41,7 @@ function append(node, children) {
   }
 }
 
-/** Bottone con icona (e testo facoltativo). */
+/** A button with an icon (and optional text). */
 export function iconButton(name, { label, title, className = 'icon-btn', size = 18, ...attrs } = {}) {
   return el(
     'button',
@@ -50,7 +51,17 @@ export function iconButton(name, { label, title, className = 'icon-btn', size = 
   );
 }
 
-/** Preferenza salvata (localStorage condiviso fra personaggio e pannello). */
+/** A saved preference (localStorage shared by the character and the panel). */
+/**
+ * With the 3D body ('vrm') or without ('none'), from `dc:body`. The flame is
+ * Tsukumo and the VRM an optional body: newcomers start without one; whoever
+ * had already done the introduction when the body came by default keeps it.
+ */
+export function readBody() {
+  const fallback = readSetting('dc:onboarded', false) ? 'vrm' : 'none';
+  return readSetting('dc:body', fallback) === 'none' ? 'none' : 'vrm';
+}
+
 export function readSetting(key, fallback) {
   try {
     const raw = window.localStorage.getItem(key);
@@ -64,32 +75,32 @@ export function writeSetting(key, value) {
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    /* localStorage non disponibile: la preferenza vale fino alla chiusura */
+    /* localStorage unavailable: the preference lasts until the window closes */
   }
 }
 
-/** Nomi italiani delle lingue piu' comuni, per i codici corti delle voci. */
+/** Names of the most common languages, for the short codes of the voices. */
 const LANGUAGES = {
-  it: 'Italiano',
-  en: 'Inglese',
-  es: 'Spagnolo',
-  fr: 'Francese',
-  de: 'Tedesco',
-  pt: 'Portoghese',
-  ja: 'Giapponese',
-  zh: 'Cinese',
-  cmn: 'Cinese',
+  it: t('Italian'),
+  en: t('English'),
+  es: t('Spanish'),
+  fr: t('French'),
+  de: t('German'),
+  pt: t('Portuguese'),
+  ja: t('Japanese'),
+  zh: t('Chinese'),
+  cmn: t('Chinese'),
   hi: 'Hindi',
-  ko: 'Coreano',
-  ru: 'Russo',
-  nl: 'Olandese',
-  pl: 'Polacco',
-  ar: 'Arabo',
-  tr: 'Turco',
-  sv: 'Svedese',
+  ko: t('Korean'),
+  ru: t('Russian'),
+  nl: t('Dutch'),
+  pl: t('Polish'),
+  ar: t('Arabic'),
+  tr: t('Turkish'),
+  sv: t('Swedish'),
 };
 
 export function languageLabel(code) {
-  if (!code) return 'Multilingua';
+  if (!code) return t('Multilingual');
   return LANGUAGES[code] ?? code.toUpperCase();
 }

@@ -1,46 +1,45 @@
 /**
- * Il corpo del personaggio: animazione procedurale in stile Desktop Mate.
+ * The character's body: procedural animation, Desktop Mate style.
  *
- * Desktop Mate anima i suoi personaggi con clip in motion capture. Qui non ne
- * abbiamo, quindi ricostruiamo a mano gli ingredienti che fanno sembrare vivo
- * un corpo, che sono sorprendentemente pochi ma vanno fatti tutti:
+ * Desktop Mate animates its characters with motion-capture clips. We have
+ * none here, so we rebuild by hand the ingredients that make a body look
+ * alive, which are surprisingly few but must all be done:
  *
- *  - postura: il peso sta su una gamba sola (contrapposto) e ogni tanto passa
- *    all'altra; il bacino si inclina, spalle e testa compensano, le ginocchia
- *    restano morbide invece che bloccate;
- *  - piedi piantati: IK a due ossa sulle gambe, cosi' il bacino puo' muoversi
- *    senza che i piedi scivolino sul pavimento;
- *  - respiro asimmetrico (si inspira piu' in fretta di quanto si espira) che
- *    solleva petto e spalle;
- *  - braccia che pendono per gravita' e seguono il busto in ritardo, mani
- *    rilassate con le dita piegate (le dita dritte sono la firma del robot);
- *  - sguardo a cascata: arrivano prima gli occhi, poi la testa, poi collo e
- *    busto; quando il cursore e' fermo guarda te, con qualche occhiata altrove;
- *  - piccole azioni spontanee: si stiracchia, si guarda intorno, si sistema i
- *    capelli, mette le mani dietro la schiena, canticchia, inclina la testa;
- *  - linguaggio del corpo mentre parla, posa pensierosa mentre l'LLM elabora;
- *  - la vita sul desktop: seduta sul bordo delle finestre con le gambe che
- *    dondolano, sdraiata sulla barra delle applicazioni (a pancia in giu' o
- *    distesa sul fianco), aggrappata al bordo dello schermo, presa per la
- *    collottola col mouse, in caduta, atterrata;
- *  - la musica: quando suona Spotify si muove a tempo (vedi music.js).
+ *  - posture: the weight sits on one leg (contrapposto) and now and then
+ *    moves to the other; the pelvis tilts, shoulders and head compensate,
+ *    the knees stay soft instead of locked;
+ *  - planted feet: two-bone IK on the legs, so the pelvis can move without
+ *    the feet sliding on the floor;
+ *  - asymmetric breathing (breathing in is faster than breathing out) that
+ *    lifts chest and shoulders;
+ *  - arms hanging by gravity and following the torso with a delay, relaxed
+ *    hands with bent fingers (straight fingers are the robot's signature);
+ *  - cascading gaze: first the eyes, then the head, then neck and torso;
+ *    when the cursor is still she looks at you, with a few glances away;
+ *  - small spontaneous actions: she stretches, looks around, tucks her hair,
+ *    puts her hands behind her back, hums, tilts her head;
+ *  - body language while she speaks, a thoughtful pose while the LLM works;
+ *  - life on the desktop: sitting on window edges with swinging legs, lying
+ *    on the taskbar (face down or on her side), clinging to the screen edge,
+ *    picked up by the scruff with the mouse, falling, landed;
+ *  - music: when Spotify plays she moves in time (see music.js).
  *
- * Modalita' del corpo (sfumano l'una nell'altra): `stand`, `sit`, `lie`,
- * `side`, `edge`, `held`, `fall`. Dove si trova la finestra lo decide il
- * processo Electron (pet-physics.js); qui si decide come sta il corpo.
+ * Body modes (they blend into each other): `stand`, `sit`, `lie`, `side`,
+ * `edge`, `held`, `fall`. Where the window is gets decided by the Electron
+ * process (pet-physics.js); here we decide how the body is.
  *
- * Convenzioni. Le pose sono scritte per un VRM 1.0 (guarda verso +Z, la sua
- * sinistra e' +X) sui bone *normalizzati* di three-vrm, che in T-pose hanno
- * rotazione nulla. I VRM 0.x nel loro spazio guardano verso -Z: basta
- * invertire le componenti X e Z (vedi `flip`). Braccia e gambe si scrivono per
- * il lato SINISTRO; il destro si ottiene a specchio (Y e Z cambiano segno).
+ * Conventions. Poses are written for a VRM 1.0 (facing +Z, her left is +X)
+ * on three-vrm's *normalized* bones, which have zero rotation in T-pose.
+ * VRM 0.x face -Z in their own space: flipping the X and Z components is
+ * enough (see `flip`). Arms and legs are written for the LEFT side; the
+ * right one is mirrored (Y and Z change sign).
  *
- * Promemoria degli assi, per il lato sinistro:
- *   braccio: Z- abbassa dalla T-pose, X- porta avanti; avambraccio: Y- piega il
- *   gomito; mano: Z- flette il polso; dita: Z- chiude; spalla: Z+ alza.
- *   gamba: X- porta avanti, Z+ allarga; ginocchio: X+ piega; piede: X+ punta.
- *   busto/testa: X+ in avanti, Y+ ruota verso la sua sinistra, Z+ inclina
- *   verso la sua destra.
+ * Axis reminder, for the left side:
+ *   arm: Z- lowers from the T-pose, X- brings forward; forearm: Y- bends the
+ *   elbow; hand: Z- flexes the wrist; fingers: Z- closes; shoulder: Z+ raises.
+ *   leg: X- brings forward, Z+ spreads; knee: X+ bends; foot: X+ points.
+ *   torso/head: X+ forward, Y+ turns towards her left, Z+ tilts towards her
+ *   right.
  */
 
 import * as THREE from 'three';
@@ -65,7 +64,7 @@ import { basisQuat, clamp, curve, damp, makeNoise, randomBetween, smoothstep, Sp
 import { Pose } from './body/pose.js';
 import { StanceMixer } from './body/stances.js';
 
-// Temporanei riutilizzati: niente allocazioni nel loop di rendering.
+// Reused temporaries: no allocations in the render loop.
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
@@ -86,23 +85,23 @@ const _e1 = new THREE.Euler();
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
-/** Il genere di tool dell'agente (backend/llm/activity.py) -> la posa mentre lavora. */
+/** The kind of the agent's tool (backend/llm/activity.py) -> the pose while it works. */
 const WORK_STYLE = { read: 'read', search: 'read', web: 'read', write: 'type', run: 'type', tool: 'type' };
 
-// ----------------------------------------------------------------- animatore
+// ------------------------------------------------------------------ animator
 export class BodyAnimator {
   /**
    * @param {import('@pixiv/three-vrm').VRM} vrm
-   * @param {THREE.Object3D} root gruppo che contiene `vrm.scene`: ruotandolo
-   *   il corpo intero penzola, si sdraia, si sporge dal bordo.
-   * @param {THREE.Object3D} lookTarget oggetto seguito dagli occhi (vrm.lookAt)
+   * @param {THREE.Object3D} root group containing `vrm.scene`: rotating it the
+   *   whole body dangles, lies down, leans out from the edge.
+   * @param {THREE.Object3D} lookTarget object followed by the eyes (vrm.lookAt)
    */
   constructor(vrm, root, lookTarget) {
     this.vrm = vrm;
     this.root = root;
     this.lookTarget = lookTarget;
     this.humanoid = vrm.humanoid;
-    /** VRM 0.x guarda verso -Z nel suo spazio: X e Z delle pose vanno invertite. */
+    /** VRM 0.x faces -Z in its space: the poses' X and Z must be flipped. */
     this.flip = vrm.meta?.metaVersion === '0' ? -1 : 1;
 
     this.pose = new Pose();
@@ -110,7 +109,7 @@ export class BodyAnimator {
 
     this._initSkeleton();
 
-    // --- postura in piedi ---------------------------------------------------
+    // --- standing posture ---------------------------------------------------
     this.breath = { phase: Math.random() };
     this.weight = new Spring(1.8, Math.random() < 0.5 ? -1 : 1);
     this.weightTarget = this.weight.x;
@@ -124,14 +123,14 @@ export class BodyAnimator {
     };
     this.armLag = { roll: new Spring(5), pitch: new Spring(5) };
 
-    // --- sguardo --------------------------------------------------------
+    // --- gaze -----------------------------------------------------------
     this.head = { yaw: new Spring(5.5), pitch: new Spring(5.5) };
     this.eyes = { yaw: 0, pitch: 0 };
     this.saccade = { yaw: 0, pitch: 0, timer: 1 };
     this.idleGlance = { yaw: 0, pitch: 0, timer: 2 };
     this.blinkRequested = false;
 
-    // --- parlato ----------------------------------------------------------
+    // --- speech -----------------------------------------------------------
     this.speech = {
       engage: new Spring(4),
       nod: new Spring(16),
@@ -151,51 +150,51 @@ export class BodyAnimator {
     };
     this.thinking = false;
     this.think = new Spring(3.2);
-    /** Come sta in piedi: normale, timida, cool, elegante... (body/stances.js). */
+    /** How she stands: normal, shy, cool, elegant... (body/stances.js). */
     this.stances = new StanceMixer();
-    /** Un agente al lavoro: che genere di passo (vedi WORK_STYLE) e le due pose. */
+    /** An agent at work: what kind of step (see WORK_STYLE) and the two poses. */
     this.work = { kind: null, read: new Spring(2.6), type: new Spring(2.6) };
-    /** Pesi delle pose da lavoro in questo frame, per il pannello olografico (holo.js). */
+    /** Weights of the work poses in this frame, for the holographic panel (holo.js). */
     this.workWeights = { reading: 0, typing: 0, taps: [0, 0] };
-    // --- sonno: il PC e' fermo da un po' (vedi presence.js) ----------------
-    /** 0 = sveglia, 0.5 = assonnata, 1 = addormentata. */
+    // --- sleep: the PC has been idle for a while (see presence.js) ----------
+    /** 0 = awake, 0.5 = drowsy, 1 = asleep. */
     this.sleepTarget = 0;
     this.sleep = 0;
-    /** Colpi di sonno da assonnata: la testa cade piano e si rialza di scatto. */
+    /** Nodding off when drowsy: the head drops slowly and snaps back up. */
     this.doze = { drop: 0, falling: false, timer: randomBetween(2, 4), jerk: 0 };
     this.sleepSide = 1;
     this.yawnTimer = randomBetween(3, 8);
-    // --- cursore sopra la testa: allunga la mano per toccarlo ---------------
+    // --- cursor over the head: she reaches out to touch it ------------------
     this.reachUp = new Spring(4);
     this.reachSide = 'right';
     this.reachTarget = new THREE.Vector3();
 
-    // --- azioni e pose spontanee ------------------------------------------
+    // --- spontaneous actions and poses ------------------------------------
     this.actions = [];
     this.fidgetTimer = randomBetween(...FIDGET_DELAY);
     this.lastFidget = null;
-    /** Gesti e cambi di posa spontanei: si spengono dal pannello. */
+    /** Spontaneous gestures and posture changes: they're turned off from the panel. */
     this.spontaneous = true;
     this.postureTimer = randomBetween(...POSTURE_DELAY);
-    /** Chiamata quando vuole sedersi/sdraiarsi/alzarsi: la esegue Electron. */
+    /** Called when she wants to sit/lie down/stand up: Electron carries it out. */
     this.onPostureRequest = null;
-    /** Clip .vrma: una a caso al posto di un gesto spontaneo (vero se e' partita). */
+    /** .vrma clips: a random one instead of a spontaneous gesture (true if it started). */
     this.onIdleClip = null;
-    /** Mentre suona una clip il corpo non inizia gesti suoi. */
+    /** While a clip plays the body doesn't start gestures of its own. */
     this.isClipPlaying = () => false;
 
-    // --- musica -------------------------------------------------------------
+    // --- music ---------------------------------------------------------------
     this.music = { active: false, bpm: 0, phase: 0, beat: 0, energy: 0, confidence: 0 };
-    /** Quanto si lascia andare alla musica, e quanto e' sicura del tempo. */
+    /** How much she lets go to the music, and how sure she is of the tempo. */
     this.vibe = new Spring(1.6);
     this.groove = new Spring(1.2);
-    /** Si spegne dal pannello. */
+    /** Turned off from the panel. */
     this.dancing = true;
 
-    // --- modalita' del corpo ----------------------------------------------
+    // --- body modes -----------------------------------------------------------
     this.mode = 'stand';
     this.modeWeight = { stand: 1, sit: 0, lie: 0, side: 0, edge: 0, held: 0, fall: 0 };
-    /** Su cosa poggia: 'ground' (barra), 'window', 'edge' o null (in aria). */
+    /** What she rests on: 'ground' (taskbar), 'window', 'edge' or null (in the air). */
     this.surface = 'ground';
     this.pendulum = { angle: 0, velocity: 0 };
     this.pivot = new THREE.Vector3();
@@ -214,27 +213,27 @@ export class BodyAnimator {
     this.shock = new Spring(3);
     this.shockTarget = 0;
 
-    // Seduta: gambe che dondolano, sballottata se la finestra si muove.
+    // Sitting: swinging legs, jostled if the window moves.
     this.legSwing = { amount: new Spring(1.5, 0.5), target: 0.5, timer: 3 };
     this.sitBounce = new Wobble(12, 0.35);
     this.sway = new Wobble(6, 0.22);
     this.carry = { x: null, y: null, px: null, py: null, vx: 0, vy: 0 };
 
-    // Bordo dello schermo: dove stanno le mani e il perno della sporgenza.
+    // Screen edge: where the hands are and the pivot of leaning out.
     this.edge = {
       sign: 1,
       pivot: new THREE.Vector3(),
       grips: [new THREE.Vector3(), new THREE.Vector3()],
     };
 
-    // --- espressioni ------------------------------------------------------
+    // --- expressions ------------------------------------------------------
     this.expressions = Object.fromEntries(MOODS.map((mood) => [mood, 0]));
   }
 
-  // ----------------------------------------------------------- scheletro
+  // ----------------------------------------------------------- skeleton
   _initSkeleton() {
     const humanoid = this.humanoid;
-    // Partiamo da una T-pose pulita: le misure dello scheletro si prendono qui.
+    // We start from a clean T-pose: the skeleton's measures are taken here.
     humanoid.resetNormalizedPose?.();
 
     this.bones = {};
@@ -242,7 +241,7 @@ export class BodyAnimator {
       const node = humanoid.getNormalizedBoneNode(name);
       if (node) this.bones[name] = node;
     }
-    // Occhi e mandibola li governano lookAt ed espressioni, non noi.
+    // Eyes and jaw are governed by lookAt and expressions, not by us.
     this.managed = Object.keys(this.bones).filter((name) => !['leftEye', 'rightEye', 'jaw'].includes(name));
 
     this.rigRoot = humanoid.normalizedHumanBonesRoot;
@@ -258,13 +257,13 @@ export class BodyAnimator {
     const head = rest('head');
     const hips = rest('hips');
     this.height = Math.max(0.5, (head?.y ?? 1.4) + 0.12);
-    /** Proporzioni del modello rispetto a un personaggio di ~1,5 m. */
+    /** The model's proportions relative to a ~1.5 m character. */
     this.size = this.height / 1.5;
     this.headRest = head;
     this.hipsRestWorld = hips;
 
-    // Punti notevoli, nello spazio del rig: la collottola per cui la si
-    // prende, la seduta (il fondo del bacino) e l'altezza delle spalle.
+    // Notable points, in the rig's space: the scruff she's picked up by, the
+    // seat (the bottom of the pelvis) and the shoulders' height.
     const neck = rest('neck') ?? head;
     this.restPoints = {
       nape: neck.clone().add(new THREE.Vector3(0, 0.03 * this.size, -0.06 * this.size * this.flip)),
@@ -289,20 +288,20 @@ export class BodyAnimator {
       if (arm) this.chains[`${side}Arm`] = arm;
     }
 
-    // Da sdraiata il corpo ruota di 90 gradi intorno al bacino e scende fino
-    // a toccare terra con la pancia.
+    // Lying down the body rotates 90 degrees around the pelvis and goes down
+    // until the belly touches the ground.
     this.lie = {
       pivot: this.restPoint('hips'),
-      // Il petto resta sollevato sui gomiti: la pancia tocca terra, i gomiti non la passano.
+      // The chest stays raised on the elbows: the belly touches the ground, the elbows don't go through it.
       offset: new THREE.Vector3(0, 0.2 * this.size - hips.y, -0.1 * this.size),
     };
 
-    // Sul fianco il corpo ruota di 90 gradi intorno all'asse dello sguardo
-    // della camera: resta rivolta verso di te, distesa lungo la barra. Il
-    // bacino finisce a mezza larghezza d'anca da terra. `sign` +1 = testa a
-    // sinistra (poggia sul fianco destro), -1 = testa a destra. `shift`
-    // ricentra il corpo nella finestra: dal bacino le gambe sono piu' lunghe
-    // del busto, quindi il perno non e' il centro della figura distesa.
+    // On her side the body rotates 90 degrees around the axis of the camera's
+    // gaze: she stays facing you, lying along the taskbar. The pelvis ends up
+    // half a hip-width off the ground. `sign` +1 = head to the left (resting on
+    // the right hip), -1 = head to the right. `shift` recentres the body in the
+    // window: from the pelvis the legs are longer than the torso, so the pivot
+    // isn't the centre of the lying figure.
     this.side = {
       sign: 1,
       pivot: this.restPoint('hips'),
@@ -312,9 +311,9 @@ export class BodyAnimator {
   }
 
   /**
-   * Catena a due ossa per l'IK. `bend` e' la direzione in cui si sposta
-   * l'articolazione di mezzo quando la catena si piega (il ginocchio va
-   * avanti, il gomito indietro), nello spazio del rig.
+   * Two-bone chain for the IK. `bend` is the direction the middle joint moves
+   * when the chain bends (the knee goes forward, the elbow back), in the
+   * rig's space.
    */
   _makeChain(upperName, lowerName, endName, bend) {
     const upper = this.bones[upperName];
@@ -347,15 +346,15 @@ export class BodyAnimator {
   }
 
   /**
-   * Punto notevole a riposo (`nape`, `seat`, `hips`, `head`, `shoulder`)
-   * nello spazio del gruppo che contiene il modello, cioe' nel mondo quando
-   * il corpo non e' ruotato. Serve alla scena per le ancore della finestra.
+   * Notable point at rest (`nape`, `seat`, `hips`, `head`, `shoulder`) in the
+   * space of the group containing the model, i.e. in the world when the body
+   * isn't rotated. The scene needs it for the window's anchors.
    */
   restPoint(name, target = new THREE.Vector3()) {
     return target.copy(this.restPoints[name]).applyMatrix4(this.vrm.scene.matrix);
   }
 
-  /** Bone di riferimento per le mani, con ripieghi per i modelli senza upperChest. */
+  /** Reference bone for the hands, with fallbacks for models without upperChest. */
   _anchor(name) {
     const b = this.bones;
     if (name === 'upperChest') return b.upperChest ?? b.chest ?? b.spine;
@@ -363,17 +362,17 @@ export class BodyAnimator {
     return b[name] ?? b.hips;
   }
 
-  /** Vettore scritto nelle convenzioni VRM 1.0, portato nello spazio del rig. */
+  /** A vector written in VRM 1.0 conventions, brought into the rig's space. */
   _rig(target, x, y, z) {
     return target.set(x * this.flip, y, z * this.flip);
   }
 
-  // ----------------------------------------------------------- comandi
-  /** Avvia un'azione per nome (utile anche dalla console: `stage.body.play('stretch')`). */
+  // ----------------------------------------------------------- commands
+  /** Starts an action by name (handy from the console too: `stage.body.play('stretch')`). */
   play(name, options = {}) {
     const def = ACTIONS[name];
     if (!def || !def.modes.includes(this.mode)) return false;
-    // Una reazione interrompe tutto il resto; un'azione non si sovrappone a se stessa.
+    // A reaction interrupts everything else; an action doesn't overlap itself.
     for (const action of this.actions) {
       if (def.reaction || action.name === name) action.cancelled = true;
     }
@@ -388,7 +387,7 @@ export class BodyAnimator {
     return true;
   }
 
-  /** Cambia il modo di stare in piedi (`shy`, `cool`, `ladylike`...): sfuma nel nuovo. */
+  /** Changes the way of standing (`shy`, `cool`, `ladylike`...): it fades into the new one. */
   setStance(name) {
     this.stances.set(name);
   }
@@ -400,16 +399,16 @@ export class BodyAnimator {
   }
 
   /**
-   * L'agente sta usando un tool (`read`, `write`, `run`...): mentre pensa
-   * legge un tablet invisibile o batte su una tastiera invisibile.
+   * The agent is using a tool (`read`, `write`, `run`...): while it thinks
+   * she reads an invisible tablet or types on an invisible keyboard.
    */
   setWorking(kind) {
     this.work.kind = kind || null;
   }
 
   /**
-   * Sonno: 0 sveglia, 0.5 assonnata, 1 addormentata. Ci si addormenta piano,
-   * in una decina di secondi; ci si sveglia in un attimo, sbattendo le palpebre.
+   * Sleep: 0 awake, 0.5 drowsy, 1 asleep. Falling asleep is slow, about ten
+   * seconds; waking up is quick, blinking.
    */
   setSleep(level) {
     const target = clamp(Number(level) || 0, 0, 1);
@@ -422,17 +421,17 @@ export class BodyAnimator {
     this.sleepTarget = target;
   }
 
-  /** Dorme davvero (non solo assonnata). */
+  /** Really asleep (not just drowsy). */
   get asleep() {
     return this.sleep > 0.75;
   }
 
-  /** Bocca aperta dal corpo (lo sbadiglio), letta dalla scena a ogni frame. */
+  /** Mouth opened by the body (the yawn), read by the scene every frame. */
   get mouthOpen() {
     return this.pose.mouthOpen;
   }
 
-  /** Una nuova frase sta per essere pronunciata: sceglie gesto, umore e testa. */
+  /** A new sentence is about to be spoken: it chooses gesture, mood and head. */
   onClipStart({ text = '', mood = null, duration = 1, vocal = null } = {}) {
     const speech = this.speech;
     const trimmed = text.trim();
@@ -442,15 +441,15 @@ export class BodyAnimator {
     speech.emphatic = trimmed.endsWith('!');
     speech.mood = mood;
     if (vocal) {
-      // Un versetto ("Hii!", "Ehehe!") accompagna un gesto gia' in corso,
-      // come il saluto: niente gesti delle mani e nessuna interruzione.
+      // A vocal ("Hii!", "Ehehe!") goes with a gesture already in progress, like
+      // the greeting: no hand gestures and no interruption.
       speech.gesture = null;
       speech.yawTarget = 0;
       speech.rollTarget = 0;
       return;
     }
 
-    // Un gesto diverso a ogni frase, ma non sempre: gesticolare di continuo stanca.
+    // A different gesture at every sentence, but not always: gesturing all the time is tiring.
     const options = speech.question
       ? ['open', 'open', 'explainRight', null]
       : ['explainRight', 'explainLeft', 'open', 'chest', null, null];
@@ -464,9 +463,9 @@ export class BodyAnimator {
   }
 
   /**
-   * Presa col mouse, per la collottola come un gattino: il corpo penzola da
-   * li'. La scena sposta la finestra perche' la collottola finisca sotto il
-   * cursore, qualunque punto si sia afferrato.
+   * Picked up with the mouse, by the scruff like a kitten: the body dangles
+   * from there. The scene moves the window so the scruff ends up under the
+   * cursor, whatever point was grabbed.
    */
   beginHold() {
     this.mode = 'held';
@@ -484,7 +483,7 @@ export class BodyAnimator {
     this.shock.x = Math.max(this.shock.x, 0.6);
   }
 
-  /** Posizione della finestra mentre e' in mano (pixel dello schermo). */
+  /** The window's position while it's held (screen pixels). */
   moveHold(x, y) {
     this.hold.x = x;
     this.hold.y = y;
@@ -503,8 +502,8 @@ export class BodyAnimator {
   }
 
   /**
-   * Arrivata su qualcosa: sulla barra atterra in piedi piegando le ginocchia,
-   * sul bordo di una finestra si siede con un piccolo rimbalzo.
+   * Landed on something: on the taskbar she lands standing, bending her knees,
+   * on a window's edge she sits with a small bounce.
    */
   landed(impact = 0.5, posture = 'stand') {
     const strength = clamp(impact, 0.15, 1);
@@ -523,8 +522,8 @@ export class BodyAnimator {
   }
 
   /**
-   * Cambio di posa sulla barra, deciso qui e confermato da Electron.
-   * @param {number} [sign] sul fianco: +1 testa a sinistra, -1 a destra
+   * Posture change on the taskbar, decided here and confirmed by Electron.
+   * @param {number} [sign] on her side: +1 head to the left, -1 to the right
    */
   setPosture(posture, sign) {
     if (!POSTURES.includes(posture)) return;
@@ -536,8 +535,8 @@ export class BodyAnimator {
   }
 
   /**
-   * Aggrappata al bordo dello schermo. `edgeX` e' la x del bordo nel mondo:
-   * le mani ci si appoggiano e il corpo si sporge verso l'interno.
+   * Clinging to the screen edge. `edgeX` is the edge's x in the world: the
+   * hands rest on it and the body leans inwards.
    */
   setEdge(side, edgeX) {
     this.mode = 'edge';
@@ -552,15 +551,15 @@ export class BodyAnimator {
     this.edge.grips[1].set(edgeX, gripY - 0.14 * this.size, 0.05 * this.size);
   }
 
-  /** La finestra su cui e' seduta si e' spostata (pixel dello schermo). */
+  /** The window she's sitting on moved (screen pixels). */
   carried(x, y) {
     this.carry.x = x;
     this.carry.y = y;
   }
 
   /**
-   * Tocco: sulla testa e' una carezza, sul corpo un piccolo spavento.
-   * Restituisce la reazione partita (`pat`, `flinch`) o `null`.
+   * Touch: on the head it's a pat, on the body a little fright.
+   * Returns the reaction that started (`pat`, `flinch`) or `null`.
    */
   poke(region) {
     if (!POSTURES.includes(this.mode)) return null;
@@ -569,17 +568,17 @@ export class BodyAnimator {
     return this.play(name) ? name : null;
   }
 
-  /** Ritmo della musica che sta suonando (vedi music.js), a ogni frame. */
+  /** The rhythm of the music playing (see music.js), every frame. */
   setMusic(state) {
     this.music = state;
   }
 
-  /** Quanto bisogna sopprimere il battito di ciglia (occhi gia' chiusi dal sorriso). */
+  /** How much the blink must be suppressed (eyes already closed by the smile). */
   get blinkSuppression() {
     return clamp(this.expressions.happy * 1.2, 0, 1);
   }
 
-  /** Il battito di ciglia richiesto da un cambio di sguardo (letto una volta). */
+  /** The blink requested by a gaze change (read once). */
   consumeBlinkRequest() {
     const requested = this.blinkRequested;
     this.blinkRequested = false;
@@ -607,12 +606,12 @@ export class BodyAnimator {
   /**
    * @param {number} dt
    * @param {object} ctx
-   * @param {boolean} ctx.speaking   c'e' audio in riproduzione
-   * @param {number} ctx.level       volume istantaneo 0..1
-   * @param {THREE.Vector3|null} ctx.gazePoint punto del cursore nel mondo
-   * @param {boolean} ctx.gazeFresh  il cursore si e' mosso da poco
-   * @param {THREE.Vector3} ctx.viewer posizione della camera (lo spettatore)
-   * @param {number} ctx.metersPerPixel scala schermo -> scena, per la fisica
+   * @param {boolean} ctx.speaking   audio is playing
+   * @param {number} ctx.level       instantaneous volume 0..1
+   * @param {THREE.Vector3|null} ctx.gazePoint the cursor's point in the world
+   * @param {boolean} ctx.gazeFresh  the cursor moved recently
+   * @param {THREE.Vector3} ctx.viewer the camera's position (the viewer)
+   * @param {number} ctx.metersPerPixel screen -> scene scale, for the physics
    */
   update(dt, ctx) {
     this.time += dt;
@@ -665,9 +664,9 @@ export class BodyAnimator {
   }
 
   /**
-   * Pendolo: quando e' in mano il corpo penzola dal punto di presa. La
-   * finestra che accelera di lato spinge il corpo nella direzione opposta,
-   * poi la gravita' lo riporta giu' con qualche oscillazione.
+   * Pendulum: when held the body dangles from the grab point. The window
+   * accelerating sideways pushes the body the opposite way, then gravity
+   * brings it back down with a few swings.
    */
   _updatePendulum(dt, ctx) {
     const hold = this.hold;
@@ -688,8 +687,8 @@ export class BodyAnimator {
     hold.lastX = heldNow ? hold.x : null;
     hold.lastY = heldNow ? hold.y : null;
 
-    // Accoppiamento ridotto: con la fisica "vera" uno strattone del mouse lo
-    // farebbe girare di 45 gradi e uscire dalla finestra.
+    // Reduced coupling: with "real" physics a jerk of the mouse would spin her
+    // 45 degrees and push her out of the window.
     const metersPerPixel = ctx.metersPerPixel || 0.004;
     const ax = heldNow ? clamp(hold.ax * metersPerPixel * 0.3, -14, 14) : 0;
     const length = 0.55;
@@ -708,8 +707,8 @@ export class BodyAnimator {
   }
 
   /**
-   * Seduta su una finestra che si sposta: le accelerazioni della finestra la
-   * sballottano (busto che ondeggia, gambe che ciondolano, piccoli sobbalzi).
+   * Sitting on a window that moves: the window's accelerations jostle her
+   * (swaying torso, dangling legs, small jolts).
    */
   _updateCarry(dt, ctx) {
     const carry = this.carry;
@@ -747,12 +746,12 @@ export class BodyAnimator {
       (action) => action.t < action.def.duration && !(action.cancelled && action.fade < 0.01),
     );
 
-    // Gesti spontanei solo quando e' tranquilla: ferma, zitta, senza pensieri.
+    // Spontaneous gestures only when she's calm: still, quiet, no thoughts.
     const settled = RESTING.includes(this.mode) && this.modeWeight[this.mode] > 0.95;
     const quiet = !this.thinking && !ctx.speaking && this.time - this.speech.lastActive > 2;
     if (!settled || !quiet) return;
 
-    // Assonnata ogni tanto sbadiglia; addormentata non fa nient'altro.
+    // Drowsy she yawns now and then; asleep she does nothing else.
     if (this.sleepTarget > 0 || this.sleep > 0.05) {
       this.yawnTimer -= dt;
       if (this.sleep > 0.25 && this.sleep < 0.7 && this.yawnTimer <= 0 && !this.actions.length) {
@@ -763,7 +762,7 @@ export class BodyAnimator {
     }
     if (!this.spontaneous) return;
 
-    // Sulla barra ogni tanto si siede sul bordo o si sdraia, poi si rialza.
+    // On the taskbar now and then she sits on the edge or lies down, then gets up.
     this.postureTimer -= dt;
     if (this.surface === 'ground' && this.onPostureRequest && this.postureTimer <= 0 && this.actions.length === 0) {
       let next = null;
@@ -779,7 +778,7 @@ export class BodyAnimator {
       return;
     }
 
-    // Mentre balla (o suona una clip) non si mette a fare altro.
+    // While she dances (or a clip plays) she doesn't start anything else.
     if (this.actions.length || this.vibe.x > 0.3 || this.isClipPlaying()) return;
     this.fidgetTimer -= dt;
     if (this.fidgetTimer > 0) return;
@@ -801,10 +800,10 @@ export class BodyAnimator {
     }
   }
 
-  // ----------------------------------------------------------- strati comuni
-  /** Respiro: inspira in ~40% del ciclo, espira nel resto. */
+  // ----------------------------------------------------------- shared layers
+  /** Breathing: in for ~40% of the cycle, out for the rest. */
   _breathe(pose, dt, ctx, w) {
-    // Nel sonno il respiro rallenta e si fa piu' profondo.
+    // In sleep the breath slows down and gets deeper.
     const breathRate = (ctx.speaking ? 1 / 3.4 : 1 / 4.2) * (1 - 0.35 * this.sleep);
     this.breath.phase = (this.breath.phase + dt * breathRate) % 1;
     if (w < EPSILON) return;
@@ -819,8 +818,8 @@ export class BodyAnimator {
   }
 
   /**
-   * Le braccia pendono per gravita': quando il busto si inclina le
-   * raddrizziamo, con un filo di ritardo, come un peso appeso.
+   * The arms hang by gravity: when the torso tilts we straighten them, with a
+   * slight delay, like a hanging weight.
    */
   _armGravity(pose, dt, w) {
     const roll = ['hips', 'spine', 'chest', 'upperChest'].reduce((sum, bone) => sum + pose.get(bone).z, 0);
@@ -832,33 +831,33 @@ export class BodyAnimator {
     pose.add('rightUpperArm', lagPitch * w, 0, lagRoll * w);
   }
 
-  // ----------------------------------------------------------- in piedi
+  // ----------------------------------------------------------- standing
   _stand(pose, dt, w) {
     const t = this.time;
     pose.legIK += w;
 
-    // --- peso su una gamba (contrapposto), cambia ogni tanto ---------------
+    // --- weight on one leg (contrapposto), it changes now and then -----------
     this.weightTimer -= dt;
     if (this.weightTimer <= 0) {
       const roll = Math.random();
       this.weightTarget = roll < 0.12 ? 0 : roll < 0.56 ? -1 : 1;
       this.weightTimer = randomBetween(4, 11);
     }
-    // Un'elegante sta composta, un'energica si sposta di piu' (vedi stances.js).
+    // An elegant one stays composed, an energetic one moves more (see stances.js).
     const weight = this.weight.update(this.weightTarget, dt) * clamp(this.stances.sway, 0, 1.3);
     const lean = Math.abs(weight);
-    // Bacino sopra la gamba d'appoggio, piu' alto da quel lato; il busto
-    // compensa in senso opposto e la testa torna dritta.
+    // Pelvis over the supporting leg, higher on that side; the torso
+    // compensates the other way and the head goes back straight.
     pose.hips.x += 0.022 * weight * w;
-    // Pochi millimetri bastano: vicino alla gamba tesa il ginocchio e'
-    // sensibilissimo (5 mm di bacino piu' basso = ~13 gradi di piega).
+    // A few millimetres are enough: near the straight leg the knee is very
+    // sensitive (5 mm lower pelvis = ~13 degrees of bend).
     pose.hips.y -= (0.002 + 0.0025 * lean) * w;
     pose.add('hips', 0, 0.05 * weight * w, 0.055 * weight * w);
     pose.add('spine', 0, -0.03 * weight * w, -0.045 * weight * w);
     pose.add('chest', 0, -0.02 * weight * w, -0.03 * weight * w);
     pose.add('neck', 0, 0, 0.012 * weight * w);
     pose.add('head', 0, 0, 0.008 * weight * w);
-    // La gamba libera va un po' avanti e in fuori, col tallone appena alzato.
+    // The free leg goes a little forward and out, with the heel just raised.
     for (const side of SIDES) {
       const s = side === 'left' ? 1 : -1;
       const free = clamp(-weight * s, 0, 1) * w;
@@ -867,13 +866,13 @@ export class BodyAnimator {
       pose.heel[side] += 0.12 * free;
     }
 
-    // --- oscillazione posturale: nessuno sta fermo come una statua ------------
+    // --- postural sway: nobody stands still like a statue ---------------------
     const n = this.noise;
     pose.hips.x += 0.006 * n.swayX(t) * w;
     pose.hips.z += 0.005 * n.swayZ(t) * w;
     pose.add('spine', 0.008 * n.spine(t) * w, 0, 0.008 * n.swayX(t + 3) * w);
 
-    // --- braccia e mani a riposo -------------------------------------------
+    // --- arms and hands at rest -------------------------------------------
     pose.both('Shoulder', 0, 0, -0.03, w);
     pose.both('UpperArm', 0.03, 0.05, -1.24, w);
     pose.both('LowerArm', 0, -0.32, 0, w);
@@ -881,14 +880,14 @@ export class BodyAnimator {
     pose.add('spine', 0.02 * w, 0, 0);
     pose.add('chest', -0.015 * w, 0, 0);
 
-    // Il modo di stare in piedi, sopra la postura di base.
+    // The way of standing, over the base posture.
     this.stances.apply(pose, dt, t, w);
   }
 
-  // ----------------------------------------------------------- seduta
+  // ----------------------------------------------------------- sitting
   /**
-   * Seduta sul bordo (di una finestra o della barra): cosce in avanti,
-   * stinchi giu' davanti al bordo, piedi che dondolano, mani sulle cosce.
+   * Sitting on an edge (of a window or the taskbar): thighs forward, shins
+   * down in front of the edge, swinging feet, hands on the thighs.
    */
   _sit(pose, dt, w) {
     const t = this.time;
@@ -908,7 +907,7 @@ export class BodyAnimator {
       pose.side(side, 'UpperLeg', -1.45 + 0.05 * phase - 0.25 * bounce, 0.04, 0.06, w);
       pose.side(side, 'LowerLeg', 1.4 + 0.38 * phase - 0.5 * bounce, 0, 0, w);
       pose.side(side, 'Foot', 0.2 + 0.12 * phase, 0, 0, w);
-      // Le gambe ciondolano quando la finestra si muove.
+      // The legs dangle when the window moves.
       pose.add(`${side}UpperLeg`, 0, 0, -0.25 * sway * w);
     }
 
@@ -924,10 +923,10 @@ export class BodyAnimator {
     pose.reach('right', 'hips', [0.1, -0.03, 0.22], [1, -0.4, -0.5], w, 0.1, true);
   }
 
-  // ----------------------------------------------------------- sdraiata
+  // ----------------------------------------------------------- lying down
   /**
-   * Sdraiata a pancia in giu' sulla barra, rivolta verso di te: appoggiata
-   * ai gomiti, mento fra le mani, piedi che scalciano piano in aria.
+   * Lying face down on the taskbar, facing you: resting on the elbows, chin in
+   * her hands, feet kicking gently in the air.
    */
   _lie(pose, w) {
     const t = this.time;
@@ -951,20 +950,20 @@ export class BodyAnimator {
     pose.mood('relaxed', 0.35 * w);
   }
 
-  // ----------------------------------------------------------- sul fianco
+  // ----------------------------------------------------------- on her side
   /**
-   * Distesa sul fianco lungo la barra, rivolta verso di te: busto sollevato
-   * sul gomito, testa appoggiata alla mano, l'altro braccio abbandonato sul
-   * fianco, gambe piegate con quella di sopra piu' avanti che dondola piano.
-   * La rotazione del corpo intero la fa `_rootTransform`; qui le ossa sono
-   * scritte nello spazio del personaggio, come se fosse in piedi.
+   * Lying on her side along the taskbar, facing you: torso raised on the
+   * elbow, head resting on the hand, the other arm lying on the hip, legs bent
+   * with the upper one further forward, gently swinging. The whole body's
+   * rotation is done by `_rootTransform`; here the bones are written in the
+   * character's space, as if she were standing.
    */
   _side(pose, w) {
     const t = this.time;
     const sign = this.side.sign;
     const low = sign > 0 ? 'right' : 'left';
     const high = sign > 0 ? 'left' : 'right';
-    // Z+ inclina verso la sua destra: il busto si solleva piegandosi verso il fianco di sopra.
+    // Z+ tilts towards her right: the torso rises bending towards the upper hip.
     const up = -sign;
     pose.add('spine', 0, 0, 0.22 * up * w);
     pose.add('chest', 0, 0, 0.2 * up * w);
@@ -972,15 +971,15 @@ export class BodyAnimator {
     pose.add('neck', 0, 0, 0.1 * up * w);
     pose.add('head', 0.04 * w, 0, (0.12 + 0.03 * Math.sin(t * 0.5)) * up * w);
 
-    // Gomito a terra sotto la spalla, la tempia appoggiata nel palmo.
+    // Elbow on the ground under the shoulder, the temple resting in the palm.
     pose.reach(low, 'head', [0.08, -0.07, 0.05], [1, -0.6, 0.1], w, 0.9, true);
     pose.fingers[low] += 0.1 * w;
-    // Il braccio di sopra riposa davanti a lei, la mano sulla coscia.
+    // The upper arm rests in front of her, the hand on the thigh.
     pose.reach(high, 'hips', [0.15, -0.1, 0.18], [0.5, -0.2, -0.8], w, 0.2, true);
     pose.fingers[high] += 0.3 * w;
 
-    // La gamba di sopra si apre verso l'alto (cosi' si vede, invece di
-    // sovrapporsi all'altra in profondita') e dondola piano.
+    // The upper leg opens upwards (so it's visible, instead of overlapping the
+    // other in depth) and swings gently.
     for (const leg of SIDES) {
       const top = leg === high;
       const swing = top ? Math.sin(t * TAU * 0.22) : 0;
@@ -991,12 +990,12 @@ export class BodyAnimator {
     pose.mood('relaxed', 0.4 * w);
   }
 
-  // ----------------------------------------------------------- musica
+  // ----------------------------------------------------------- music
   /**
-   * Si muove a tempo con la musica: testa che annuisce sul battito, peso che
-   * passa da una gamba all'altra ogni due battiti, spalle che molleggiano. Se
-   * il tempo non e' affidabile (musica d'atmosfera, parlato) ondeggia piano
-   * per conto suo invece di annuire fuori tempo. Mai mentre parla o pensa.
+   * She moves in time with the music: head nodding on the beat, weight moving
+   * from one leg to the other every two beats, bouncing shoulders. If the
+   * tempo isn't reliable (ambient music, speech) she sways gently on her own
+   * instead of nodding out of time. Never while she speaks or thinks.
    */
   _dance(pose, dt, ctx) {
     const W = this.modeWeight;
@@ -1008,7 +1007,7 @@ export class BodyAnimator {
     if (vibe < EPSILON) return;
 
     const amp = vibe * (0.55 + 0.45 * m.energy);
-    // 1 sul battito, 0 a meta'; "sway" arriva agli estremi sui battiti, alternando lato.
+    // 1 on the beat, 0 halfway; "sway" reaches the extremes on the beats, alternating sides.
     const bob = (0.5 + 0.5 * Math.cos(TAU * m.phase)) ** 2 * groove;
     const sway = groove * Math.cos(Math.PI * (m.beat + m.phase)) + (1 - groove) * Math.sin(this.time * TAU * 0.3);
     const upright = W.stand + W.sit;
@@ -1018,7 +1017,7 @@ export class BodyAnimator {
     pose.add('spine', 0.03 * bob * amp * upright, 0, 0.06 * sway * amp * upright);
     pose.add('chest', 0.02 * bob * amp * upright, 0.05 * sway * amp * upright, 0.03 * sway * amp * upright);
     pose.both('Shoulder', 0, 0, 0.06 * bob * amp * upright);
-    // Le braccia seguono il corpo con un filo di ritardo: mezzo battito dopo.
+    // The arms follow the body with a slight delay: half a beat later.
     const lag = groove * Math.cos(Math.PI * (m.beat + m.phase) - 0.6) + (1 - groove) * Math.sin(this.time * TAU * 0.3 - 0.6);
     pose.both('UpperArm', 0, 0, 0.07 * bob * amp * upright);
     pose.add('leftUpperArm', 0, 0, 0.05 * lag * amp * upright);
@@ -1044,7 +1043,7 @@ export class BodyAnimator {
       pose.side('right', 'LowerLeg', -0.35 * sway, 0, 0, s);
     }
     if (W.side > EPSILON) {
-      // Batte il piede di sopra a tempo.
+      // She taps the upper foot in time.
       const high = this.side.sign > 0 ? 'left' : 'right';
       pose.side(high, 'LowerLeg', 0.18 * bob, 0, 0, W.side * amp);
       pose.side(high, 'Foot', 0.2 * bob, 0, 0, W.side * amp);
@@ -1053,12 +1052,12 @@ export class BodyAnimator {
     pose.mood('relaxed', 0.2 * vibe);
   }
 
-  // ----------------------------------------------------------- bordo
-  /** Aggrappata al bordo dello schermo: mani sul bordo, sbircia dentro, gambe a penzoloni. */
+  // ----------------------------------------------------------- edge
+  /** Clinging to the screen edge: hands on the edge, peeking in, legs dangling. */
   _edge(pose, w) {
     const t = this.time;
     const s = this.edge.sign;
-    // La mano dal lato del bordo sta piu' in alto, l'altra poco sotto.
+    // The hand on the edge's side is higher, the other a little below.
     const near = s > 0 ? 'right' : 'left';
     const far = s > 0 ? 'left' : 'right';
     pose.reachWorld(near, this.edge.grips[0], [1, -1, -0.2], w, 0.3);
@@ -1068,7 +1067,7 @@ export class BodyAnimator {
     pose.both('UpperArm', -0.3, 0, -0.3, w);
     pose.both('LowerArm', 0, -0.6, 0, w);
 
-    // Testa inclinata verso l'interno, come chi sbircia da dietro un angolo.
+    // Head tilted inwards, like someone peeking from behind a corner.
     pose.add('head', 0.03 * w, 0, s * 0.16 * w);
     pose.add('neck', 0, 0, s * 0.06 * w);
     for (const side of SIDES) {
@@ -1081,10 +1080,10 @@ export class BodyAnimator {
     pose.mood('happy', 0.1 * w);
   }
 
-  // ----------------------------------------------------------- in mano
+  // ----------------------------------------------------------- held
   /**
-   * Presa per la collottola: busto che si incurva in avanti, testa su che
-   * guarda chi la tiene, braccia e gambe a penzoloni. Scalcia solo se la scuoti.
+   * Held by the scruff: torso curling forward, head up looking at whoever
+   * holds her, arms and legs dangling. She kicks only if you shake her.
    */
   _held(pose, dt, w) {
     const t = this.time;
@@ -1096,11 +1095,11 @@ export class BodyAnimator {
     pose.add('upperChest', 0.06 * w, 0, 0);
     pose.add('neck', -0.2 * w, 0, 0);
     pose.add('head', -0.12 * w, 0, 0.08 * Math.sin(t * 0.7 + 1) * w);
-    // Spalle tirate su verso le orecchie: e' il segno di chi e' preso per il colletto.
+    // Shoulders pulled up to the ears: the sign of someone held by the collar.
     pose.both('Shoulder', 0, 0, 0.2, w);
 
-    // Le braccia compensano l'inclinazione del busto e restano verticali,
-    // in ritardo sull'oscillazione.
+    // The arms compensate the torso's tilt and stay vertical, lagging behind
+    // the swing.
     const torso = HOLD_PITCH + 0.35;
     pose.both('UpperArm', -torso * 0.9, 0, -1.38, w);
     pose.add('leftUpperArm', 0, 0, -0.15 * swing * w);
@@ -1114,23 +1113,23 @@ export class BodyAnimator {
       const s = side === 'left' ? 1 : -1;
       const phase = t * TAU * 1.15 + (s > 0 ? 0 : Math.PI);
       const k = Math.sin(phase) * kick;
-      // Gambe un po' diverse fra loro: due gambe identiche sembrano un manichino.
+      // Legs slightly different from each other: two identical legs look like a mannequin.
       const bent = s > 0 ? 0.55 : 0.3;
       pose.side(side, 'UpperLeg', -HOLD_PITCH * 0.5 - 0.1 * (s > 0 ? 1 : 0) - 0.28 * k, 0.04, 0.05, w);
       pose.side(side, 'LowerLeg', bent + 0.45 * Math.max(0, Math.sin(phase + 1.3)) * kick, 0, 0, w);
       pose.side(side, 'Foot', 0.75, 0, 0, w);
-      // Le gambe restano indietro rispetto all'oscillazione del corpo.
+      // The legs lag behind the body's swing.
       pose.add(`${side}UpperLeg`, 0, 0, -0.12 * swing * w);
     }
     pose.mood('relaxed', 0.25 * w);
   }
 
-  // ----------------------------------------------------------- in caduta
+  // ----------------------------------------------------------- falling
   _fall(pose, w) {
     const t = this.time;
     for (const side of SIDES) {
       const s = side === 'left' ? 1 : -1;
-      // Braccia in alto che si agitano: "uaaah!".
+      // Arms up and flailing: "waaah!".
       const flail = Math.sin(t * 11 + (s > 0 ? 0 : 1.7));
       pose.side(side, 'UpperArm', -0.3, 0, 0.55 + 0.18 * flail, w);
       pose.side(side, 'LowerArm', 0, -0.7 - 0.2 * flail, 0, w);
@@ -1146,19 +1145,19 @@ export class BodyAnimator {
     pose.add('head', 0.12 * w, 0, 0);
   }
 
-  // ----------------------------------------------------------- parlato e pensiero
+  // ----------------------------------------------------------- speech and thought
   /**
-   * @param {number} bodyWeight quanto possono muoversi braccia e busto (in piedi o seduta)
-   * @param {number} headWeight quanto puo' annuire la testa (anche sdraiata o aggrappata)
+   * @param {number} bodyWeight how much arms and torso can move (standing or sitting)
+   * @param {number} headWeight how much the head can nod (lying down or clinging too)
    */
   _speech(pose, dt, ctx, bodyWeight, headWeight) {
     const speech = this.speech;
     if (ctx.speaking) speech.lastActive = this.time;
-    // Resta "in conversazione" per un attimo anche fra una frase e l'altra.
+    // She stays "in conversation" for a moment between one sentence and the next.
     const active = this.time - speech.lastActive < 0.7;
     const engage = speech.engage.update(active ? 1 : 0, dt);
 
-    // Battute: i picchi di volume sopra la media diventano cenni della testa.
+    // Beats: volume peaks above the average become head nods.
     speech.slowLevel = damp(speech.slowLevel, ctx.level, 2.5, dt);
     const onset = Math.max(0, ctx.level - speech.slowLevel - 0.04);
     const emphasis = speech.emphatic ? 1.4 : 1;
@@ -1171,8 +1170,8 @@ export class BodyAnimator {
     }
     if (engage < EPSILON) return;
 
-    // L'umore delle emoji, contenuto: con la bocca che parla un sorriso
-    // pieno deformerebbe il lip-sync.
+    // The emojis' mood, restrained: with the mouth speaking a full smile would
+    // deform the lip-sync.
     if (speech.mood) pose.mood(speech.mood, 0.5 * engage);
 
     const h = engage * headWeight;
@@ -1183,7 +1182,7 @@ export class BodyAnimator {
     if (e < EPSILON) return;
     pose.add('spine', 0.025 * e, 0, 0);
 
-    // Domanda: verso la fine della frase alza le spalle e inclina la testa.
+    // Question: towards the end of the sentence she shrugs and tilts her head.
     const progress = clamp((this.time - speech.clipStart) / speech.clipDuration, 0, 1);
     if (speech.question) {
       const shrug = curve(progress, [[0.55, 0], [0.85, 1], [1, 0.6]]) * e;
@@ -1191,7 +1190,7 @@ export class BodyAnimator {
       pose.add('head', -0.03 * shrug, 0, 0);
     }
 
-    // Gesti delle mani, con i palmi che "battono" il ritmo delle parole.
+    // Hand gestures, with the palms "beating" the rhythm of the words.
     const beat = nod * 0.035 + ctx.level * 0.015;
     for (const [name, spring] of Object.entries(speech.gestures)) {
       const g = spring.x * bodyWeight;
@@ -1205,7 +1204,7 @@ export class BodyAnimator {
     }
   }
 
-  /** Il cursore resta sopra la testa: si allunga verso di lui, contenta (Desktop Mate lo fa). */
+  /** The cursor stays over her head: she reaches for it, happy (Desktop Mate does it). */
   _reachCursor(pose, dt, ctx, w) {
     const free = !ctx.speaking && !this.thinking && this.sleep < 0.2 && !this.actions.some((action) => action.def.reaction);
     const k = this.reachUp.update(ctx.reachPoint && free ? 1 : 0, dt) * w;
@@ -1213,7 +1212,7 @@ export class BodyAnimator {
     if (ctx.reachPoint && head) {
       this.reachTarget.copy(ctx.reachPoint);
       const local = this._toCharacter(_v6.copy(ctx.reachPoint).sub(head.getWorldPosition(_v7)));
-      // La mano dalla parte del cursore (+x e' la sinistra del personaggio).
+      // The hand on the cursor's side (+x is the character's left).
       if (k < 0.05) this.reachSide = local.x >= 0 ? 'left' : 'right';
     }
     if (k < EPSILON) return;
@@ -1228,7 +1227,7 @@ export class BodyAnimator {
   }
 
   _updateSleep(dt) {
-    // Addormentarsi richiede una decina di secondi, svegliarsi mezzo secondo.
+    // Falling asleep takes about ten seconds, waking up half a second.
     const rate = this.sleepTarget > this.sleep ? 0.35 : 5;
     this.sleep = damp(this.sleep, this.sleepTarget, rate, dt);
 
@@ -1244,7 +1243,7 @@ export class BodyAnimator {
     if (doze.falling) {
       doze.drop = Math.min(1, doze.drop + dt / 3.5);
       if (doze.timer <= 0) {
-        // Si riprende di soprassalto, sbattendo le palpebre.
+        // She comes to with a start, blinking.
         doze.falling = false;
         doze.jerk = doze.drop;
         doze.timer = randomBetween(2.5, 5);
@@ -1260,8 +1259,8 @@ export class BodyAnimator {
   }
 
   /**
-   * Assonnata: palpebre pesanti, sguardo basso, colpi di sonno. Addormentata:
-   * occhi chiusi, testa reclinata di lato, spalle abbandonate.
+   * Drowsy: heavy eyelids, low gaze, nodding off. Asleep: closed eyes, head
+   * tilted to the side, slumped shoulders.
    */
   _sleep(pose, upright, lying) {
     const s = this.sleep;
@@ -1276,7 +1275,7 @@ export class BodyAnimator {
     pose.mood('relaxed', (0.25 * drowsy + 0.35 * deep) * all);
     pose.mood('surprised', 0.35 * doze.jerk * all);
 
-    // Smette di seguire il cursore e abbassa lo sguardo.
+    // She stops following the cursor and lowers her gaze.
     const g = Math.max(0.6 * drowsy, deep) * all;
     pose.gaze.pitch += 0.18 * g;
     pose.gaze.weight += g;
@@ -1291,7 +1290,7 @@ export class BodyAnimator {
     pose.both('Shoulder', 0, 0, -0.04 * (drowsy + deep), upright);
   }
 
-  /** Pensa (mano al mento), oppure lavora: legge o scrive, secondo il tool dell'agente. */
+  /** Thinks (hand on the chin), or works: reads or writes, according to the agent's tool. */
   _thinking(pose, dt, w) {
     const style = this.thinking ? WORK_STYLE[this.work.kind] ?? null : null;
     const reading = this.work.read.update(style === 'read' ? 1 : 0, dt) * w;
@@ -1316,7 +1315,7 @@ export class BodyAnimator {
     pose.gaze.weight += 0.8 * k;
   }
 
-  /** Tiene un tablet invisibile davanti al petto e lo legge riga per riga. */
+  /** Holds an invisible tablet in front of the chest and reads it line by line. */
   _reading(pose, k) {
     const t = this.time;
     pose.reach('left', 'upperChest', [0.095, -0.03, 0.24], [1, -1.2, -0.3], k, 1.3);
@@ -1326,7 +1325,7 @@ export class BodyAnimator {
     pose.add('head', 0.2 * k, 0, 0.04 * Math.sin(t * 0.4) * k);
     pose.add('neck', 0.08 * k, 0, 0);
     pose.add('spine', 0.03 * k, 0, 0);
-    // Gli occhi scorrono la riga e tornano a capo di scatto.
+    // The eyes run along the line and snap back to the start.
     const line = (t * 0.55) % 1;
     const sweep = line < 0.85 ? line / 0.85 : 1 - (line - 0.85) / 0.15;
     pose.gaze.yaw += (sweep - 0.5) * 0.3 * k;
@@ -1334,10 +1333,10 @@ export class BodyAnimator {
     pose.gaze.weight += 0.9 * k;
   }
 
-  /** Batte su una tastiera invisibile all'altezza della vita, a raffiche. */
+  /** Types on an invisible keyboard at waist height, in bursts. */
   _typing(pose, k) {
     const t = this.time;
-    // Raffiche di tasti con piccole pause, come chi scrive davvero.
+    // Bursts of keys with small pauses, like someone really writing.
     const burst = smoothstep(-0.2, 0.4, Math.sin(t * 0.9) + 0.35 * Math.sin(t * 2.3));
     const tapL = Math.max(0, Math.sin(t * 13)) * burst;
     const tapR = Math.max(0, Math.sin(t * 13 + 2.1)) * burst;
@@ -1363,7 +1362,7 @@ export class BodyAnimator {
     }
   }
 
-  /** Atterraggio: ginocchia che si piegano e rimbalzano, braccia che si aprono. */
+  /** Landing: knees bending and bouncing, arms opening. */
   _landing(pose, dt, w) {
     const squash = clamp(this.land.update(dt), -0.12, 0.05);
     if (w < EPSILON || (Math.abs(squash) < 0.0005 && Math.abs(this.land.v) < 0.001)) return;
@@ -1378,31 +1377,31 @@ export class BodyAnimator {
   }
 
   _reactions(pose, dt) {
-    // Espressione di spavento (presa, caduta, atterraggio) che sfuma da sola.
+    // Fright expression (picked up, falling, landing) that fades by itself.
     const shock = this.shock.update(this.shockTarget, dt);
     if (this.mode === 'held' && this.time - this.hold.since > 1.6) this.shockTarget = 0.25;
     pose.mood('surprised', shock);
   }
 
-  // ----------------------------------------------------------- sguardo
+  // ----------------------------------------------------------- gaze
   /**
-   * Gli occhi arrivano subito sul bersaglio, la testa li segue con calma e
-   * distribuisce la rotazione su collo e busto. Senza un cursore che si muove
-   * guarda lo spettatore, con qualche occhiata altrove ogni tanto.
+   * The eyes reach the target right away, the head follows calmly and spreads
+   * the rotation over neck and torso. Without a moving cursor she looks at the
+   * viewer, with a few glances away now and then.
    */
   _gaze(pose, dt, ctx) {
     const headNode = this.bones.head;
     if (!headNode) return;
     const headPos = headNode.getWorldPosition(_v1);
 
-    // Direzione verso il cursore (o verso la camera) nello spazio del personaggio.
+    // Direction towards the cursor (or the camera) in the character's space.
     const target = ctx.gazeFresh && ctx.gazePoint ? ctx.gazePoint : ctx.viewer;
     const local = this._toCharacter(_v2.copy(target).sub(headPos));
     let yaw = Math.atan2(local.x, Math.max(0.05, local.z));
     let pitch = Math.atan2(-local.y, Math.hypot(local.x, local.z));
 
     if (!ctx.gazeFresh) {
-      // Occhiate spontanee: per lo piu' guarda te, a volte distoglie lo sguardo.
+      // Spontaneous glances: mostly she looks at you, sometimes she looks away.
       const glance = this.idleGlance;
       glance.timer -= dt;
       if (glance.timer <= 0) {
@@ -1415,7 +1414,7 @@ export class BodyAnimator {
       pitch += glance.pitch;
     }
 
-    // Le azioni (guardarsi intorno, pensare) possono prendersi lo sguardo.
+    // Actions (looking around, thinking) can take over the gaze.
     const override = clamp(pose.gaze.weight, 0, 1);
     if (override > 0) {
       const ow = pose.gaze.weight;
@@ -1425,12 +1424,12 @@ export class BodyAnimator {
     yaw = clamp(yaw, -1.3, 1.3);
     pitch = clamp(pitch, -0.7, 0.7);
 
-    // Un grande spostamento dello sguardo di solito si accompagna a un battito.
+    // A big gaze shift usually comes with a blink.
     if (Math.abs(yaw - this.eyes.yaw) > 0.45 && Math.random() < 0.7) this.blinkRequested = true;
     this.eyes.yaw = yaw;
     this.eyes.pitch = pitch;
 
-    // Microsaccadi: piccoli salti degli occhi, fermi fra un salto e l'altro.
+    // Microsaccades: small jumps of the eyes, still between one jump and the next.
     const saccade = this.saccade;
     saccade.timer -= dt;
     if (saccade.timer <= 0) {
@@ -1439,7 +1438,7 @@ export class BodyAnimator {
       saccade.timer = randomBetween(0.4, 1.8);
     }
 
-    // La testa copre la maggior parte dell'angolo, gli occhi il resto.
+    // The head covers most of the angle, the eyes the rest.
     const headYaw = this.head.yaw.update(clamp(yaw, -0.8, 0.8), dt);
     const headPitch = this.head.pitch.update(clamp(pitch, -0.45, 0.45), dt);
     pose.add('upperChest', 0.1 * headPitch, 0.12 * headYaw, 0);
@@ -1450,7 +1449,7 @@ export class BodyAnimator {
       pose.add('head', 0, 0, 0.03 * this.noise.headRoll(this.time));
     }
 
-    // Bersaglio degli occhi: un metro davanti alla testa, nella direzione voluta.
+    // The eyes' target: one metre in front of the head, in the wanted direction.
     const eyeYaw = yaw + saccade.yaw;
     const eyePitch = pitch + saccade.pitch;
     const dir = this._fromCharacter(
@@ -1459,7 +1458,7 @@ export class BodyAnimator {
     this.lookTarget.position.copy(headPos).add(dir);
   }
 
-  /** Direzione del mondo -> spazio del personaggio (convenzioni VRM 1.0). */
+  /** World direction -> character's space (VRM 1.0 conventions). */
   _toCharacter(vector) {
     this.vrm.scene.getWorldQuaternion(_q1).invert();
     vector.applyQuaternion(_q1);
@@ -1475,12 +1474,12 @@ export class BodyAnimator {
     return vector.applyQuaternion(_q1);
   }
 
-  // ----------------------------------------------------------- applicazione
+  // ----------------------------------------------------------- applying
   _applyForwardKinematics(pose) {
     const f = this.flip;
 
-    // Dita: piega di riposo, modulata da quanto la mano e' aperta o chiusa;
-    // quelle tese una per una (la V, la pistola) si raddrizzano del loro peso.
+    // Fingers: resting bend, modulated by how open or closed the hand is; the
+    // ones extended one by one (the V, the gun) straighten by their weight.
     for (const side of SIDES) {
       const curl = clamp(1 + pose.fingers[side], 0, 2.4);
       const extend = pose.extend[side];
@@ -1488,7 +1487,7 @@ export class BodyAnimator {
         const bend = curl * (1 - clamp(extend[finger] ?? 0, 0, 1));
         PHALANGES.forEach((phalanx, i) => pose.side(side, finger + phalanx, 0, 0, -bends[i] * bend));
       }
-      // La V: indice e medio si aprono a forbice.
+      // The V: index and middle spread like scissors.
       const spread = pose.spread[side];
       if (spread > EPSILON) {
         pose.side(side, 'IndexProximal', 0, 0.2 * spread, 0);
@@ -1516,9 +1515,9 @@ export class BodyAnimator {
   }
 
   /**
-   * Trasformazione del corpo intero: penzolare dalla collottola, sdraiarsi,
-   * sporgersi dal bordo dello schermo. Ogni modalita' ruota intorno al suo
-   * perno; durante i passaggi le rotazioni si mescolano secondo i pesi.
+   * The whole body's transform: dangling from the scruff, lying down, leaning
+   * out from the screen edge. Each mode rotates around its pivot; during the
+   * transitions the rotations blend according to the weights.
    */
   _applyRoot() {
     const rotation = _qRoot.identity();
@@ -1529,23 +1528,23 @@ export class BodyAnimator {
       if (w < 1e-4) continue;
       accumulated += w;
       const offset = this._rootTransform(mode, _qMode, _v4);
-      // Media pesata incrementale: slerp verso la nuova rotazione in
-      // proporzione al suo peso sul totale accumulato fin qui.
+      // Incremental weighted average: slerp towards the new rotation in
+      // proportion to its weight on the total accumulated so far.
       rotation.slerp(_qMode, w / accumulated);
       position.addScaledVector(offset, w);
     }
-    // Giravolte e "mettersi in mostra": tutto il corpo gira intorno ai piedi.
+    // Twirls and "showing off": the whole body turns around the feet.
     if (Math.abs(this.pose.rootYaw) > 1e-4) rotation.multiply(_qMode.setFromAxisAngle(Y_AXIS, this.pose.rootYaw));
     this.root.quaternion.copy(rotation);
     this.root.position.copy(position);
   }
 
-  /** Rotazione `q` e traslazione del gruppo per una modalita'. */
+  /** Rotation `q` and translation of the group for a mode. */
   _rootTransform(mode, q, out) {
     let pivot = null;
     if (mode === 'held') {
-      // Appesa a un punto solo gira piano su se stessa, e un po' di piu'
-      // quando la sposti: cosi' la si vede anche di tre quarti.
+      // Hanging from a single point she slowly turns on herself, and a bit more
+      // when you move her: so she's seen in three-quarter view too.
       const twist = 0.42 * Math.sin(this.time * 0.7) + clamp(this.hold.vx * 0.0006, -0.35, 0.35);
       q.setFromEuler(_e1.set(HOLD_PITCH, twist, this.pendulum.angle));
       pivot = this.pivot;
@@ -1562,8 +1561,8 @@ export class BodyAnimator {
       q.identity();
       return out.set(0, 0, 0);
     }
-    // Ruotare intorno al perno = ruotare intorno all'origine e poi riportare
-    // il perno dov'era.
+    // Rotating around the pivot = rotating around the origin and then putting
+    // the pivot back where it was.
     out.copy(pivot).sub(_v5.copy(pivot).applyQuaternion(q));
     if (mode === 'lie') out.add(this.lie.offset);
     if (mode === 'side') {
@@ -1578,7 +1577,7 @@ export class BodyAnimator {
     const sceneMatrix = this.vrm.scene.matrixWorld;
     const sceneQuat = this.vrm.scene.getWorldQuaternion(_q5);
 
-    // --- gambe: piedi piantati dove stavano a riposo, piu' gli spostamenti --
+    // --- legs: feet planted where they were at rest, plus the shifts --------
     const legWeight = clamp(pose.legIK, 0, 1);
     if (legWeight > EPSILON) {
       for (const side of SIDES) {
@@ -1587,7 +1586,7 @@ export class BodyAnimator {
         const s = side === 'left' ? 1 : -1;
         const heel = pose.heel[side];
         const offset = pose.feet[side];
-        // Alzare il tallone con la punta a terra solleva la caviglia.
+        // Raising the heel with the toe on the ground lifts the ankle.
         const target = this._rig(
           _v4,
           offset.x,
@@ -1604,13 +1603,13 @@ export class BodyAnimator {
       }
     }
 
-    // --- braccia: la media pesata dei punti richiesti da gesti e azioni ----
+    // --- arms: the weighted average of the points requested by gestures and actions
     for (const side of SIDES) {
       const requests = pose.hands[side];
       const chain = this.chains[`${side}Arm`];
       if (!requests.length || !chain) continue;
 
-      // Le mani "di base" (sulle cosce, sotto il mento) lasciano il posto ai gesti.
+      // The "base" hands (on the thighs, under the chin) give way to gestures.
       let override = 0;
       for (const request of requests) if (!request.base) override += request.weight;
       const baseScale = 1 - clamp(override, 0, 1);
@@ -1640,16 +1639,16 @@ export class BodyAnimator {
       pole.normalize();
       const weight = Math.min(1, total);
       this._solveTwoBone(chain, target, pole, weight, null);
-      // Rotazione dell'avambraccio sul suo asse: gira il palmo.
+      // Forearm rotation on its axis: turns the palm.
       chain.lower.quaternion.multiply(_q4.setFromAxisAngle(X_AXIS, (twist / total) * this.flip * weight));
     }
   }
 
   /**
-   * IK analitico a due ossa. Trova la posizione dell'articolazione di mezzo
-   * (legge del coseno) sul piano che contiene il bersaglio e il `pole`, poi
-   * costruisce le rotazioni dei due segmenti a partire da basi ortonormali:
-   * cosi' non c'e' ambiguita' sulla torsione e il ginocchio non "gira".
+   * Analytic two-bone IK. It finds the middle joint's position (law of
+   * cosines) on the plane containing the target and the `pole`, then builds
+   * the rotations of the two segments from orthonormal bases: so there's no
+   * ambiguity in the twist and the knee doesn't "spin".
    */
   _solveTwoBone(chain, target, pole, weight, endQuat) {
     const { upper, lower, end, l1, l2 } = chain;
@@ -1667,7 +1666,7 @@ export class BodyAnimator {
     const cosA = clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1);
     const sinA = Math.sqrt(1 - cosA * cosA);
     const u1 = _v6.copy(dir).multiplyScalar(cosA).addScaledVector(bend, sinA);
-    // u2 = (punta - gomito) normalizzato, con punta = root + dir*dist e gomito = root + u1*l1.
+    // u2 = (tip - elbow) normalized, with tip = root + dir*dist and elbow = root + u1*l1.
     const u2 = _v4.copy(dir).multiplyScalar(dist).addScaledVector(u1, -l1).normalize();
     const normal = _v5.crossVectors(dir, bend).normalize();
 

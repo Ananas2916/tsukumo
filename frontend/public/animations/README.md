@@ -1,37 +1,38 @@
-# Animazioni `.vrma`
+# `.vrma` animations
 
-Metti qui le clip VRM Animation (`.vrma`): Tsukumo le mescola al suo movimento
-procedurale (respiro, peso, sguardo restano suoi). Il nome del file dice
-quando usarle:
+Put VRM Animation clips (`.vrma`) here: when Tsukumo is in her VRM body she
+blends them with her procedural motion (breathing, weight and gaze stay
+hers). The file name says when to use them:
 
-| Nome | Quando |
-|------|--------|
-| `greet*.vrma` (o `wave*`, `hello*`) | al posto del saluto con la mano, quando compare o quando torni |
-| `idle*.vrma` | ogni tanto, fra i gesti spontanei (in piedi) |
-| `dance*.vrma` | in loop mentre Spotify suona, se "Balla con Spotify" è acceso |
-| `inchino*.vrma` (o `bow*`) | quando la ringrazi ("grazie", "thanks"...), e dal pannello |
-| `alza*.vrma` (o `here*`, `raise*`) | quando la chiami per nome in ascolto a chiamata, e dal pannello |
-| tutte le altre | a richiesta, dai pulsanti in Personaggio → Falle fare qualcosa |
+| Name | When |
+|------|------|
+| `greet*.vrma` (or `wave*`, `hello*`) | instead of the hand wave, when she appears or when you come back |
+| `idle*.vrma` | now and then, among the spontaneous gestures (standing) |
+| `dance*.vrma` | looping while Spotify plays, if "Dance to Spotify" is on |
+| `inchino*.vrma` (or `bow*`) | when you thank her ("thanks", "grazie"...), and from the panel |
+| `alza*.vrma` (or `here*`, `raise*`) | when you call her by name in wake-word mode, and from the panel |
+| all the others | on request, from the buttons in Character → Make her do something |
 
-Si usano solo le rotazioni delle ossa: lo spostamento dei fianchi e le
-espressioni della clip vengono ignorati, cosi' il personaggio non esce dalla
-finestra e la faccia resta quella del lip-sync. Le clip in piedi funzionano
-meglio: da seduta o sdraiata non partono.
+Only the bone rotations are used: the clip's hip movement and expressions are
+ignored, so the character doesn't leave the window and the face stays the
+lip-sync's. Standing clips work best: sitting or lying down they don't start.
 
-## Da un BVH qualsiasi
+The flame doesn't use clips: they only apply to the optional VRM body.
+
+## From any BVH
 
 ```
-node scripts/bvh2vrma.mjs clip.bvh frontend/public/animations/greet-mio.vrma --trim
+node scripts/bvh2vrma.mjs clip.bvh frontend/public/animations/greet-mine.vrma --trim
 ```
 
-Riconosce gli scheletri Bandai Namco, Mixamo, CMU e i nomi più comuni, e
-porta la clip in T-pose qualunque sia la posa di riposo del BVH (il primo
-fotogramma deve essere l'attore in piedi, fermo). `--trim` toglie l'attesa
-immobile prima e dopo il gesto; di norma resta rivolta verso di te anche se
-l'attore si girava, `--free-facing` lo evita.
+It recognizes Bandai Namco, Mixamo and CMU skeletons and the most common
+names, and brings the clip to T-pose whatever the BVH's rest pose is (the first
+frame must be the actor standing still). `--trim` removes the still wait
+before and after the gesture; normally she keeps facing you even if the actor
+turned, `--free-facing` avoids that.
 
-Altre fonti: il pacchetto gratuito di animazioni VRMA di VRoid (pixiv), o clip
-convertite da altri formati. Controlla la licenza di ciascuna: i file `.vrma`
-di questa cartella non finiscono nel repository.
+Other sources: VRoid's (pixiv) free VRMA animation pack, or clips converted
+from other formats. Check each one's licence: the `.vrma` files in this folder
+never end up in the repository.
 
-Dopo aver aggiunto o tolto file, riavvia Tsukumo (o ricarica il personaggio).
+After adding or removing files, restart Tsukumo (or reload the character).

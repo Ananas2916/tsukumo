@@ -1,18 +1,19 @@
 /**
- * Client WebSocket con riconnessione automatica.
+ * WebSocket client with automatic reconnection.
  *
- * Espone un mini event-emitter: `on(type, handler)` dove `type` e' il campo
- * `type` dei messaggi del backend, piu' gli eventi locali `open`, `close`,
- * `socketerror` e `*` (tutti i messaggi).
+ * Exposes a mini event emitter: `on(type, handler)` where `type` is the
+ * `type` field of the backend's messages, plus the local events `open`,
+ * `close`, `socketerror` and `*` (every message).
  *
- * Nota sui nomi: l'evento di trasporto si chiama `socketerror` e NON `error`,
- * perche' il backend invia anche messaggi applicativi `{type: "error"}`. Con
- * lo stesso nome lo stesso handler riceverebbe due payload di forma diversa.
+ * About the names: the transport event is called `socketerror` and NOT
+ * `error`, because the backend also sends application messages
+ * `{type: "error"}`. With the same name the same handler would receive two
+ * payloads of different shapes.
  */
 
 export class CompanionSocket {
   /**
-   * @param {string} url URL del WebSocket (ws:// o wss://)
+   * @param {string} url WebSocket URL (ws:// or wss://)
    * @param {{minDelay?: number, maxDelay?: number}} [options]
    */
   constructor(url, options = {}) {
@@ -25,11 +26,11 @@ export class CompanionSocket {
     this.closedByUser = false;
     this.attempt = 0;
     this.handlers = new Map();
-    this.queue = []; // messaggi inviati mentre la socket era chiusa
+    this.queue = []; // messages sent while the socket was closed
     this.reconnectTimer = null;
   }
 
-  /** Registra un handler. Ritorna una funzione per rimuoverlo. */
+  /** Registers a handler. Returns a function that removes it. */
   on(type, handler) {
     if (!this.handlers.has(type)) this.handlers.set(type, new Set());
     this.handlers.get(type).add(handler);
@@ -41,7 +42,7 @@ export class CompanionSocket {
       try {
         handler(payload);
       } catch (error) {
-        console.error(`[ws] handler "${type}" ha sollevato un errore`, error);
+        console.error(`[ws] handler "${type}" threw an error`, error);
       }
     });
   }
@@ -64,7 +65,7 @@ export class CompanionSocket {
       this.connected = true;
       this.attempt = 0;
       this.emit('open', null);
-      // Svuota la coda accumulata durante la disconnessione.
+      // Flush the queue built up while disconnected.
       const pending = this.queue.splice(0);
       pending.forEach((message) => this.send(message));
     });
@@ -74,7 +75,7 @@ export class CompanionSocket {
       try {
         data = JSON.parse(event.data);
       } catch (error) {
-        console.warn('[ws] messaggio non JSON ignorato', error);
+        console.warn('[ws] non-JSON message ignored', error);
         return;
       }
       this.emit('*', data);
@@ -88,7 +89,7 @@ export class CompanionSocket {
     });
 
     socket.addEventListener('error', () => {
-      // 'error' e' sempre seguito da 'close': la riconnessione la gestiamo li'.
+      // 'error' is always followed by 'close': reconnection is handled there.
       this.emit('socketerror', null);
     });
   }
@@ -96,19 +97,19 @@ export class CompanionSocket {
   scheduleReconnect() {
     if (this.closedByUser) return;
     this.attempt += 1;
-    // Backoff esponenziale con tetto massimo.
+    // Exponential backoff with a ceiling.
     const delay = Math.min(this.minDelay * 2 ** (this.attempt - 1), this.maxDelay);
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 
-  /** Invia un messaggio; se la socket e' chiusa lo mette in coda. */
+  /** Sends a message; if the socket is closed it queues it. */
   send(message) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(message));
       return true;
     }
-    // Teniamo una coda corta: i messaggi vecchi non servono piu'.
+    // We keep a short queue: old messages are no longer useful.
     this.queue.push(message);
     if (this.queue.length > 16) this.queue.shift();
     return false;
@@ -123,10 +124,10 @@ export class CompanionSocket {
   }
 
   /**
-   * Invia audio dal microfono da trascrivere.
+   * Sends microphone audio to be transcribed.
    *
-   * @param {string} audio PCM 16 bit a 16 kHz, mono, in base64
-   * @param {boolean} [autoSend] false = trascrivi soltanto, senza rispondere
+   * @param {string} audio 16-bit PCM at 16 kHz, mono, in base64
+   * @param {boolean} [autoSend] false = only transcribe, don't reply
    */
   voice(audio, autoSend = true) {
     return this.send({ type: 'voice', audio, autoSend });

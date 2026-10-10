@@ -1,28 +1,29 @@
-"""Chi puo' parlare con Tsukumo, e come.
+"""Who can talk to Tsukumo, and how.
 
-Il backend ascolta su 127.0.0.1, ma "solo in locale" non basta: ogni pagina
-web aperta nel browser puo' provare a collegarsi a ``ws://127.0.0.1:8770``
-(i WebSocket non hanno il CORS) o mandare una POST alla cieca. Con un agente
-che esegue comandi senza chiedere, sarebbe come lasciare la tastiera a
-qualunque sito. Qui ci sono le difese, dalla piu' esterna:
+The backend listens on 127.0.0.1, but "local only" isn't enough: any web page
+open in the browser can try to connect to ``ws://127.0.0.1:8770`` (WebSockets
+have no CORS) or send a blind POST. With an agent running commands without
+asking, it would be like leaving the keyboard to any site. Here are the
+defences, from the outermost:
 
-1. **Host** - con il backend su un indirizzo locale, la richiesta deve dire
-   di essere per ``127.0.0.1``/``localhost`` (o un nome scelto in
-   ``DC_ALLOWED_HOSTS``). Blocca il DNS rebinding: un dominio che si risolve
-   in 127.0.0.1 porta il proprio nome nell'header ``Host``.
-2. **Origin** - WebSocket e richieste che cambiano qualcosa (POST, PUT,
-   DELETE...) da un browser devono venire dalla stessa origine del backend.
-   ``Origin: null`` (iframe in sandbox, file://, data:) non e' mai valido.
-   ``Sec-Fetch-Site: cross-site`` viene respinto anche sulle letture.
-3. **Token** - chi non e' sul PC (un'altra macchina, un proxy come
-   ``tailscale serve``) deve presentare il token di ``state/access_token``,
-   e non puo' comunque toccare le impostazioni (``LOCAL_ONLY``). Fa
-   eccezione solo il guscio della pagina del telefono (``public_shell``).
-4. **Header** - CSP, niente iframe, niente sniffing, niente cache delle API.
-5. **Limiti** - corpo delle richieste limitato anche senza Content-Length.
+1. **Host** - with the backend on a local address, the request must say it's
+   for ``127.0.0.1``/``localhost`` (or a name chosen in ``DC_ALLOWED_HOSTS``).
+   It blocks DNS rebinding: a domain resolving to 127.0.0.1 carries its own
+   name in the ``Host`` header.
+2. **Origin** - WebSockets and requests that change something (POST, PUT,
+   DELETE...) from a browser must come from the backend's own origin.
+   ``Origin: null`` (sandboxed iframes, file://, data:) is never valid.
+   ``Sec-Fetch-Site: cross-site`` is refused on reads too.
+3. **Token** - whoever isn't on the PC (another machine, a proxy like
+   ``tailscale serve``) must present the ``state/access_token`` token, and
+   can't touch the settings anyway (``LOCAL_ONLY``). The only exception is
+   the shell of the phone's page (``public_shell``).
+4. **Headers** - CSP, no iframes, no sniffing, no caching of the API.
+5. **Limits** - request bodies are limited even without Content-Length.
 
-I programmi locali senza browser (gli hook di Claude Code, la shell Electron,
-curl) non mandano ``Origin`` e girano gia' con i permessi dell'utente: passano.
+Local programs without a browser (Claude Code's hooks, the Electron shell,
+curl) send no ``Origin`` and already run with the user's permissions: they
+pass.
 """
 
 from __future__ import annotations
@@ -50,9 +51,9 @@ Receive = Callable[[], Awaitable[Message]]
 Send = Callable[[Message], Awaitable[None]]
 ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
-#: Nomi che indicano questo PC.
+#: Names that mean this PC.
 LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
-#: Header che mette un proxy davanti al backend: la richiesta non e' "dal PC".
+#: Headers a proxy puts in front of the backend: the request isn't "from the PC".
 PROXY_HEADERS = (
     b"x-forwarded-for",
     b"x-forwarded-host",
@@ -61,17 +62,21 @@ PROXY_HEADERS = (
     b"tailscale-user-login",
     b"tailscale-funnel-request",
 )
-#: Metodi che leggono soltanto.
+#: Methods that only read.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-#: Questi percorsi arrivano da un altro sito per costruzione: il ritorno da
-#: Spotify dopo il permesso (protetto da ``state`` e PKCE, vedi music.py), e
-#: la pagina del QR aperta da un link altrove (note della release, una chat):
-#: e' solo una lettura, solo dal PC, e un altro sito non puo' leggerla.
+#: These paths come from another site by design: the return from Spotify
+#: after the permission (protected by ``state`` and PKCE, see music.py), and
+#: the QR page opened from a link elsewhere (release notes, a chat): it's
+#: only a read, only from the PC, and another site can't read it.
 CROSS_SITE_OK = ("/api/music/spotify/callback", "/api/phone")
-#: Cosa non si fa da lontano nemmeno col token: motori, programmi da lanciare,
-#: hook installati negli agenti, pacchetti pip, voci, preferenze, contesto del PC.
+#: What isn't done from afar even with the token: engines, programs to run,
+#: hooks installed in the agents, pip packages, voices, preferences, the PC's
+#: context.
 LOCAL_ONLY: tuple[tuple[str, str], ...] = (
     ("POST", "/api/providers"),
+    # "Check" builds the engine from the posted fields and runs its program
+    # (`<command> --version`); "options" writes .env. Neither from afar.
+    ("POST", "/api/providers/"),
     ("POST", "/api/integrations"),
     ("POST", "/api/setup/"),
     ("POST", "/api/voices/"),
@@ -81,30 +86,30 @@ LOCAL_ONLY: tuple[tuple[str, str], ...] = (
     ("POST", "/api/preferences"),
     ("POST", "/api/music/"),
     ("PUT", "/api/memory/persona"),
-    # Il QR col token e il pulsante che lancia ``tailscale serve``.
+    # The QR code with the token and the button that runs ``tailscale serve``.
     ("GET", "/api/phone"),
     ("POST", "/api/phone/serve"),
 )
-#: Il guscio della pagina del telefono: l'HTML e il bundle (codice gia'
-#: pubblico, nessun dato). Si carica senza token perche' il token sta dopo "#"
-#: nel link e lo legge proprio questa pagina (vedi phone.py).
+#: The shell of the phone's page: the HTML and the bundle (code already
+#: public, no data). It loads without the token because the token is after
+#: "#" in the link and it's this very page that reads it (see phone.py).
 PUBLIC_PAGE = "/mobile.html"
 PUBLIC_ASSETS = "/assets/"
-#: Dove serve un corpo grande (file, audio, voci da clonare).
+#: Where a big body is needed (files, audio, voices to clone).
 UPLOAD_PATHS = ("/api/attachments", "/api/voices/clone", "/api/transcribe")
-#: Corpo massimo delle altre richieste (JSON di impostazioni, chat, promemoria).
+#: Maximum body of the other requests (settings JSON, chat, reminders).
 MAX_JSON_BYTES = 1024 * 1024
-#: Il nome del cookie/parametro con cui un client remoto presenta il token.
+#: The name of the cookie/parameter a remote client presents the token with.
 TOKEN_NAME = "tsukumo_token"
-#: Un header Host "normale": finisce dentro la CSP, quindi niente spazi ne' ";".
+#: A "normal" Host header: it ends up inside the CSP, so no spaces or ";".
 _PLAIN_HOST = re.compile(r"[A-Za-z0-9.\-]+(?::\d{1,5})?|\[[0-9A-Fa-f:]+\](?::\d{1,5})?")
 
 
 class BodyTooLarge(HTTPException):
-    """Sollevata leggendo il corpo: FastAPI lascia passare le HTTPException."""
+    """Raised while reading the body: FastAPI lets HTTPExceptions through."""
 
     def __init__(self, limit: int) -> None:
-        super().__init__(status_code=413, detail=f"Richiesta troppo grande (massimo {limit // 1024} KB)")
+        super().__init__(status_code=413, detail=f"Request too large (at most {limit // 1024} KB)")
 
 
 def _hostname(value: str) -> str:
@@ -133,15 +138,15 @@ def is_wildcard(host: str) -> bool:
 
 @dataclass
 class AccessPolicy:
-    """Le regole, separate dal middleware per poterle provare da sole."""
+    """The rules, separate from the middleware so they can be tested on their own."""
 
-    #: Indirizzo su cui ascolta il backend (``DC_HOST``).
+    #: Address the backend listens on (``DC_HOST``).
     bind_host: str = "127.0.0.1"
-    #: Nomi in piu' accettati nell'header Host (``DC_ALLOWED_HOSTS``).
+    #: Extra names accepted in the Host header (``DC_ALLOWED_HOSTS``).
     extra_hosts: frozenset[str] = frozenset()
-    #: Origini in piu' accettate per WebSocket e scritture (``DC_CORS_ORIGINS``).
+    #: Extra origins accepted for WebSockets and writes (``DC_CORS_ORIGINS``).
     extra_origins: frozenset[str] = frozenset()
-    #: Dove sta il token per l'accesso da fuori (creato la prima volta che serve).
+    #: Where the token for access from outside lives (created the first time it's needed).
     token_path: Path | None = None
     _token: str | None = field(default=None, repr=False)
 
@@ -150,7 +155,7 @@ class AccessPolicy:
     def from_settings(cls, settings: Any) -> "AccessPolicy":
         origins = {o.rstrip("/").lower() for o in settings.cors_origins if o.strip() and o.strip() != "*"}
         if "*" in settings.cors_origins:
-            logger.warning("DC_CORS_ORIGINS=* ignorato: aprirebbe il backend a qualunque sito web")
+            logger.warning("DC_CORS_ORIGINS=* ignored: it would open the backend to any web site")
         hosts = {_hostname(h) for h in settings.allowed_hosts if h.strip()}
         return cls(
             bind_host=settings.host,
@@ -167,14 +172,14 @@ class AccessPolicy:
         if is_loopback(name) or name in self.extra_hosts:
             return True
         if is_wildcard(self.bind_host):
-            # In ascolto su tutte le interfacce (scelta esplicita): da fuori
-            # si arriva con l'IP della rete. Chi non e' locale deve comunque
-            # avere il token, quindi qui basta.
+            # Listening on all interfaces (an explicit choice): from outside one
+            # arrives with the network IP. Whoever isn't local must have the token
+            # anyway, so this is enough here.
             return True
         return name == _hostname(self.bind_host)
 
     def origin_allowed(self, origin: str, host: str) -> bool:
-        """Stessa origine del backend, oppure una di quelle permesse a mano."""
+        """The backend's own origin, or one of those allowed by hand."""
         origin = origin.strip().lower().rstrip("/")
         if not origin or origin == "null":
             return False
@@ -188,7 +193,7 @@ class AccessPolicy:
     # ------------------------------------------------------------------
     @property
     def token(self) -> str:
-        """Il segreto per chi si collega da fuori: 256 bit, creato una volta sola."""
+        """The secret for whoever connects from outside: 256 bits, created only once."""
         if self._token:
             return self._token
         token = ""
@@ -196,7 +201,7 @@ class AccessPolicy:
             try:
                 token = self.token_path.read_text(encoding="utf-8").strip()
             except OSError as exc:
-                logger.warning("Token di accesso non leggibile: %s", exc)
+                logger.warning("Access token unreadable: %s", exc)
         if len(token) < 32:
             token = secrets.token_urlsafe(32)
             if self.token_path:
@@ -206,7 +211,7 @@ class AccessPolicy:
                     if os.name != "nt":
                         self.token_path.chmod(0o600)
                 except OSError as exc:
-                    logger.warning("Token di accesso non salvato: %s", exc)
+                    logger.warning("Access token not saved: %s", exc)
         self._token = token
         return token
 
@@ -217,12 +222,12 @@ class AccessPolicy:
 
 
 def _headers(scope: Scope) -> dict[bytes, str]:
-    """Header della richiesta (minuscoli), l'ultimo vince se ripetuto."""
+    """The request's headers (lowercase), the last wins if repeated."""
     return {key.lower(): value.decode("latin-1") for key, value in scope.get("headers") or []}
 
 
 def presented_token(scope: Scope, headers: dict[bytes, str]) -> str | None:
-    """Il token da ``Authorization: Bearer``, dal cookie o da ``?tsukumo_token=``."""
+    """The token from ``Authorization: Bearer``, from the cookie or from ``?tsukumo_token=``."""
     auth = headers.get(b"authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
@@ -231,7 +236,7 @@ def presented_token(scope: Scope, headers: dict[bytes, str]) -> str | None:
         jar = SimpleCookie()
         try:
             jar.load(cookie)
-        except Exception:  # cookie malformato: lo ignoriamo
+        except Exception:  # malformed cookie: we ignore it
             jar = SimpleCookie()
         if TOKEN_NAME in jar:
             return jar[TOKEN_NAME].value
@@ -241,7 +246,7 @@ def presented_token(scope: Scope, headers: dict[bytes, str]) -> str | None:
 
 
 def is_local(scope: Scope, headers: dict[bytes, str]) -> bool:
-    """La richiesta parte da questo PC, direttamente, e dice di essere per questo PC."""
+    """The request starts from this PC, directly, and says it's for this PC."""
     client = scope.get("client")
     if not client or not is_loopback(str(client[0])):
         return False
@@ -255,17 +260,17 @@ def local_only(method: str, path: str) -> bool:
 
 
 def public_shell(method: str, path: str) -> bool:
-    """La pagina del telefono e i suoi file, in lettura: un file per nome, niente sottocartelle."""
+    """The phone's page and its files, read only: one file by name, no subfolders."""
     if method not in ("GET", "HEAD") or ".." in path or "\\" in path:
         return False
     return path == PUBLIC_PAGE or (path.startswith(PUBLIC_ASSETS) and path.count("/") == 2 and len(path) > len(PUBLIC_ASSETS))
 
 
 def content_security_policy(host: str) -> str:
-    """La CSP delle pagine: solo codice nostro, connessioni solo verso di noi.
+    """The pages' CSP: only our code, connections only towards us.
 
-    Le immagini e i suoni da https restano permessi: copertine di Spotify e
-    anteprime delle voci (ElevenLabs) arrivano da li'.
+    Images and sounds from https stay allowed: Spotify covers and voice previews
+    (ElevenLabs) come from there.
     """
     sockets = f" ws://{host} wss://{host}" if _PLAIN_HOST.fullmatch(host or "") else ""
     return "; ".join(
@@ -289,20 +294,21 @@ def content_security_policy(host: str) -> str:
 _COMMON_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"x-content-type-options", b"nosniff"),
     (b"x-frame-options", b"DENY"),
-    # Agli altri siti nessun Referer, come con "no-referrer". Ma con
-    # "no-referrer" le POST dei moduli (e, a seconda del browser, anche altre)
-    # partono con "Origin: null", che qui viene sempre respinto.
+    # No Referer to other sites, as with "no-referrer". But with "no-referrer"
+    # form POSTs (and, depending on the browser, others too) leave with
+    # "Origin: null", which is always refused here.
     (b"referrer-policy", b"same-origin"),
     (b"cross-origin-opener-policy", b"same-origin"),
     (b"cross-origin-resource-policy", b"same-origin"),
-    # camera e display-capture: il ritmo della musica ascolta l'audio del desktop
-    # con getUserMedia(chromeMediaSource: 'desktop'), che per Chromium e' "camera".
+    # camera and display-capture: the music's rhythm listens to the desktop
+    # audio with getUserMedia(chromeMediaSource: 'desktop'), which for Chromium
+    # is "camera".
     (b"permissions-policy", b"geolocation=(), payment=(), usb=(), microphone=(self), camera=(self), display-capture=(self)"),
 )
 
 
 class SecurityMiddleware:
-    """Applica ``AccessPolicy`` a ogni richiesta HTTP e WebSocket."""
+    """Applies ``AccessPolicy`` to every HTTP and WebSocket request."""
 
     def __init__(self, app: ASGIApp, policy: AccessPolicy | Callable[[], AccessPolicy]) -> None:
         self.app = app
@@ -328,7 +334,7 @@ class SecurityMiddleware:
         problem = self._check(policy, scope, headers, path, method, host, sensitive)
         if problem is not None:
             status, reason = problem
-            logger.warning("Richiesta respinta (%s): %s %s da %s", reason, method, path, (scope.get("client") or ("?",))[0])
+            logger.warning("Request refused (%s): %s %s from %s", reason, method, path, (scope.get("client") or ("?",))[0])
             await self._reject(kind, send, status, reason)
             return
 
@@ -350,29 +356,29 @@ class SecurityMiddleware:
         sensitive: bool,
     ) -> tuple[int, str] | None:
         if not policy.host_allowed(host):
-            return 421, "host non permesso"
+            return 421, "host not allowed"
         origin = headers.get(b"origin")
         fetch_site = headers.get(b"sec-fetch-site", "").lower()
         exempt = path in CROSS_SITE_OK
         if sensitive and not exempt:
             if fetch_site == "cross-site" and not (origin and policy.origin_allowed(origin, host)):
-                return 403, "richiesta da un altro sito"
+                return 403, "request from another site"
             if origin is not None and (method not in SAFE_METHODS or origin == "null"):
                 if not policy.origin_allowed(origin, host):
-                    return 403, "origine non permessa"
+                    return 403, "origin not allowed"
         if not is_local(scope, headers):
             if public_shell(method, path):
                 return None
             if not policy.token_ok(presented_token(scope, headers)):
-                return 401, "serve il token di accesso"
+                return 401, "the access token is required"
             if local_only(method, path):
-                return 403, "si fa solo dal PC"
+                return 403, "only from the PC"
         return None
 
     @staticmethod
     async def _reject(kind: str, send: Send, status: int, reason: str) -> None:
         if kind == "websocket":
-            # Chiudere prima di accettare = handshake rifiutato (HTTP 403).
+            # Closing before accepting = handshake refused (HTTP 403).
             await send({"type": "websocket.close", "code": 1008, "reason": reason})
             return
         body = ('{"error": "%s"}' % reason).encode("utf-8")
@@ -432,19 +438,19 @@ def upload_limit() -> int:
 
 
 def clean_env_value(value: str) -> str:
-    """Un valore per il ``.env``: niente a capo ne' caratteri di controllo.
+    """A value for the ``.env``: no newlines or control characters.
 
-    Un a capo dentro un valore ("modello\\nDC_..._PERMISSION=skip") scriverebbe
-    una variabile in piu' nel file: e' il modo piu' semplice per cambiare il
-    programma che il companion lancia.
+    A newline inside a value ("model\\nDC_..._PERMISSION=skip") would write one
+    more variable in the file: it's the simplest way to change the program the
+    companion runs.
     """
     if any(ord(char) < 32 and char != "\t" or ord(char) == 127 for char in value):
-        raise ValueError("Il valore contiene caratteri non permessi (a capo o di controllo)")
+        raise ValueError("The value contains characters that aren't allowed (newlines or control characters)")
     return value.strip()
 
 
 def within(path: Path, folders: Iterable[Path]) -> bool:
-    """``path`` sta dentro una di ``folders`` (dopo aver risolto link e ``..``)."""
+    """``path`` is inside one of ``folders`` (after resolving links and ``..``)."""
     try:
         resolved = path.resolve()
     except OSError:

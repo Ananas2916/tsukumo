@@ -1,7 +1,7 @@
-"""Preferenze del companion che non sono motori: quanto chiacchiera e di cosa.
+"""The companion's preferences that aren't engines: how much she chats and about what.
 
-Stanno in ``state/preferences.json`` (non nel ``.env``: si cambiano dal
-pannello a ogni momento). Un file rotto o assente vale come i default.
+They live in ``state/preferences.json`` (not in ``.env``: they're changed from
+the panel at any time). A broken or missing file counts as the defaults.
 """
 
 from __future__ import annotations
@@ -15,23 +15,23 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: Quanto spesso parla di sua iniziativa (commenti su video, notizie, curiosita').
+#: How often she speaks on her own (comments on videos, news, fun facts).
 CHATTER_LEVELS = ("off", "rare", "normal", "chatty")
 
-#: Argomenti dei commenti spontanei, accendibili uno per uno.
+#: Topics of the spontaneous comments, each one can be turned on or off.
 TOPICS = ("night", "breaks", "weather", "battery", "usage", "youtube", "news", "facts", "films")
 
 DEFAULTS: dict[str, Any] = {
     "chatter": "normal",
     "topics": {topic: True for topic in TOPICS},
-    #: Citta' per il meteo; vuota = posizione approssimativa dall'indirizzo IP.
+    #: City for the weather; empty = approximate position from the IP address.
     "city": "",
-    #: Chi scrive le chiacchiere: un motore LLM cloud o locale (``openrouter``,
-    #: ``ollama``...), vuoto = il cervello principale. Cosi' un agente a consumo
-    #: non spende un turno per ogni notizia commentata.
+    #: Who writes the chatter: a cloud or local LLM engine (``openrouter``,
+    #: ``ollama``...), empty = the main brain. So a pay-per-use agent doesn't
+    #: spend a turn on every news item it comments on.
     "brain": "",
-    #: I modelli di quel motore, in fila separata da virgole: se il primo non
-    #: risponde (i gratuiti a volte sono saturi) si prova il successivo.
+    #: That engine's models, in a comma-separated row: if the first doesn't
+    #: answer (the free ones are sometimes saturated) the next is tried.
     "brainModels": "",
 }
 
@@ -46,7 +46,7 @@ class Preferences:
             try:
                 self.update(json.loads(path.read_text(encoding="utf-8")), save=False)
             except (OSError, ValueError) as exc:
-                logger.warning("Preferenze non leggibili da %s: %s", path, exc)
+                logger.warning("Preferences unreadable from %s: %s", path, exc)
 
     @property
     def chatter(self) -> str:
@@ -68,7 +68,7 @@ class Preferences:
         return bool(self.data["topics"].get(name, True))
 
     def update(self, changes: dict[str, Any], save: bool = True) -> dict[str, Any]:
-        """Applica solo i campi noti e validi; il resto si ignora."""
+        """Applies only the known, valid fields; the rest is ignored."""
         if changes.get("chatter") in CHATTER_LEVELS:
             self.data["chatter"] = changes["chatter"]
         if isinstance(changes.get("city"), str):
@@ -99,4 +99,4 @@ class Preferences:
             temporary.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
             os.replace(temporary, self.path)
         except OSError as exc:
-            logger.warning("Preferenze non salvate: %s", exc)
+            logger.warning("Preferences not saved: %s", exc)

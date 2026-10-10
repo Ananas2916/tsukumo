@@ -1,21 +1,22 @@
 /**
- * Scheda "Lavoro": gli agenti che usi per conto tuo.
+ * "Work" tab: the agents you use on your own.
  *
- *  - Consumi: quanto e' usato dei limiti del piano di Claude Code e Codex,
- *    quando si azzerano, i token di oggi (backend/usage.py). Antigravity non
- *    li scrive sul PC: si vede solo quando l'hai usato.
- *  - Avvisi: quando finiscono un lavoro o ti aspettano, lei ti chiama
+ *  - Usage: how much of the Claude Code and Codex plan limits is used, when
+ *    they reset, today's tokens (backend/usage.py). Antigravity doesn't write
+ *    them on the PC: you only see when you used it.
+ *  - Notifications: when they finish a job or wait for you, she calls you
  *    (backend/notify.py).
  *
- * Collegare qualcosa scrive nelle configurazioni degli agenti (con una copia
- * di sicurezza): solo quando premi il pulsante.
+ * Connecting something writes into the agents' configurations (with a
+ * backup copy): only when you press the button.
  */
 
 import { apiUrl } from '../config.js';
 import { el } from '../dom.js';
+import { LOCALE, t, tx } from '../i18n.js';
 import { icon } from '../icons.js';
 
-const WINDOW_LABELS = { 300: '5 ore', 10080: 'Settimana', 43200: 'Mese' };
+const WINDOW_LABELS = { 300: t('5 hours'), 10080: t('Week'), 43200: t('Month') };
 const PLAN_LABELS = { free: 'Free', plus: 'Plus', pro: 'Pro', team: 'Team', business: 'Business', enterprise: 'Enterprise', edu: 'Edu' };
 
 async function request(path, method = 'GET', body) {
@@ -25,44 +26,44 @@ async function request(path, method = 'GET', body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+  if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
   return data;
 }
 
 function windowLabel(minutes) {
   if (WINDOW_LABELS[minutes]) return WINDOW_LABELS[minutes];
-  if (!minutes) return 'Limite';
-  return minutes < 1440 ? `${Math.round(minutes / 60)} ore` : `${Math.round(minutes / 1440)} giorni`;
+  if (!minutes) return t('Limit');
+  return minutes < 1440 ? t('{n} hours', { n: Math.round(minutes / 60) }) : t('{n} days', { n: Math.round(minutes / 1440) });
 }
 
 function resetText(epoch) {
-  if (!epoch) return 'azzerato';
+  if (!epoch) return t('reset|limit');
   const moment = new Date(epoch * 1000);
   const now = new Date();
-  const clock = moment.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-  if (moment.toDateString() === now.toDateString()) return `si azzera alle ${clock}`;
+  const clock = moment.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
+  if (moment.toDateString() === now.toDateString()) return t('resets at {time}', { time: clock });
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
-  if (moment.toDateString() === tomorrow.toDateString()) return `si azzera domani alle ${clock}`;
-  const day = moment.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
-  return `si azzera ${day}`;
+  if (moment.toDateString() === tomorrow.toDateString()) return t('resets tomorrow at {time}', { time: clock });
+  const day = moment.toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
+  return t('resets {day}', { day });
 }
 
 function ago(epoch) {
   if (!epoch) return '';
   const minutes = Math.round((Date.now() / 1000 - epoch) / 60);
-  if (minutes < 2) return 'usato adesso';
-  if (minutes < 60) return `usato ${minutes} min fa`;
+  if (minutes < 2) return t('used just now');
+  if (minutes < 60) return t('used {n} min ago', { n: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `usato ${hours} ${hours === 1 ? 'ora' : 'ore'} fa`;
+  if (hours < 24) return hours === 1 ? t('used 1 hour ago') : t('used {n} hours ago', { n: hours });
   const days = Math.round(hours / 24);
-  return days === 1 ? 'usato ieri' : `usato ${days} giorni fa`;
+  return days === 1 ? t('used yesterday') : t('used {n} days ago', { n: days });
 }
 
 function tokensText(tokens) {
   if (tokens < 1000) return `${tokens}`;
-  if (tokens < 1_000_000) return `${Math.round(tokens / 1000)} mila`;
-  return `${(tokens / 1_000_000).toFixed(1).replace('.', ',').replace(',0', '')} M`;
+  if (tokens < 1_000_000) return t('{n}k', { n: Math.round(tokens / 1000) });
+  return `${(tokens / 1_000_000).toLocaleString(LOCALE, { maximumFractionDigits: 1 })} M`;
 }
 
 function usageColor(used) {
@@ -91,21 +92,21 @@ export class WorkView {
 
   // ----------------------------------------------------------------- DOM
   _build() {
-    this.agents = el('div', { class: 'usage-list' }, el('p', { class: 'hint' }, 'Leggo i consumi…'));
+    this.agents = el('div', { class: 'usage-list' }, el('p', { class: 'hint' }, t('Reading the usage…')));
     this.alerts = this._switch(
-      'Avvisami vicino ai limiti',
-      'All’80 e al 95% di un limite, e quando si azzera. Anche con le chiacchiere spente; mai in riunione o se non sei al PC.',
+      t('Warn me near the limits'),
+      t("At 80 and 95% of a limit, and when it resets. Even with chatter off; never in a meeting or when you're away from the PC."),
     );
     this.alerts.input.addEventListener('change', () => {
       request('/api/preferences', 'POST', { topics: { usage: this.alerts.input.checked } }).catch((error) => this.app.toast(error.message, 'error'));
     });
     const usageCard = this._card(
       'gauge',
-      'Consumi degli agenti',
+      t('Agent usage'),
       el(
         'p',
         { class: 'card-sub' },
-        'Letti dai file che gli agenti scrivono sul tuo PC: niente rete, niente password. Puoi anche chiederglielo a voce: «quanto mi resta di Claude?».',
+        t('Read from the files the agents write on your PC: no network, no passwords. You can also ask her by voice: "how much Claude do I have left?".'),
       ),
       this.agents,
       this.alerts.node,
@@ -114,11 +115,11 @@ export class WorkView {
     this.notifyList = el('div', { class: 'integration-list' });
     const notifyCard = this._card(
       'robot',
-      'Avvisi dagli agenti',
+      t('Agent notifications'),
       el(
         'p',
         { class: 'card-sub' },
-        'Quando Claude Code o Codex, usati per conto tuo, finiscono un lavoro (o ti aspettano), lei ti chiama. Se stai già guardando l’editor basta una bolla.',
+        t("When Claude Code or Codex, used on your own, finish a job (or wait for you), she calls you. If you're already looking at the editor, a bubble is enough."),
       ),
       this.notifyList,
     );
@@ -146,12 +147,12 @@ export class WorkView {
     return { node, input };
   }
 
-  // -------------------------------------------------------------- consumi
+  // ------------------------------------------------------------------ usage
   async _loadUsage() {
     try {
       this._setUsage(await request('/api/usage'));
     } catch (error) {
-      if (!this.usage) this.agents.replaceChildren(el('p', { class: 'hint error' }, `Consumi non disponibili: ${error.message}`));
+      if (!this.usage) this.agents.replaceChildren(el('p', { class: 'hint error' }, t('Usage unavailable: {error}', { error: error.message })));
     }
   }
 
@@ -159,7 +160,7 @@ export class WorkView {
     this.usage = snapshot;
     const agents = snapshot?.agents ?? [];
     if (!agents.length) {
-      this.agents.replaceChildren(el('p', { class: 'hint' }, 'Non trovo Claude Code, Codex o Antigravity su questo PC.'));
+      this.agents.replaceChildren(el('p', { class: 'hint' }, t("I can't find Claude Code, Codex or Antigravity on this PC.")));
       return;
     }
     this.agents.replaceChildren(...agents.map((agent) => this._agent(agent)));
@@ -190,27 +191,27 @@ export class WorkView {
     });
     const today = agent.today;
     const todayLine = today?.tokens
-      ? el('p', { class: 'usage-today' }, `Oggi: ${tokensText(today.tokens)} token in ${today.messages} ${today.messages === 1 ? 'risposta' : 'risposte'}`)
+      ? el('p', { class: 'usage-today' }, today.messages === 1 ? t('Today: {tokens} tokens in 1 reply', { tokens: tokensText(today.tokens) }) : t('Today: {tokens} tokens in {n} replies', { tokens: tokensText(today.tokens), n: today.messages }))
       : today
-        ? el('p', { class: 'usage-today' }, 'Oggi non l’hai ancora usato.')
+        ? el('p', { class: 'usage-today' }, t("You haven't used it today yet."))
         : null;
     const note = agent.note ? el('p', { class: 'hint' }, agent.note) : null;
     return el('div', { class: 'usage-agent' }, head, ...limits, todayLine, note, agent.link ? this._linkRow(agent) : null);
   }
 
-  /** Claude Code: i limiti arrivano solo dalla sua barra di stato, che si collega da qui. */
+  /** Claude Code: the limits come only from its status line, which is connected from here. */
   _linkRow(agent) {
     const status = this.integrations?.[agent.link];
     if (agent.linked) {
       return el(
         'button',
         { class: 'link-btn', type: 'button', onClick: () => this._change(agent.link, 'uninstall') },
-        'Scollega la barra di stato di Claude Code',
+        t("Disconnect Claude Code's status line"),
       );
     }
     const wraps = status?.wraps
-      ? ' Avevi già una barra: resta com’è, la nostra la mostra uguale.'
-      : ' Mostra modello, contesto e limiti.';
+      ? t(' You already had a status line: it stays as it is, ours shows it the same.')
+      : t(' Shows model, context and limits.');
     return el(
       'div',
       { class: 'usage-link' },
@@ -218,18 +219,18 @@ export class WorkView {
         'button',
         { class: 'btn primary', type: 'button', onClick: () => this._change(agent.link, 'install') },
         icon('gauge', 15),
-        el('span', {}, 'Mostra i limiti di Claude Code'),
+        el('span', {}, t("Show Claude Code's limits")),
       ),
-      el('p', { class: 'hint' }, `Aggiunge a Claude Code una barra di stato che passa i limiti a Tsukumo.${wraps} Prima fa una copia di settings.json.`),
+      el('p', { class: 'hint' }, t('Adds a status line to Claude Code that passes the limits to Tsukumo.{wraps} It backs up settings.json first.', { wraps })),
     );
   }
 
-  // ---------------------------------------------------------------- avvisi
+  // --------------------------------------------------------------- notices
   async _loadIntegrations() {
     try {
       this._renderIntegrations(await request('/api/integrations'));
     } catch {
-      /* backend spento: resta com'era */
+      /* backend off: stays as it was */
     }
   }
 
@@ -239,11 +240,23 @@ export class WorkView {
       ...['claude', 'codex'].map((tool) => {
         const item = status?.[tool];
         if (!item) return null;
-        const state = item.installed ? 'Collegato' : item.conflict ? 'Ha già un suo avviso' : item.available ? 'Non collegato' : 'Non installato';
+        const state = item.outdated
+          ? t('Connected, without the agents dashboard')
+          : item.installed
+            ? t('Connected|integration')
+            : item.conflict
+              ? t('Already has its own notification')
+              : item.available
+                ? t('Not connected')
+                : t('Not installed');
         return el(
           'div',
           { class: 'integration' },
           el('span', { class: 'integration-text' }, el('strong', {}, item.label), el('small', { title: item.file }, state)),
+          // Connected before the dashboard: "Update" adds the missing hooks.
+          item.outdated
+            ? el('button', { class: 'btn primary', type: 'button', onClick: () => this._change(tool, 'install') }, el('span', {}, t('Update')))
+            : null,
           el(
             'button',
             {
@@ -252,7 +265,7 @@ export class WorkView {
               disabled: !item.available || item.conflict,
               onClick: () => this._change(tool, item.installed ? 'uninstall' : 'install'),
             },
-            el('span', {}, item.installed ? 'Scollega' : 'Collega'),
+            el('span', {}, item.installed ? t('Disconnect') : t('Connect')),
           ),
         );
       }),
@@ -263,22 +276,22 @@ export class WorkView {
   async _change(tool, action) {
     try {
       const data = await request('/api/integrations', 'POST', { tool, action });
-      if (!data.ok) throw new Error(data.error ?? 'non riuscito');
+      if (!data.ok) throw new Error(tx(data.error) ?? t('failed'));
       this._renderIntegrations(data.status);
-      const done = tool === 'claude_usage' ? 'I limiti arrivano alla prossima risposta di Claude Code.' : 'Collegato: ti chiamo quando ha finito.';
-      this.app.toast(action === 'install' ? done : 'Scollegato.');
+      const done = tool === 'claude_usage' ? t("The limits arrive with Claude Code's next reply.") : t("Connected: I'll call you when it's done.");
+      this.app.toast(action === 'install' ? done : t('Disconnected.'));
       this._loadUsage();
     } catch (error) {
       this.app.toast(error.message, 'error');
     }
   }
 
-  // ------------------------------------------------------------ preferenze
+  // ----------------------------------------------------------- preferences
   async _loadPreferences() {
     try {
       this._setPreferences(await request('/api/preferences'));
     } catch {
-      /* resta com'era */
+      /* stays as it was */
     }
   }
 

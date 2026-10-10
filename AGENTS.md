@@ -6,10 +6,18 @@ humans working on Tsukumo. Read this before changing code.
 ## What this is
 
 A desktop companion: a Python backend (FastAPI) that turns any LLM or CLI
-agent into a talking VRM character, a Three.js frontend that renders her and
+agent into a talking spirit flame, a Three.js frontend that renders her and
 her panel, and an Electron shell that makes her a transparent, always-on-top
 desktop mascot on Windows. See [README.md](README.md) for the feature tour and
 the HTTP/WebSocket API.
+
+**The flame comes first.** Tsukumo *is* the flame (`frontend/src/flame.js`):
+new installs start without a body, and every feature must work, and look
+finished, on the flame alone. A VRM model is an optional body she can enter
+and leave. Body-only behaviour (sitting, lying down, `.vrma` clips, the two
+arc docks of the right-click menu) stays behind `form === 'vrm'`; the flame
+has her own menu (the black island in `island.js`, which she slides into) and
+her own reactions.
 
 ## Map
 
@@ -23,12 +31,17 @@ the HTTP/WebSocket API.
 | `backend/llm/` | `cli_agents.py` (Claude Code, Codex, Antigravity, Gemini CLI… via subprocess), `openclaw.py`, `openai_compatible.py`, `ollama.py`, `anthropic.py`, `gemini.py`, `mock.py`, `detect.py` |
 | `backend/tts/`, `backend/stt/` | Voice and speech-recognition engines |
 | `backend/reminders.py` | Natural-language timers/reminders (IT/EN), `[[remind]]` tags, persistent store |
+| `backend/agents_board.py`, `backend/llm/tasks.py` | **Agents at work**: Tsukumo's own agent (observed in `ConnectionHub.broadcast`) and external Claude Code/Codex sessions from the hooks, with their task lists |
+| `backend/transcript.py` | The last chat lines with a growing `seq`, sent in `hello` so a reconnecting client catches up |
 | `backend/proactive.py` | Spontaneous comments (time, weather, battery, YouTube, news) |
 | `backend/usage.py`, `notify.py` | Agent usage limits from local files; Claude Code/Codex hooks |
-| `frontend/src/main.js`, `vrm.js`, `body.js`, `flame.js`, `hud.js` | The character: rendering, procedural animation, spirit flame, docks |
+| `frontend/src/flame.js`, `flame/` | **The flame (Tsukumo herself)**: moods, reactions, work props (terminal, page, lens, helper flame), effects. `motion.js` (keyed curves, springs, contact squash) and `moves.js` (every reaction as curves: anticipation, action, overshoot, hold); `wardrobe.js` (outfits, seasonal "auto") and `outfits.js` (their 3D, soft parts on springs); `palettes.js` (named colours and free `#rrggbb`) |
+| `frontend/src/main.js`, `vrm.js`, `body.js`, `hud.js`, `island.js` | The stage: rendering, the optional VRM body and its procedural animation, the right-click menu (`hud.js` holds its state and draws the body's arc docks; `island.js` is the flame's Coucou-style island) |
+| `frontend/dashboard.html`, `src/dashboard.js`, `src/dashboard/` | **Dashboard**: week, today, weather, agents, chat. The pet window docks into its corner (`setPetStage` in `electron/main.js`); "−" sends her back to the desktop |
 | `frontend/src/panel.js`, `panel/`, `engines.js` | The panel (chat, character, agenda, work, engines) |
+| `frontend/src/i18n.js`, `i18n/it.js`, `electron/i18n.js` | **Interface language**: `t()`/`tx()`, the Italian catalog keyed by the English text, the choice in *Character → Language* (`dc:ui-language`, else the system language) |
 | `electron/main.js` | Windows, backend process, IPC, tray, **renderer hardening** |
-| `electron/pet-physics.js`, `desktop.js` | Falling, sitting on windows, taskbar, sprints; Win32 via koffi |
+| `electron/pet-physics.js`, `desktop.js` | Falling, throwing (the flame flies and bounces off screen edges), sitting on windows, taskbar, sprints; Win32 via koffi |
 | `scripts/build_installer.ps1` | Public Windows installer (embedded Python + electron-builder NSIS) |
 | `tests/` | pytest suite (no network, no models, no user `.env`) |
 
@@ -48,10 +61,18 @@ var `ELECTRON_RUN_AS_NODE=1` may be set by tooling: run Electron with it unset.
 
 ## Conventions
 
-- **Language.** Code comments, docstrings, log lines and the panel UI are in
-  Italian; identifiers and config keys are in English. Public docs (README,
-  this file, SECURITY.md, release notes) are in English. Match the surrounding
-  style: explain *why*, not *what*.
+- **Language.** Everything is written in English: code, comments, docstrings,
+  log lines, docs, commit messages. Match the surrounding style: explain *why*,
+  not *what*.
+- **Interface text** is English in the source, wrapped in `t()` (frontend) or
+  sent as-is by the backend and translated with `tx()` on display. The Italian
+  catalog `frontend/src/i18n/it.js` is keyed by the English text; `{0}`, `{1}`
+  keys also match backend text with values inside. Electron's own text (tray,
+  dialogs) has a small catalog in `electron/i18n.js`. A new string without an
+  Italian entry just shows in English; add the entry in the same change.
+- **What she says** (spoken lines, reminders, comments) follows the voice's
+  language, not the interface: those strings stay bilingual in the backend
+  (`it`/`en` variants).
 - **Engines are data.** To add an engine, declare a `ProviderSpec` in
   `provider_specs.py`, implement the client in `llm/`, `tts/` or `stt/`, and
   add a test. Don't add per-engine code to the frontend.

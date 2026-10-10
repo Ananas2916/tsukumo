@@ -1,4 +1,4 @@
-"""Testo -> frasi pronunciabili: la parte che si rompe in silenzio."""
+"""Text -> speakable sentences: the part that breaks silently."""
 
 from backend.pipeline import clean_for_speech, detect_mood, split_sentences, strip_emoji
 

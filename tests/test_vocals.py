@@ -1,4 +1,4 @@
-"""Versetti: frasi nella lingua della voce, cache per voce, mai in conversazione."""
+"""Vocal sounds: lines in the voice's language, cache per voice, never in conversation."""
 
 import random
 
@@ -26,9 +26,9 @@ def test_lines_follow_the_voice_language():
     rng = random.Random(1)
     assert vocal_line("greet", "it", rng) in LINES["greet"]["it"]
     assert vocal_line("greet", "cmn", rng) in LINES["greet"]["zh"]
-    # Lingua sconosciuta: inglese.
+    # Unknown language: English.
     assert vocal_line("poke", "xx", rng) in LINES["poke"]["en"]
-    # Manca l'evento per la lingua: meglio un saluto nella lingua giusta.
+    # The event is missing for the language: better a greeting in the right language.
     assert vocal_line("welcome", "hi", rng) in LINES["greet"]["hi"]
     with pytest.raises(KeyError):
         vocal_line("dance", "en")
@@ -57,7 +57,7 @@ def test_vocal_speaks_with_the_current_voice_and_is_cached(client, monkeypatch):
     for _ in range(6):
         again = client.post("/api/vocal", json={"event": "pat"}).json()
         assert again["ok"] is True
-    # Al massimo una sintesi per variante: le altre richieste vengono dalla cache.
+    # At most one synthesis per variant: the other requests come from the cache.
     assert len(calls) == len(set(calls)) <= len(LINES["pat"]["en"])
     assert instance.history == history
 
@@ -79,7 +79,7 @@ def test_without_a_chosen_voice_the_system_language_picks_it(client, monkeypatch
     monkeypatch.setattr(instance, "voice_chosen", False)
     client.portal.call(instance.load_voices)
     assert instance.voice == "if_sara"
-    # Una voce scelta dal pannello vince, anche se le voci si ricaricano dopo.
+    # A voice chosen in the panel wins, even if the voices reload later.
     instance.update_settings(voice="af_heart")
     client.portal.call(instance.load_voices)
     assert instance.voice == "af_heart"

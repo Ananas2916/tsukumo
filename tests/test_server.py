@@ -1,4 +1,4 @@
-"""API e WebSocket del backend, con cervello finto e voce a formanti."""
+"""The backend's API and WebSocket, with a fake brain and the formant voice."""
 
 import asyncio
 import time
@@ -10,8 +10,8 @@ from backend.providers import REGISTRIES
 
 
 def test_health_is_instant_even_if_the_brain_hangs(client):
-    # Prima /api/health chiedeva lo stato all'agente: con OpenClaw spento
-    # restava appeso e la shell Electron dava il backend per morto.
+    # /api/health used to ask the agent for its status: with OpenClaw off
+    # it hung and the Electron shell took the backend for dead.
     instance = server.app.state.companion
 
     async def stuck():
@@ -57,7 +57,7 @@ def test_check_reports_without_applying(client):
     missing_key = client.post(
         "/api/providers/check", json={"kind": "tts", "provider": "elevenlabs", "options": {}}
     ).json()
-    assert missing_key["ok"] is False and "chiave" in missing_key["detail"].lower()
+    assert missing_key["ok"] is False and "api key" in missing_key["detail"].lower()
     assert client.get("/api/providers").json()["selected"]["tts"] == "formant"
 
 

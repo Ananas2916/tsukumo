@@ -1,8 +1,8 @@
 """Tsukumo - backend package.
 
-Contiene la logica applicativa: configurazione, cervelli (modelli e agenti),
-voci, estrazione dei visemi per il lip-sync, stato dei motori e server
-WebSocket.
+It holds the application logic: configuration, brains (models and agents),
+voices, viseme extraction for the lip-sync, engine status and the WebSocket
+server.
 """
 
-__version__ = "2.3.0"
+__version__ = "2.9.0"

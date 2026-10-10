@@ -1,10 +1,10 @@
 /**
- * Effetti sonori: un "pop" quando compare, un tonfo quando atterra, un
- * campanello per promemoria e notifiche, un toc-toc quando bussa sul vetro.
+ * Sound effects: a "pop" when she appears, a thud when she lands, a chime
+ * for reminders and notifications, a knock-knock when she taps the glass.
  *
- * Niente file audio: tutto sintetizzato con WebAudio, in un contesto separato
- * da quello della voce. Cosi' gli effetti non passano dall'analizzatore del
- * lip-sync e la bocca non si muove a ogni "ding".
+ * No audio files: everything is synthesized with WebAudio, in a context
+ * separate from the voice's. So the effects don't go through the lip-sync
+ * analyser and the mouth doesn't move at every "ding".
  */
 
 import { readSetting, writeSetting } from './dom.js';
@@ -24,7 +24,7 @@ export class Sfx {
     writeSetting('dc:sfx', this.enabled);
   }
 
-  /** Il contesto nasce al primo suono; `null` se non si puo' (o se deve tacere). */
+  /** The context is created at the first sound; `null` if it can't be (or she must keep quiet). */
   _ready() {
     if (!this.enabled || this.isMuted()) return null;
     if (!this.context) {
@@ -39,7 +39,7 @@ export class Sfx {
     return this.context;
   }
 
-  /** Un tono che parte forte e sfuma, con un'armonica per il timbro. */
+  /** A tone that starts loud and fades, with a harmonic for the timbre. */
   _tone(frequency, { at = 0, duration = 0.6, gain = 0.5, type = 'sine', slideTo = null, harmonic = 0 } = {}) {
     const context = this.context;
     const start = context.currentTime + at;
@@ -63,7 +63,7 @@ export class Sfx {
     }
   }
 
-  /** Rumore filtrato: la parte "legno" di un colpo. */
+  /** Filtered noise: the "wood" part of a knock. */
   _noise({ at = 0, duration = 0.05, gain = 0.4, frequency = 1800, q = 1.2 } = {}) {
     const context = this.context;
     const start = context.currentTime + at;
@@ -83,20 +83,20 @@ export class Sfx {
     source.start(start);
   }
 
-  /** Din-don: promemoria, timer, notifiche. */
+  /** Ding-dong: reminders, timers, notifications. */
   chime() {
     if (!this._ready()) return;
     this._tone(1318.5, { duration: 1.1, gain: 0.35, harmonic: 0.12 });
     this._tone(987.8, { at: 0.16, duration: 1.4, gain: 0.32, harmonic: 0.1 });
   }
 
-  /** Compare sullo schermo. */
+  /** She appears on screen. */
   pop() {
     if (!this._ready()) return;
     this._tone(420, { duration: 0.16, gain: 0.3, slideTo: 980 });
   }
 
-  /** Atterra: piu' forte se cade da piu' in alto (`strength` 0..1). */
+  /** She lands: louder if she falls from higher up (`strength` 0..1). */
   thud(strength = 0.5) {
     if (!this._ready()) return;
     const level = 0.15 + 0.45 * Math.min(1, Math.max(0, strength));
@@ -104,7 +104,7 @@ export class Sfx {
     this._noise({ duration: 0.06, gain: level * 0.5, frequency: 600, q: 0.8 });
   }
 
-  /** Toc toc sul vetro dello schermo. */
+  /** Knock knock on the screen glass. */
   knock() {
     if (!this._ready()) return;
     for (const at of [0, 0.19]) {
@@ -113,7 +113,7 @@ export class Sfx {
     }
   }
 
-  /** Un piccolo "blip" di sorpresa (le gira la testa, si offende...). */
+  /** A small "blip" of surprise (her head spins, she gets offended...). */
   blip(up = true) {
     if (!this._ready()) return;
     this._tone(up ? 660 : 880, { duration: 0.14, gain: 0.22, slideTo: up ? 990 : 520, type: 'triangle' });

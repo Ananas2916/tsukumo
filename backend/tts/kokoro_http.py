@@ -1,11 +1,11 @@
-"""Adapter verso un server Kokoro-FastAPI gia' in esecuzione.
+"""Adapter for a Kokoro-FastAPI server that's already running.
 
-Utile se hai gia' il progetto ``Kokoro-FastAPI`` avviato (anche in Docker con
-accelerazione GPU): il Desk Companion gli parla via l'endpoint
-OpenAI-compatible ``POST /v1/audio/speech`` e riceve un WAV.
+Handy if you already have the ``Kokoro-FastAPI`` project running (in Docker
+with GPU acceleration too): Tsukumo talks to it through the
+OpenAI-compatible ``POST /v1/audio/speech`` endpoint and gets a WAV back.
 
-Attivalo con ``DC_TTS_ENGINE=kokoro_http`` (e ``DC_KOKORO_HTTP_URL`` se il
-server non e' su http://127.0.0.1:8880).
+Turn it on with ``DC_TTS_ENGINE=kokoro_http`` (and ``DC_KOKORO_HTTP_URL`` if
+the server isn't on http://127.0.0.1:8880).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class KokoroHTTPTTS(TTSEngine):
-    """Client sincrono (viene chiamato dentro un thread pool) per Kokoro-FastAPI."""
+    """Synchronous client (it's called inside a thread pool) for Kokoro-FastAPI."""
 
     name = "kokoro_http"
 
@@ -40,9 +40,9 @@ class KokoroHTTPTTS(TTSEngine):
         self.language = language
         self._client = httpx.Client(timeout=timeout)
         self._voices_cache: list[str] | None = None
-        # Verifica immediata: meglio fallire all'avvio che alla prima frase.
+        # Immediate check: better to fail at startup than at the first sentence.
         self._client.get(f"{self.base_url}/v1/audio/voices").raise_for_status()
-        logger.info("Kokoro-FastAPI raggiungibile su %s", self.base_url)
+        logger.info("Kokoro-FastAPI reachable at %s", self.base_url)
 
     # ------------------------------------------------------------------
     def voices(self) -> list[str]:
@@ -53,8 +53,8 @@ class KokoroHTTPTTS(TTSEngine):
                 payload = response.json()
                 raw = payload.get("voices", payload) if isinstance(payload, dict) else payload
                 self._voices_cache = sorted(str(v) for v in raw)
-            except Exception as exc:  # pragma: no cover - dipende dal server
-                logger.warning("Elenco voci non disponibile: %s", exc)
+            except Exception as exc:  # pragma: no cover - depends on the server
+                logger.warning("Voice list unavailable: %s", exc)
                 self._voices_cache = [self.default_voice]
         return list(self._voices_cache)
 
@@ -94,7 +94,7 @@ class KokoroHTTPTTS(TTSEngine):
             samples=samples,
             sample_rate=sample_rate,
             text=clean,
-            phonemes=None,  # il server non espone l'IPA: usiamo il G2P interno
+            phonemes=None,  # the server doesn't expose the IPA: we use the internal G2P
             meta={"engine": self.name, "voice": chosen_voice, "speed": chosen_speed},
         )
 

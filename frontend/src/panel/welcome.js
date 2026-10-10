@@ -1,47 +1,50 @@
 /**
- * Primo avvio: una presentazione in sei passi dentro il pannello.
+ * First start: a six-step introduction inside the panel.
  *
- * 1. chi e' e come si usa (tasto destro, doppio click, trascinarla);
- * 2. come la vuoi: con il corpo (il VRM, e la fiammella quando vuoi) o solo
- *    la fiammella, senza corpo: il VRM allora non si carica nemmeno. Si
- *    vede subito sul personaggio: esce dal corpo, o ci rientra;
- * 3. come ti chiami (diventa un ricordo, vedi backend/memory.py) e il suo nome;
- * 4. il cervello, fra quelli trovati sul PC (backend/llm/detect.py): si
- *    aspetta che il riconoscimento finisca, appena installata e' ancora li';
- * 5. "ti preparo tutto": con un clic l'ascolto (installa Faster-Whisper se
- *    manca), gli avvisi di Claude Code e Codex, i limiti di Claude Code, e la
- *    voce da ascoltare. Ogni voce si puo' togliere prima di premere;
- * 6. fatto: ti saluta per nome.
+ * 1. who she is and how to use her (right-click, double click, dragging her);
+ * 2. how you want her: the flame (recommended: the VRM isn't even loaded) or
+ *    the flame with a 3D body to enter. It shows right away on the
+ *    character: she leaves the body, or enters it;
+ * 3. your name (it becomes a memory, see backend/memory.py) and hers;
+ * 4. the brain, among those found on the PC (backend/llm/detect.py): it
+ *    waits for the detection to finish, right after install it's still there;
+ * 5. "I'll set everything up": with one click listening (installs
+ *    Faster-Whisper if missing), Claude Code and Codex notifications, Claude
+ *    Code's limits, and the voice to listen to. Each item can be removed
+ *    before pressing;
+ * 6. done: she greets you by name.
  *
- * Ogni passo si puo' saltare, e tutto si cambia dopo dalle schede. Riparte
- * dalla scheda Personaggio ("Rifai la presentazione").
+ * Every step can be skipped, and everything can be changed later from the
+ * tabs. It starts again from the Character tab ("Redo the introduction").
  */
 
 import { apiUrl } from '../config.js';
 import { el, readSetting, writeSetting } from '../dom.js';
+import { t, tx } from '../i18n.js';
 import { icon } from '../icons.js';
 import { applyForm, currentForm } from './character.js';
 
 export const ONBOARDED = 'dc:onboarded';
 
 const TIPS = [
-  { icon: 'dots', text: 'Tasto destro su di lei: comandi, voce, microfono.' },
-  { icon: 'chat', text: 'Doppio click: le scrivi. Oppure parlale a voce.' },
-  { icon: 'hand', text: 'Trascinala dove vuoi: si siede anche sulle finestre.' },
+  { icon: 'dots', text: t('Right-click on her: commands, voice, microphone.') },
+  { icon: 'chat', text: t('Double click: write to her. Or talk to her.') },
+  { icon: 'hand', text: t('Drag her wherever you like, or throw her: she bounces off the edges and sits on windows.') },
+  { icon: 'clip', text: t('Drop a file on her: she eats it and passes it to her brain.') },
 ];
 
 const FORMS = [
   {
-    value: 'vrm',
-    icon: 'character',
-    title: 'Con il corpo',
-    text: 'Il personaggio 3D. Quando vuoi diventa una fiammella e poi ci rientra.',
-  },
-  {
     value: 'spirit',
     icon: 'flame',
-    title: 'Solo la fiammella',
-    text: 'Niente modello 3D: più leggera per il PC. Il corpo si aggiunge quando vuoi.',
+    title: t('The flame'),
+    text: t('Me, just as I am: light on the PC. A 3D body can be added whenever you like.'),
+  },
+  {
+    value: 'vrm',
+    icon: 'body',
+    title: t('With a 3D body'),
+    text: t('I enter a VRM character, and leave it whenever you like.'),
   },
 ];
 
@@ -50,7 +53,7 @@ const GREETING = {
   en: (user, name) => (user ? `Nice to meet you, ${user}! I'm ${name}. I'm here whenever you need me.` : `Here I am! I'm ${name}. I'm here whenever you need me.`),
 };
 
-/** Quanto aspettare il riconoscimento dei cervelli prima di mostrare cosa c'e' (s). */
+/** How long to wait for the brain detection before showing what's there (s). */
 const DETECT_WAIT = 12;
 
 async function request(path, method = 'GET', body) {
@@ -60,7 +63,7 @@ async function request(path, method = 'GET', body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+  if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
   return data;
 }
 
@@ -68,8 +71,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class Welcome {
   /**
-   * @param {object} app lo stato del pannello (socket, showTab, settings...)
-   * @param {HTMLElement} host dove appoggiare il riquadro (la finestra del pannello)
+   * @param {object} app the panel's state (socket, showTab, settings...)
+   * @param {HTMLElement} host where to place the card (the panel's window)
    */
   constructor(app, host) {
     this.app = app;
@@ -80,7 +83,7 @@ export class Welcome {
     this.herName = 'Tsukumo';
   }
 
-  /** Al primo avvio (o se richiesto) apre la presentazione. */
+  /** At first start (or on request) it opens the introduction. */
   maybeStart() {
     if (!readSetting(ONBOARDED, false)) this.start();
   }
@@ -88,7 +91,7 @@ export class Welcome {
   start() {
     this.step = 0;
     this.node?.remove();
-    this.node = el('div', { class: 'welcome', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Benvenuto' });
+    this.node = el('div', { class: 'welcome', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('Welcome') });
     this.host.append(this.node);
     this._render();
   }
@@ -121,39 +124,39 @@ export class Welcome {
     this._render();
   }
 
-  _footer(next, { nextLabel = 'Avanti', skip = true } = {}) {
+  _footer(next, { nextLabel = t('Next'), skip = true } = {}) {
     return el(
       'div',
       { class: 'welcome-actions' },
-      skip ? el('button', { class: 'link-btn', type: 'button', title: 'Salta la presentazione', onClick: () => this.finish() }, 'Salta') : el('span'),
+      skip ? el('button', { class: 'link-btn', type: 'button', title: t('Skip the introduction'), onClick: () => this.finish() }, t('Skip')) : el('span'),
       el('span', { class: 'spacer' }),
-      this.step > 0 ? el('button', { class: 'btn', type: 'button', onClick: () => this._go(-1) }, 'Indietro') : null,
+      this.step > 0 ? el('button', { class: 'btn', type: 'button', onClick: () => this._go(-1) }, t('Back')) : null,
       el('button', { class: 'btn primary', type: 'button', onClick: next }, el('span', {}, nextLabel), icon('chevronRight', 15)),
     );
   }
 
-  // ---------------------------------------------------------------- passi
+  // ------------------------------------------------------------------ steps
   async _intro() {
     try {
       this.herName = (await request('/api/memory')).persona?.name || this.herName;
     } catch {
-      /* il backend sta ancora partendo: resta il nome di default */
+      /* the backend is still starting: the default name stays */
     }
     return el(
       'div',
       { class: 'welcome-step' },
-      el('h2', {}, `Ciao! Sono ${this.herName}.`),
+      el('h2', {}, t("Hi! I'm {name}.", { name: this.herName })),
       el(
         'p',
         {},
-        'Vivo sulla tua scrivania e sono la voce e la faccia del cervello che scegli: un agente come Claude Code, Codex o Antigravity, un modello sul tuo PC o un servizio in rete.',
+        t("I live on your desk and I'm the voice and face of the brain you choose: an agent like Claude Code, Codex or Antigravity, a model on your PC or an online service."),
       ),
       el('ul', { class: 'welcome-tips' }, ...TIPS.map((tip) => el('li', {}, icon(tip.icon, 16), el('span', {}, tip.text)))),
-      this._footer(() => this._go(1), { nextLabel: 'Cominciamo' }),
+      this._footer(() => this._go(1), { nextLabel: t("Let's start") }),
     );
   }
 
-  /** Con il corpo o solo la fiammella: si vede subito sul personaggio. */
+  /** With the body or just the flame: it shows right away on the character. */
   async _form() {
     let chosen = currentForm() === 'spirit' ? 'spirit' : 'vrm';
     const list = el('div', { class: 'welcome-forms' });
@@ -185,15 +188,15 @@ export class Welcome {
     return el(
       'div',
       { class: 'welcome-step' },
-      el('h2', {}, 'Come mi vuoi?'),
-      el('p', {}, 'Scegli e guardami: cambio subito. Si può rifare quando vuoi da Personaggio → Aspetto.'),
+      el('h2', {}, t('How do you want me?')),
+      el('p', {}, t('Choose and watch me: I change right away. You can redo it whenever you like from Character → Look.')),
       list,
       this._footer(() => this._go(1)),
     );
   }
 
   async _names() {
-    const user = el('input', { class: 'field-input', type: 'text', maxlength: 40, placeholder: 'Il tuo nome', value: this.userName });
+    const user = el('input', { class: 'field-input', type: 'text', maxlength: 40, placeholder: t('Your name'), value: this.userName });
     const her = el('input', { class: 'field-input', type: 'text', maxlength: 40, placeholder: 'Tsukumo', value: this.herName });
     const next = async () => {
       this.userName = user.value.trim();
@@ -201,8 +204,8 @@ export class Welcome {
       try {
         if (name !== this.herName) await request('/api/memory/persona', 'PUT', { name });
         this.herName = name;
-        // Il nome diventa un ricordo: vale per ogni cervello, anche cambiandolo.
-        if (this.userName) await request('/api/memory/facts', 'POST', { text: `Si chiama ${this.userName}` }).catch(() => {});
+        // The name becomes a memory: it holds for every brain, even when you change it.
+        if (this.userName) await request('/api/memory/facts', 'POST', { text: t("The user's name is {name}", { name: this.userName }) }).catch(() => {});
       } catch (error) {
         this.app.toast?.(error.message, 'error');
       }
@@ -213,30 +216,30 @@ export class Welcome {
     return el(
       'div',
       { class: 'welcome-step' },
-      el('h2', {}, 'Come ti chiami?'),
-      el('p', {}, 'Me lo ricordo, qualunque cervello userai. Puoi anche darmi un altro nome.'),
-      el('label', { class: 'row' }, el('span', { class: 'row-label' }, 'Tu'), user),
-      el('label', { class: 'row' }, el('span', { class: 'row-label' }, 'Io'), her),
+      el('h2', {}, t("What's your name?")),
+      el('p', {}, t("I'll remember it, whatever brain you use. You can also give me another name.")),
+      el('label', { class: 'row' }, el('span', { class: 'row-label' }, t('You')), user),
+      el('label', { class: 'row' }, el('span', { class: 'row-label' }, t('Me')), her),
       this._footer(next),
     );
   }
 
-  /** Il passo si mostra subito e si riempie quando il backend ha finito di guardare cosa c'e' sul PC. */
+  /** The step shows right away and fills in when the backend has finished looking at what's on the PC. */
   async _brain() {
-    const intro = el('p', {}, 'Guardo cosa c’è sul tuo PC…');
+    const intro = el('p', {}, t("Looking at what's on your PC…"));
     const list = el('div', { class: 'welcome-choices' });
     const status = el('p', { class: 'hint' });
     const node = el(
       'div',
       { class: 'welcome-step' },
-      el('h2', {}, 'Il cervello'),
+      el('h2', {}, t('The brain')),
       intro,
       list,
       status,
       el(
         'button',
         { class: 'link-btn', type: 'button', onClick: () => this.app.showTab?.('engines', { section: 'llm' }) },
-        'Tutti i cervelli, in Motori',
+        t('All the brains, in Engines'),
         icon('chevronRight', 14),
       ),
       this._footer(() => this._go(1)),
@@ -251,7 +254,7 @@ export class Welcome {
       await request(`/api/setup?wait=${DETECT_WAIT}`).catch(() => null);
       data = await request('/api/providers');
     } catch (error) {
-      intro.textContent = 'Non riesco a parlare col backend.';
+      intro.textContent = t("I can't talk to the backend.");
       status.textContent = error.message;
       status.classList.add('error');
       return;
@@ -271,43 +274,43 @@ export class Welcome {
               type: 'button',
               class: `welcome-choice${spec.id === selected ? ' on' : ''}`,
               onClick: async () => {
-                status.textContent = `Collego ${spec.label}…`;
+                status.textContent = t('Connecting {engine}…', { engine: tx(spec.label) });
                 try {
                   const result = await request('/api/providers', 'POST', { kind: 'llm', provider: spec.id, options: {} });
-                  if (!result.ok) throw new Error(result.error ?? 'non risponde');
+                  if (!result.ok) throw new Error(tx(result.error) ?? t('not answering'));
                   selected = spec.id;
-                  status.textContent = `${spec.label} è il mio cervello.`;
+                  status.textContent = t('{engine} is my brain.', { engine: tx(spec.label) });
                 } catch (error) {
-                  status.textContent = `${spec.label}: ${error.message}`;
+                  status.textContent = `${tx(spec.label)}: ${error.message}`;
                 }
                 render();
               },
             },
-            el('strong', {}, spec.label),
-            el('small', {}, spec.tagline ?? ''),
+            el('strong', {}, tx(spec.label)),
+            el('small', {}, tx(spec.tagline) ?? ''),
           ),
         ),
       );
     };
     render();
     intro.textContent = found.length
-      ? 'Sul tuo PC ho trovato questi. Scegline uno: gli altri (e i servizi in rete) sono nella scheda Motori.'
-      : 'Non ho trovato agenti o modelli sul PC. Nella scheda Motori puoi collegarne uno: Claude Code, Codex, LM Studio, Ollama o una chiave di un servizio.';
+      ? t('I found these on your PC. Pick one: the others (and online services) are in the Engines tab.')
+      : t("I didn't find agents or models on the PC. In the Engines tab you can connect one: Claude Code, Codex, LM Studio, Ollama or a service's key.");
     const current = specs.get(selected);
-    status.textContent = current ? `Adesso uso ${current.label}.` : '';
+    status.textContent = current ? t("Now I'm using {engine}.", { engine: tx(current.label) }) : '';
   }
 
   /**
-   * "Ti preparo tutto": quello che si puo' fare da soli, con un clic. Tocca
-   * file fuori da Tsukumo (le impostazioni degli agenti) solo per le voci
-   * lasciate spuntate, e ognuna dice cosa fa.
+   * "I'll set everything up": what can be done by itself, with one click. It
+   * touches files outside Tsukumo (the agents' settings) only for the items
+   * left ticked, and each says what it does.
    */
   async _setup() {
     let data = null;
     try {
       data = await request('/api/setup');
     } catch (error) {
-      return el('div', { class: 'welcome-step' }, el('h2', {}, 'Ti preparo tutto'), el('p', { class: 'hint error' }, error.message), this._footer(() => this._go(1)));
+      return el('div', { class: 'welcome-step' }, el('h2', {}, t("I'll set everything up")), el('p', { class: 'hint error' }, error.message), this._footer(() => this._go(1)));
     }
     const integrations = data.integrations ?? {};
     const listening = data.listening ?? {};
@@ -316,49 +319,49 @@ export class Welcome {
 
     const addTask = ({ id, title, text, done, disabled, run }) => {
       const check = el('input', { type: 'checkbox', checked: done || !disabled, disabled: done || disabled });
-      const state = el('span', { class: `setup-state${done ? ' ok' : ''}` }, done ? 'fatto' : '');
+      const state = el('span', { class: `setup-state${done ? ' ok' : ''}` }, done ? t('done|task') : '');
       const detail = el('small', {}, text);
       rows.push(el('label', { class: 'setup-item' }, check, el('span', { class: 'integration-text' }, el('strong', {}, title), detail), state));
       if (!done && !disabled) tasks.push({ id, check, state, detail, run });
     };
 
-    // Ascolto -----------------------------------------------------------------
+    // Listening ------------------------------------------------------------------
     addTask({
       id: 'listening',
-      title: 'Ascoltarti a voce',
+      title: t('Hear you speak'),
       text: listening.on
-        ? 'Già acceso: Ctrl+Spazio e parlami.'
+        ? t('Already on: Ctrl+Space and talk to me.')
         : listening.local
-          ? 'Faster-Whisper c’è già: lo accendo. Il modello si scarica la prima volta (circa 150 MB).'
-          : 'Installo Faster-Whisper e il suo modello, sul PC: circa 300 MB, una volta sola. Niente cloud.',
+          ? t("Faster-Whisper is already there: I'll turn it on. The model downloads the first time (about 150 MB).")
+          : t("I'll install Faster-Whisper and its model on the PC: about 300 MB, only once. No cloud."),
       done: listening.on,
       run: (task) => this._enableListening(task),
     });
 
-    // Agenti --------------------------------------------------------------------
+    // Agents ---------------------------------------------------------------------
     const integration = (id, title, text) => {
       const item = integrations[id];
       if (!item?.available) return;
       addTask({
         id,
         title,
-        text: item.conflict ? 'Ha già un suo comando di avviso: non lo tocco.' : text,
+        text: item.conflict ? t("It already has its own notification command: I won't touch it.") : text,
         done: item.installed,
         disabled: item.conflict,
         run: async () => {
           const result = await request('/api/integrations', 'POST', { tool: id, action: 'install' });
-          if (!result.ok) throw new Error(result.error ?? 'non riuscito');
+          if (!result.ok) throw new Error(tx(result.error) ?? t('failed'));
         },
       });
     };
-    integration('claude', 'Avvisi da Claude Code', 'Ti chiamo quando finisce un lavoro o ti aspetta. Aggiunge due hook a ~/.claude/settings.json (con una copia).');
-    integration('codex', 'Avvisi da Codex', 'Ti chiamo quando finisce. Aggiunge una riga a ~/.codex/config.toml (con una copia).');
+    integration('claude', t('Notifications from Claude Code'), t("I'll call you when it finishes a job or waits for you. Adds two hooks to ~/.claude/settings.json (with a backup)."));
+    integration('codex', t('Notifications from Codex'), t("I'll call you when it's done. Adds a line to ~/.codex/config.toml (with a backup)."));
     integration(
       'claude_usage',
-      'Limiti di Claude Code',
+      t("Claude Code's limits"),
       integrations.claude_usage?.wraps
-        ? 'Ti dico quanto resta del piano. La tua barra di stato resta com’è: la nostra la mostra uguale.'
-        : 'Ti dico quanto resta del piano (Pro o Max, usando Claude Code nel terminale). Aggiunge a Claude Code una barra di stato con modello, contesto e limiti.',
+        ? t("I'll tell you how much of the plan is left. Your status line stays as it is: ours shows it the same.")
+        : t("I'll tell you how much of the plan is left (Pro or Max, using Claude Code in the terminal). Adds a status line to Claude Code with model, context and limits."),
     );
     if (integrations.codex?.available) {
       rows.push(
@@ -366,12 +369,12 @@ export class Welcome {
           'div',
           { class: 'setup-item' },
           icon('check', 16),
-          el('span', { class: 'integration-text' }, el('strong', {}, 'Consumi di Codex'), el('small', {}, 'Li leggo dai suoi log: non serve collegare niente.')),
+          el('span', { class: 'integration-text' }, el('strong', {}, t('Codex usage')), el('small', {}, t('I read it from its logs: nothing to connect.'))),
         ),
       );
     }
 
-    // Voce ---------------------------------------------------------------------
+    // Voice ----------------------------------------------------------------------
     const settings = this.app.settings ?? {};
     const voice = (this.app.voices ?? []).find((item) => item.id === settings.voice);
     const engine = this.app.engines?.tts?.label ?? settings.ttsEngine;
@@ -385,14 +388,14 @@ export class Welcome {
         el(
           'span',
           { class: 'integration-text' },
-          el('strong', {}, 'La mia voce'),
-          el('small', {}, voice ? `${voice.name ?? voice.id}${engine ? `, con ${engine}` : ''}. Si cambia da Personaggio.` : 'Si sceglie nella scheda Personaggio.'),
+          el('strong', {}, t('My voice')),
+          el('small', {}, voice ? engine ? t('{voice}, with {engine}. You can change it in Character.', { voice: voice.name ?? voice.id, engine }) : t('{voice}. You can change it in Character.', { voice: voice.name ?? voice.id }) : t("It's chosen in the Character tab.")),
         ),
-        el('button', { class: 'btn', type: 'button', onClick: () => this.app.socket.say(sample) }, icon('play', 14), el('span', {}, 'Ascoltala')),
+        el('button', { class: 'btn', type: 'button', onClick: () => this.app.socket.say(sample) }, icon('play', 14), el('span', {}, t('Listen to her'))),
       ),
     );
 
-    // Il bottone principale fa tutto; finito (o se non c'e' niente da fare) diventa "Avanti".
+    // The main button does everything; when done (or if there's nothing to do) it becomes "Next".
     const summary = el('p', { class: 'hint' });
     let prepared = false;
     const footer = this._footer(async () => {
@@ -402,12 +405,12 @@ export class Welcome {
       }
       const primary = footer.querySelector('.btn.primary');
       primary.disabled = true;
-      primary.querySelector('span').textContent = 'Preparo…';
+      primary.querySelector('span').textContent = t('Setting up…');
       const failed = await runTasks();
       primary.disabled = false;
       prepared = !failed;
-      primary.querySelector('span').textContent = failed ? 'Riprova' : 'Avanti';
-    }, { nextLabel: tasks.length ? 'Prepara tutto' : 'Avanti' });
+      primary.querySelector('span').textContent = failed ? t('Retry') : t('Next');
+    }, { nextLabel: tasks.length ? t('Set everything up') : t('Next') });
     const runTasks = async () => {
       const chosen = tasks.filter((task) => task.check.checked && !task.check.disabled);
       let failed = 0;
@@ -418,52 +421,52 @@ export class Welcome {
         try {
           await task.run(task);
           task.state.className = 'setup-state ok';
-          task.state.textContent = 'fatto';
+          task.state.textContent = t('done|task');
         } catch (error) {
           failed += 1;
           task.state.className = 'setup-state error';
-          task.state.textContent = 'errore';
+          task.state.textContent = t('error');
           task.detail.textContent = error.message;
           task.check.disabled = false;
         }
       }
-      summary.textContent = failed ? 'Qualcosa non è andato: puoi riprovare, o sistemarlo dopo dalle schede.' : 'Tutto pronto!';
+      summary.textContent = failed ? t("Something didn't work: you can retry, or fix it later from the tabs.") : t('All set!');
       return failed;
     };
 
     return el(
       'div',
       { class: 'welcome-step' },
-      el('h2', {}, 'Ti preparo tutto'),
-      el('p', {}, 'Quello che posso sistemare da sola, con un clic. Togli la spunta a quello che non vuoi.'),
+      el('h2', {}, t("I'll set everything up")),
+      el('p', {}, t("What I can fix by myself, with one click. Untick what you don't want.")),
       el('div', { class: 'setup-list' }, ...rows),
       summary,
       footer,
     );
   }
 
-  /** L'ascolto: il backend installa, sceglie e prepara il modello; qui si segue come va. */
+  /** Listening: the backend installs, chooses and prepares the model; here we follow how it goes. */
   async _enableListening(task) {
     let job = (await request('/api/setup/listening', 'POST')).job;
     const deadline = Date.now() + 30 * 60_000;
     while (['selecting', 'installing', 'loading'].includes(job?.state) && Date.now() < deadline) {
-      if (job.detail) task.detail.textContent = job.detail;
+      if (job.detail) task.detail.textContent = tx(job.detail);
       await sleep(1500);
       job = (await request('/api/setup')).listening?.job;
     }
-    if (job?.state !== 'done') throw new Error(job?.detail || 'non è partito');
-    task.detail.textContent = job.detail;
+    if (job?.state !== 'done') throw new Error(tx(job?.detail) || t("didn't start"));
+    task.detail.textContent = tx(job.detail);
   }
 
   async _done() {
     return el(
       'div',
       { class: 'welcome-step' },
-      el('h2', {}, 'Tutto pronto'),
+      el('h2', {}, t('All set')),
       el(
         'p',
         {},
-        'Chiedimi quello che vuoi. Posso ricordarti le cose («tra 20 minuti ricordami di bere»), ricordarmi di te («ricordati che…»), avvisarti quando Claude Code o Codex hanno finito e dirti quanto ti resta dei loro limiti: è tutto nella scheda Lavoro.',
+        t('Ask me anything. I can remind you of things ("remind me to drink in 20 minutes"), remember things about you ("remember that…"), tell you when Claude Code or Codex are done and how much of their limits you have left: it\'s all in the Work tab.'),
       ),
       this._footer(
         () => {
@@ -472,7 +475,7 @@ export class Welcome {
           this.app.companion?.sendToPet({ type: 'greet' });
           this.finish();
         },
-        { nextLabel: 'Andiamo', skip: false },
+        { nextLabel: t("Let's go"), skip: false },
       ),
     );
   }

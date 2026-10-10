@@ -1,22 +1,22 @@
-"""Avvisi dagli agenti che usi per conto tuo: "Claude Code ha finito!".
+"""Notifications from the agents you use on your own: "Claude Code is done!".
 
-Quando lavori con Claude Code o Codex in un terminale o in VS Code e ti metti a
-fare altro, e' il companion a chiamarti quando hanno finito (o quando ti
-aspettano per un permesso). Funziona con gli hook dei due programmi:
+When you work with Claude Code or Codex in a terminal or in VS Code and turn
+to something else, the companion calls you when they're done (or when they
+wait for a permission). It works with the two programs' hooks:
 
-* Claude Code: ``hooks.Stop`` e ``hooks.Notification`` in ``~/.claude/settings.json``;
+* Claude Code: ``hooks.Stop`` and ``hooks.Notification`` in ``~/.claude/settings.json``;
 * Codex: ``notify = [...]`` in ``~/.codex/config.toml``.
 
-Entrambi lanciano ``scripts/tsukumo_notify.py``, che manda il messaggio a
-``POST /api/notify``. Collegarli e scollegarli si fa dal pannello
-(``install``/``uninstall`` qui sotto): tocca file di configurazione fuori dal
-progetto, quindi solo su richiesta, con una copia di sicurezza.
+Both run ``scripts/tsukumo_notify.py``, which sends the message to
+``POST /api/notify``. Connecting and disconnecting them is done from the panel
+(``install``/``uninstall`` below): it touches configuration files outside the
+project, so only on request, with a backup copy.
 
-Qui c'e' anche la barra di stato di Claude Code (``statusLine``), l'unico
-posto in cui Claude Code dice quanto resta dei limiti del piano: la lancia
-``scripts/tsukumo_statusline.py``, che li passa a Tsukumo (``usage.py``). Se
-c'era gia' una barra, la nostra la lancia e ne stampa l'uscita: scollegando
-torna quella di prima.
+Here there's also Claude Code's status line (``statusLine``), the only place
+where Claude Code says how much of the plan's limits is left: it runs
+``scripts/tsukumo_statusline.py``, which passes them to Tsukumo
+(``usage.py``). If there already was a status line, ours runs it and prints
+its output: disconnecting brings the old one back.
 """
 
 from __future__ import annotations
@@ -38,6 +38,12 @@ STATUSLINE_SCRIPT = ROOT / "scripts" / "tsukumo_statusline.py"
 STATUSLINE_MARK = "tsukumo_statusline.py"
 
 NAMES = {"claude": "Claude Code", "codex": "Codex"}
+#: Claude Code's hooks: notifications (Stop, Notification) and, for the
+#: dashboard, when it starts working (UserPromptSubmit) and its task list
+#: (PostToolUse).
+CLAUDE_EVENTS = ("Stop", "Notification", "UserPromptSubmit", "PostToolUse")
+#: PostToolUse only for the list's tools: no other tool runs anything.
+TASKS_MATCHER = "TodoWrite|TaskCreate|TaskUpdate"
 
 
 def claude_settings_path() -> Path:
@@ -49,20 +55,20 @@ def codex_config_path() -> Path:
 
 
 def _python() -> str:
-    """L'interprete del backend (quello del venv), con le barre in avanti: vale in cmd e in bash."""
+    """The backend's interpreter (the venv's), with forward slashes: it works in cmd and in bash."""
     return Path(sys.executable).as_posix()
 
 
 def claude_hook() -> dict[str, Any]:
-    """Forma "exec" (command + args): parte direttamente, che la shell sia bash o PowerShell."""
+    """The "exec" form (command + args): it starts directly, whether the shell is bash or PowerShell."""
     return {"type": "command", "command": _python(), "args": [SCRIPT.as_posix(), "claude"], "timeout": 10}
 
 
 # ---------------------------------------------------------------------------
-# Testo dell'avviso
+# The notification's text
 # ---------------------------------------------------------------------------
 def summary_of(message: str, limit: int = 160) -> str:
-    """La prima frase utile, senza markdown ne' blocchi di codice."""
+    """The first useful sentence, without markdown or code blocks."""
     text = re.sub(r"```.*?```", " ", message or "", flags=re.DOTALL)
     text = re.sub(r"`([^`]*)`", r"\1", text)
     text = re.sub(r"[*_#>|]+", " ", text)
@@ -88,7 +94,7 @@ def announcement(source: str, kind: str, summary: str, language: str, brief: boo
 
 
 # ---------------------------------------------------------------------------
-# Collegamento: Claude Code
+# Connecting: Claude Code
 # ---------------------------------------------------------------------------
 def _backup(path: Path) -> None:
     backup = path.with_name(path.name + ".tsukumo-bak")
@@ -105,13 +111,19 @@ def _is_ours(hook: Any) -> bool:
     return MARK in json.dumps(hook)
 
 
-def _claude_has(settings: dict[str, Any]) -> bool:
-    for event in ("Stop", "Notification"):
+def _claude_ours(settings: dict[str, Any]) -> set[str]:
+    """The events that already have our hook."""
+    found = set()
+    for event in CLAUDE_EVENTS:
         for group in _claude_hooks(settings).get(event) or []:
             for hook in (group or {}).get("hooks") or []:
                 if _is_ours(hook):
-                    return True
-    return False
+                    found.add(event)
+    return found
+
+
+def _claude_has(settings: dict[str, Any]) -> bool:
+    return bool(_claude_ours(settings))
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -119,31 +131,37 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
     data = json.loads(path.read_text(encoding="utf-8") or "{}")
     if not isinstance(data, dict):
-        raise ValueError(f"{path} non contiene un oggetto JSON")
+        raise ValueError(f"{path} doesn't contain a JSON object")
     return data
 
 
 def install_claude(path: Path | None = None) -> str:
     path = path or claude_settings_path()
     settings = _read_json(path)
-    if _claude_has(settings):
-        return "già collegato"
+    present = _claude_ours(settings)
+    missing = [event for event in CLAUDE_EVENTS if event not in present]
+    if not missing:
+        return "already connected"
     _backup(path)
     hooks = settings.setdefault("hooks", {})
-    for event in ("Stop", "Notification"):
-        hooks.setdefault(event, []).append({"hooks": [claude_hook()]})
+    for event in missing:
+        group: dict[str, Any] = {"hooks": [claude_hook()]}
+        if event == "PostToolUse":
+            group = {"matcher": TASKS_MATCHER, **group}
+        hooks.setdefault(event, []).append(group)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return "collegato"
+    # Connected before the dashboard: only the new events were missing.
+    return "updated" if present else "connected"
 
 
 def uninstall_claude(path: Path | None = None) -> str:
     path = path or claude_settings_path()
     settings = _read_json(path)
     if not _claude_has(settings):
-        return "non era collegato"
+        return "was not connected"
     hooks = _claude_hooks(settings)
-    for event in ("Stop", "Notification"):
+    for event in CLAUDE_EVENTS:
         groups = []
         for group in hooks.get(event) or []:
             kept = [hook for hook in (group or {}).get("hooks") or [] if not _is_ours(hook)]
@@ -156,11 +174,11 @@ def uninstall_claude(path: Path | None = None) -> str:
     if not hooks:
         settings.pop("hooks", None)
     path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return "scollegato"
+    return "disconnected"
 
 
 # ---------------------------------------------------------------------------
-# Collegamento: Codex
+# Connecting: Codex
 # ---------------------------------------------------------------------------
 _NOTIFY_LINE = re.compile(r"^\s*notify\s*=", re.MULTILINE)
 
@@ -176,40 +194,40 @@ def install_codex(path: Path | None = None) -> str:
     if found:
         line = text[found.start() : text.find("\n", found.start()) if "\n" in text[found.start() :] else len(text)]
         if MARK in line:
-            return "già collegato"
-        raise ValueError("Codex ha già un comando 'notify' in config.toml: non lo sovrascrivo.")
+            return "already connected"
+        raise ValueError("Codex already has a 'notify' command in config.toml: I won't overwrite it.")
     _backup(path)
-    # Le chiavi di primo livello vanno prima di qualsiasi [tabella]: in cima.
-    block = f"# Tsukumo: avvisa quando Codex ha finito (si toglie dal pannello).\n{_codex_line()}\n"
+    # Top-level keys must come before any [table]: at the top.
+    block = f"# Tsukumo: notifies when Codex is done (remove it from the panel).\n{_codex_line()}\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(block + ("\n" + text if text else ""), encoding="utf-8")
-    return "collegato"
+    return "connected"
 
 
 def uninstall_codex(path: Path | None = None) -> str:
     path = path or codex_config_path()
     if not path.is_file():
-        return "non era collegato"
+        return "was not connected"
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    kept = [line for line in lines if not (MARK in line and _NOTIFY_LINE.match(line)) and not line.startswith("# Tsukumo: avvisa")]
+    kept = [line for line in lines if not (MARK in line and _NOTIFY_LINE.match(line)) and not line.startswith(("# Tsukumo: avvisa", "# Tsukumo: notifies"))]
     if len(kept) == len(lines):
-        return "non era collegato"
+        return "was not connected"
     text = "".join(kept).lstrip("\n")
     path.write_text(text, encoding="utf-8")
-    return "scollegato"
+    return "disconnected"
 
 
 # ---------------------------------------------------------------------------
-# Collegamento: barra di stato di Claude Code (limiti del piano)
+# Connecting: Claude Code's status line (the plan's limits)
 # ---------------------------------------------------------------------------
 def _statusline_ours(entry: Any) -> bool:
     return isinstance(entry, dict) and STATUSLINE_MARK in str(entry.get("command") or "")
 
 
 def statusline_command(previous: dict[str, Any] | None = None) -> str:
-    """Il comando della barra: stringa unica (``statusLine`` non ha la forma command + args).
+    """The status line's command: a single string (``statusLine`` has no command + args form).
 
-    Percorsi fra virgolette doppie e con le barre in avanti: valgono in bash e in cmd.
+    Paths in double quotes and with forward slashes: they work in bash and in cmd.
     """
     command = f'"{_python()}" "{STATUSLINE_SCRIPT.as_posix()}"'
     if previous:
@@ -219,7 +237,7 @@ def statusline_command(previous: dict[str, Any] | None = None) -> str:
 
 
 def _statusline_previous(entry: dict[str, Any]) -> dict[str, Any] | None:
-    """La barra che c'era prima, dal nostro comando (``--then <base64>``)."""
+    """The status line there was before, from our command (``--then <base64>``)."""
     try:
         parts = shlex.split(str(entry.get("command") or ""), posix=True)
         index = parts.index("--then")
@@ -234,7 +252,7 @@ def install_statusline(path: Path | None = None) -> str:
     settings = _read_json(path)
     current = settings.get("statusLine")
     if _statusline_ours(current):
-        return "già collegato"
+        return "already connected"
     _backup(path)
     previous = current if isinstance(current, dict) and current.get("command") else None
     entry: dict[str, Any] = {"type": "command", "command": statusline_command(previous)}
@@ -243,7 +261,7 @@ def install_statusline(path: Path | None = None) -> str:
     settings["statusLine"] = entry
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return "collegato"
+    return "connected"
 
 
 def uninstall_statusline(path: Path | None = None) -> str:
@@ -251,14 +269,14 @@ def uninstall_statusline(path: Path | None = None) -> str:
     settings = _read_json(path)
     current = settings.get("statusLine")
     if not _statusline_ours(current):
-        return "non era collegato"
+        return "was not connected"
     previous = _statusline_previous(current)
     if previous:
         settings["statusLine"] = previous
     else:
         settings.pop("statusLine", None)
     path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return "scollegato"
+    return "disconnected"
 
 
 def statusline_installed(path: Path | None = None) -> bool:
@@ -269,20 +287,22 @@ def statusline_installed(path: Path | None = None) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Stato, per il pannello
+# State, for the panel
 # ---------------------------------------------------------------------------
 def status() -> dict[str, Any]:
     result: dict[str, Any] = {}
     claude_path = claude_settings_path()
     try:
-        claude_installed = _claude_has(_read_json(claude_path))
+        claude_events = _claude_ours(_read_json(claude_path))
     except (OSError, ValueError):
-        claude_installed = False
+        claude_events = set()
     claude_available = claude_path.parent.is_dir() or bool(shutil.which("claude"))
     result["claude"] = {
         "label": NAMES["claude"],
         "available": claude_available,
-        "installed": claude_installed,
+        "installed": bool(claude_events),
+        # Connected from a version without the dashboard: "Connect" adds the missing events.
+        "outdated": bool(claude_events) and len(claude_events) < len(CLAUDE_EVENTS),
         "file": str(claude_path),
     }
     try:
@@ -290,10 +310,10 @@ def status() -> dict[str, Any]:
     except (OSError, ValueError):
         statusline = None
     result["claude_usage"] = {
-        "label": "Limiti di Claude Code",
+        "label": "Claude Code's limits",
         "available": claude_available,
         "installed": _statusline_ours(statusline),
-        # C'era gia' una barra di stato: resta, la nostra la lancia e ne mostra l'uscita.
+        # There was already a status line: it stays, ours runs it and shows its output.
         "wraps": bool(isinstance(statusline, dict) and statusline.get("command") and not _statusline_ours(statusline)),
         "file": str(claude_path),
     }

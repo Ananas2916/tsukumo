@@ -1,4 +1,4 @@
-"""Contesto del PC: finestra in primo piano -> attivita', non disturbare, sessione."""
+"""The PC's context: foreground window -> activity, do not disturb, session."""
 
 import pytest
 
@@ -25,7 +25,7 @@ def app(title, exe, fullscreen=False):
         ("Chat | Microsoft Teams", "ms-teams.exe", "chat", "Teams", "Chat | Microsoft Teams"),
         ("Riunione con Marco | Microsoft Teams", "ms-teams.exe", "meeting", "Teams", "Riunione con Marco | Microsoft Teams"),
         ("Spotify Premium", "Spotify.exe", "music", "Spotify", "Spotify Premium"),
-        ("", "explorer.exe", "desktop", "il desktop", ""),
+        ("", "explorer.exe", "desktop", "the desktop", ""),
     ],
 )
 def test_foreground_window_becomes_an_activity(title, exe, kind, label, detail):
@@ -53,9 +53,9 @@ def test_session_survives_short_pauses_and_ends_after_a_break():
     coding = app("x - VS Code", "Code.exe")
     assert pc.update(2, False, coding, now=1000) is True
     assert pc.session_start == 1000
-    pc.update(400, False, coding, now=1600)  # via per 6 minuti: sessione ancora aperta
+    pc.update(400, False, coding, now=1600)  # away for 6 minutes: the session is still open
     assert pc.session_start == 1000 and not pc.present_at()
-    pc.update(700, False, coding, now=1900)  # pausa vera
+    pc.update(700, False, coding, now=1900)  # a real break
     assert pc.session_start is None
     pc.update(1, False, coding, now=2000)
     assert pc.session_minutes(now=2600) == pytest.approx(10)

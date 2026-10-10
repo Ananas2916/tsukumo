@@ -1,4 +1,4 @@
-"""Le difese di backend/security.py, provate come le proverebbe un attaccante."""
+"""The defences of backend/security.py, tried as an attacker would try them."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ SAME = "http://127.0.0.1:8770"
 
 
 # ---------------------------------------------------------------------------
-# Il server vero, dal PC (fixture ``client`` di conftest)
+# The real server, from the PC (conftest's ``client`` fixture)
 # ---------------------------------------------------------------------------
 def test_websocket_from_another_site_is_refused(client):
     with pytest.raises(WebSocketDisconnect) as refused:
@@ -33,7 +33,7 @@ def test_websocket_from_another_site_is_refused(client):
 
 
 def test_websocket_with_null_origin_is_refused(client):
-    # iframe in sandbox, file://, data: -> "Origin: null"
+    # sandboxed iframe, file://, data: -> "Origin: null"
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws", headers={"Origin": "null"}) as ws:
             ws.receive_json()
@@ -45,7 +45,7 @@ def test_websocket_from_the_app_itself_is_accepted(client):
 
 
 def test_dns_rebinding_host_is_refused(client):
-    # Un dominio che si risolve in 127.0.0.1 porta il suo nome nell'header Host.
+    # A domain resolving to 127.0.0.1 carries its name in the Host header.
     response = client.get("/api/memory", headers={"Host": "rebind.sito-malevolo.example:8770"})
     assert response.status_code == 421
 
@@ -54,7 +54,7 @@ def test_post_from_another_site_is_refused(client):
     response = client.post("/api/cancel", headers={"Origin": EVIL})
     assert response.status_code == 403
     assert client.post("/api/cancel", headers={"Origin": SAME}).status_code == 200
-    # Gli hook di Claude Code, curl, la shell Electron: niente Origin, dal PC.
+    # Claude Code's hooks, curl, the Electron shell: no Origin, from the PC.
     assert client.post("/api/cancel").status_code == 200
 
 
@@ -77,7 +77,7 @@ def test_security_headers(client):
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["cache-control"] == "no-store"
-    # Non "no-referrer": farebbe partire i moduli POST con "Origin: null".
+    # Not "no-referrer": it would make POST forms send "Origin: null".
     assert response.headers["referrer-policy"] == "same-origin"
 
 
@@ -88,10 +88,10 @@ def test_qr_page_opens_from_a_link_elsewhere(client, monkeypatch):
         return phone.Tailscale()
 
     monkeypatch.setattr(phone, "tailscale_status", no_tailscale)
-    # Un link alla pagina del QR cliccato su GitHub o in una chat: navigazione cross-site.
+    # A link to the QR page clicked on GitHub or in a chat: cross-site navigation.
     navigation = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
     assert client.get("/api/phone", headers=navigation).status_code == 200
-    # Le altre API restano chiuse agli altri siti, e il pulsante "Attiva" anche.
+    # The other APIs stay closed to other sites, and so does the "Turn on" button.
     assert client.get("/api/memory", headers=navigation).status_code == 403
     assert client.post("/api/phone/serve", headers={"Origin": "https://sito-malevolo.example"}).status_code == 403
 
@@ -109,7 +109,7 @@ def test_oversized_json_is_refused(client):
 
 
 def test_oversized_body_without_length_is_refused(client):
-    # Trasferimento "chunked": nessun Content-Length da controllare in anticipo.
+    # "chunked" transfer: no Content-Length to check in advance.
     def chunks():
         for _ in range(40):
             yield b"x" * (1024 * 1024)
@@ -136,7 +136,7 @@ def test_save_dotenv_refuses_newlines_and_odd_keys(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Da un altro dispositivo (rete locale, proxy): app in miniatura
+# From another device (local network, proxy): a miniature app
 # ---------------------------------------------------------------------------
 def _mini_app(policy: AccessPolicy) -> FastAPI:
     app = FastAPI()
@@ -186,6 +186,15 @@ def test_settings_are_off_limits_from_another_device(lan_policy):
     assert response.status_code == 403
 
 
+def test_engine_check_and_options_are_off_limits_from_another_device(lan_policy):
+    # With the token, a phone could otherwise point CLAUDE_CODE_COMMAND at any
+    # file and have "check" run it, or rewrite an inactive engine in .env.
+    client = _lan_client(lan_policy)
+    headers = {"Authorization": f"Bearer {lan_policy.token}"}
+    for path in ("/api/providers/check", "/api/providers/options"):
+        assert client.post(path, headers=headers, json={}).status_code == 403, path
+
+
 def test_remote_websocket_with_token(lan_policy):
     client = _lan_client(lan_policy)
     with pytest.raises(WebSocketDisconnect):
@@ -196,7 +205,7 @@ def test_remote_websocket_with_token(lan_policy):
 
 
 def test_a_local_proxy_is_not_the_pc(tmp_path):
-    # tailscale serve / un reverse proxy: arriva da 127.0.0.1 ma per conto d'altri.
+    # tailscale serve / a reverse proxy: it comes from 127.0.0.1 but on behalf of others.
     policy = AccessPolicy(token_path=tmp_path / "access_token")
     client = TestClient(_mini_app(policy), base_url="http://127.0.0.1:8770", client=("127.0.0.1", 50000))
     assert client.get("/api/memory").status_code == 200
@@ -212,7 +221,7 @@ def test_lan_names_are_refused_when_bound_to_loopback(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Le regole da sole
+# The rules alone
 # ---------------------------------------------------------------------------
 def test_token_is_long_random_and_persistent(tmp_path):
     path = tmp_path / "access_token"
@@ -245,14 +254,17 @@ def test_local_only_paths():
     assert local_only("POST", "/api/setup/listening")
     assert local_only("DELETE", "/api/voices/abc")
     assert not local_only("GET", "/api/providers")
+    # "Check" runs the engine's program, "options" writes .env.
+    assert local_only("POST", "/api/providers/check")
+    assert local_only("POST", "/api/providers/options")
     assert not local_only("POST", "/api/attachments")
-    # Il QR col token e il pulsante che lancia tailscale serve: solo dal PC.
+    # The QR with the token and the button that launches tailscale serve: only from the PC.
     assert local_only("GET", "/api/phone")
     assert local_only("POST", "/api/phone/serve")
     assert not local_only("POST", "/api/phone/session")
 
 
-# Il guscio della pagina del telefono: l'unica cosa che da fuori si apre senza token.
+# The phone page's shell: the only thing that opens from afar without a token.
 def test_public_shell_rules():
     assert public_shell("GET", "/mobile.html")
     assert public_shell("HEAD", "/assets/mobile-abc.css")

@@ -1,4 +1,4 @@
-"""Factory dei client LLM e degli agenti."""
+"""Factory of the LLM clients and the agents."""
 
 from __future__ import annotations
 
@@ -36,29 +36,29 @@ __all__ = [
     "describe_error",
 ]
 
-#: Percorso di default del file di configurazione di OpenClaw sull'account
-#: dell'utente: e' li' che vive il token del Gateway, se non lo passi a mano.
+#: Default path of OpenClaw's configuration file in the user's account:
+#: that's where the Gateway token lives, if you don't pass it by hand.
 _DEFAULT_OPENCLAW_CONFIG = Path.home() / ".openclaw" / "openclaw.json"
 
 
 def _read_openclaw_token() -> str:
-    """Legge ``gateway.auth.token`` dal config di OpenClaw dell'utente.
+    """Reads ``gateway.auth.token`` from the user's OpenClaw config.
 
-    E' una comodita': se non imposti ``DC_OPENCLAW_TOKEN`` a mano, il backend
-    prova a leggerlo da dove OpenClaw lo tiene gia'. Non solleva mai: se il
-    file manca o e' malformato, il chiamante ricevera' un token vuoto e un
-    errore chiaro al primo tentativo di connessione.
+    It's a convenience: if you don't set ``DC_OPENCLAW_TOKEN`` by hand, the
+    backend tries to read it from where OpenClaw already keeps it. It never
+    raises: if the file is missing or malformed, the caller gets an empty token
+    and a clear error at the first connection attempt.
     """
     try:
         config = json.loads(_DEFAULT_OPENCLAW_CONFIG.read_text(encoding="utf-8"))
         return config["gateway"]["auth"]["token"]
     except (OSError, KeyError, json.JSONDecodeError) as exc:
-        logger.warning("Token OpenClaw non leggibile da %s (%s)", _DEFAULT_OPENCLAW_CONFIG, exc)
+        logger.warning("OpenClaw token unreadable from %s (%s)", _DEFAULT_OPENCLAW_CONFIG, exc)
         return ""
 
 
-#: Servizi cloud che parlano l'API OpenAI: cambia solo l'indirizzo, quindi
-#: riusano lo stesso client. I nomi dei campi seguono lo schema dichiarato in
+#: Cloud services that speak the OpenAI API: only the address changes, so
+#: they reuse the same client. The field names follow the schema declared in
 #: ``provider_specs`` (``<ID>_API_KEY``, ``<ID>_MODEL``, ``<ID>_BASE_URL``).
 _OPENAI_COMPATIBLE_CLOUD = {"groq", "openrouter", "deepseek", "mistral", "together"}
 
@@ -75,11 +75,11 @@ def create_llm_client(
     backend: str | None = None,
     overrides: dict[str, object] | None = None,
 ) -> LLMClient:
-    """Istanzia il motore indicato da ``DC_LLM_BACKEND`` (o da ``backend``).
+    """Instantiates the engine named by ``DC_LLM_BACKEND`` (or by ``backend``).
 
-    Il nome viene normalizzato dal registro dei provider, quindi gli alias
-    storici (``lmstudio``, ``claude``, ``offline``, ...) continuano a valere.
-    ``overrides`` sostituisce alcuni campi salvati (per esempio il modello).
+    The name is normalized by the provider registry, so the historical aliases
+    (``lmstudio``, ``claude``, ``offline``, ...) still hold. ``overrides``
+    replaces some saved fields (for example the model).
     """
     requested = backend or settings.llm_backend
     backend = LLM_REGISTRY.resolve(requested) or (requested or "ollama").lower()
@@ -95,8 +95,8 @@ def create_llm_client(
         api_key = str(options.get(f"{prefix}_API_KEY", "") or "")
         if not api_key:
             raise RuntimeError(
-                f"Manca la chiave API di {backend}. Impostala nel pannello "
-                f"oppure con DC_{prefix}_API_KEY."
+                f"The {backend} API key is missing. Set it in the panel "
+                f"or with DC_{prefix}_API_KEY."
             )
         base_url = str(options.get(f"{prefix}_BASE_URL", "")).rstrip("/")
         model = str(options.get(f"{prefix}_MODEL", ""))
@@ -116,8 +116,8 @@ def create_llm_client(
         api_key = str(options.get("ANTHROPIC_API_KEY", "") or "")
         if not api_key:
             raise RuntimeError(
-                "Manca la chiave API di Anthropic. Impostala nel pannello "
-                "oppure con DC_ANTHROPIC_API_KEY."
+                "The Anthropic API key is missing. Set it in the panel "
+                "or with DC_ANTHROPIC_API_KEY."
             )
         logger.info("Backend LLM: anthropic (%s)", options.get("ANTHROPIC_MODEL"))
         return AnthropicClient(
@@ -133,8 +133,8 @@ def create_llm_client(
         api_key = str(options.get("GEMINI_API_KEY", "") or "")
         if not api_key:
             raise RuntimeError(
-                "Manca la chiave API di Gemini. Impostala nel pannello "
-                "oppure con DC_GEMINI_API_KEY."
+                "The Gemini API key is missing. Set it in the panel "
+                "or with DC_GEMINI_API_KEY."
             )
         logger.info("Backend LLM: gemini (%s)", options.get("GEMINI_MODEL"))
         return GeminiClient(
@@ -156,8 +156,8 @@ def create_llm_client(
         )
 
     if backend == "openai":
-        # LM Studio, llama.cpp server, vLLM: gli alias li ha gia' normalizzati
-        # il registro, e parlano tutti la stessa API.
+        # LM Studio, llama.cpp server, vLLM: the registry has already normalized the
+        # aliases, and they all speak the same API.
         url = str(options.get("OPENAI_BASE_URL") or settings.openai_base_url).rstrip("/")
         model = str(options.get("OPENAI_MODEL") or settings.openai_model)
         logger.info("Backend LLM: openai-compatible (%s @ %s)", model, url)
@@ -170,8 +170,8 @@ def create_llm_client(
         )
 
     if backend == "hermes":
-        # Hermes Agent con l'API server attivo parla /v1/chat/completions: per
-        # il companion e' un server OpenAI come gli altri.
+        # Hermes Agent with the API server on speaks /v1/chat/completions: for the
+        # companion it's an OpenAI server like the others.
         base_url = str(options.get("HERMES_BASE_URL") or "http://127.0.0.1:8642/v1").rstrip("/")
         logger.info("Backend LLM: Hermes Agent @ %s", base_url)
         return OpenAICompatibleClient(
@@ -181,19 +181,35 @@ def create_llm_client(
             api_key=str(options.get("HERMES_API_KEY") or "") or None,
             timeout=_number(options.get("HERMES_TIMEOUT"), 300.0),
             name="hermes",
-            hint="Avvia Hermes con l'API server attivo: API_SERVER_ENABLED=true, poi `hermes gateway`.",
+            hint="Start Hermes with the API server on: API_SERVER_ENABLED=true, then `hermes gateway`.",
+        )
+
+    if backend == "g4f":
+        # gpt4free with `g4f api` is a local OpenAI server; the key is optional
+        # (only with --g4f-api-key).
+        base_url = str(options.get("G4F_BASE_URL") or "http://127.0.0.1:1337/v1").rstrip("/")
+        model = str(options.get("G4F_MODEL") or "gemini-2.5-flash")
+        logger.info("Backend LLM: gpt4free (%s @ %s)", model, base_url)
+        return OpenAICompatibleClient(
+            base_url=base_url,
+            model=model,
+            temperature=_number(options.get("TEMPERATURE"), settings.temperature),
+            api_key=str(options.get("G4F_API_KEY") or "") or None,
+            timeout=_number(options.get("G4F_TIMEOUT"), 60.0),
+            name="g4f",
+            hint='Start gpt4free: pip install -U "g4f[api]", then `g4f api --bind 127.0.0.1:1337 --no-gui`.',
         )
 
     if backend == "openclaw":
-        token = str(options.get("OPENCLAW_TOKEN") or "") or _read_openclaw_token()
+        token =str(options.get("OPENCLAW_TOKEN") or "") or _read_openclaw_token()
         if not token:
             raise RuntimeError(
-                "Token OpenClaw non trovato. Imposta DC_OPENCLAW_TOKEN oppure "
-                f"assicurati che {_DEFAULT_OPENCLAW_CONFIG} contenga gateway.auth.token."
+                "OpenClaw token not found. Set DC_OPENCLAW_TOKEN or "
+                f"make sure {_DEFAULT_OPENCLAW_CONFIG} contains gateway.auth.token."
             )
         url = str(options.get("OPENCLAW_URL") or "http://127.0.0.1:18789")
         agent = str(options.get("OPENCLAW_AGENT_ID") or "main")
-        logger.info("Backend LLM: openclaw (agente %r @ %s)", agent, url)
+        logger.info("Backend LLM: openclaw (agent %r @ %s)", agent, url)
         return OpenClawClient(
             gateway_url=url,
             token=token,
@@ -211,7 +227,7 @@ def create_llm_client(
             timeout=_number(options.get("CLAUDE_CODE_TIMEOUT"), 300.0),
             session_path=state / "claude_code_session.json",
         )
-        logger.info("Backend LLM: Claude Code (%s)", client.executable or "non trovato")
+        logger.info("Backend LLM: Claude Code (%s)", client.executable or "not found")
         return client
 
     if backend == "codex":
@@ -223,7 +239,7 @@ def create_llm_client(
             timeout=_number(options.get("CODEX_TIMEOUT"), 300.0),
             session_path=state / "codex_session.json",
         )
-        logger.info("Backend LLM: Codex (%s)", client.executable or "non trovato")
+        logger.info("Backend LLM: Codex (%s)", client.executable or "not found")
         return client
 
     if backend == "antigravity":
@@ -235,11 +251,11 @@ def create_llm_client(
             timeout=_number(options.get("ANTIGRAVITY_TIMEOUT"), 300.0),
             session_path=state / "antigravity_session.json",
         )
-        logger.info("Backend LLM: Antigravity (%s)", client.executable or "non trovato")
+        logger.info("Backend LLM: Antigravity (%s)", client.executable or "not found")
         return client
 
     if backend in CLI_AGENT_PRESETS:
-        # Cline, Gemini CLI, Cursor...: un comando gia' pronto, modificabile dal pannello.
+        # Cline, Gemini CLI, Cursor...: a ready-made command, editable from the panel.
         prefix = backend.upper()
         command = str(options.get(f"{prefix}_COMMAND") or CLI_AGENT_PRESETS[backend])
         spec = LLM_REGISTRY.get(backend)
@@ -255,8 +271,8 @@ def create_llm_client(
     if backend == "command":
         command = str(options.get("AGENT_COMMAND") or "")
         if not command.strip():
-            raise RuntimeError("Scrivi nel pannello il comando da lanciare (per esempio: hermes chat -q {prompt}).")
-        logger.info("Backend LLM: comando %r", command)
+            raise RuntimeError("Write in the panel the command to run (for example: hermes chat -q {prompt}).")
+        logger.info("Backend LLM: command %r", command)
         return CommandAgentClient(
             command=command,
             cwd=str(options.get("AGENT_CWD") or ""),
@@ -266,21 +282,21 @@ def create_llm_client(
     raise ValueError(f"Backend LLM sconosciuto: {requested!r}")
 
 
-#: Chi puo' scrivere le chiacchiere: i modelli, non gli agenti (che tengono
-#: una sessione loro e costano un turno intero a ogni commento).
+#: Who can write the chatter: the models, not the agents (which keep a
+#: session of their own and cost a whole turn for every comment).
 CHATTER_CATEGORIES = ("cloud", "local")
 
 
 def create_chatter_llm(settings: Settings, backend: str, models: str = "") -> LLMClient:
-    """Il cervello delle chiacchiere: un modello cloud o locale, di solito economico.
+    """The chatter brain: a cloud or local model, usually cheap.
 
-    ``models`` e' una fila separata da virgole (``a:free, b:free``): se il primo
-    non risponde si prova il secondo. Vuota = il modello salvato per quel motore.
-    La chiave e gli altri campi sono quelli del motore, gli stessi della scheda Motori.
+    ``models`` is a comma-separated row (``a:free, b:free``): if the first
+    doesn't answer the second is tried. Empty = the model saved for that engine.
+    The key and the other fields are the engine's, the same as in the Engines tab.
     """
     spec = LLM_REGISTRY.get(LLM_REGISTRY.resolve(backend) or backend)
     if spec is None or spec.category not in CHATTER_CATEGORIES:
-        raise ValueError(f"{backend!r} non puo' scrivere le chiacchiere: serve un modello cloud o locale.")
+        raise ValueError(f"{backend!r} can't write the chatter: it needs a cloud or local model.")
     model_env = next((f.env for f in spec.fields if f.env.endswith("_MODEL")), None)
     names = [name.strip() for name in models.split(",") if name.strip()]
     if model_env is None or not names:

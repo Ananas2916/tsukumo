@@ -1,9 +1,9 @@
 {
   "name": "tsukumo-frontend",
-  "version": "2.3.0",
+  "version": "2.9.0",
   "private": true,
   "type": "module",
-  "description": "Renderer 3D (Three.js + three-vrm) e pannello di Tsukumo, con lip-sync guidato dal backend Python.",
+  "description": "Tsukumo's 3D renderer (Three.js), panel and dashboard, with lip-sync driven by the Python backend.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

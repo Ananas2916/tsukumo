@@ -1,33 +1,33 @@
 /**
- * Modi di stare in piedi: timida, cool, elegante, energica, diva...
+ * Ways of standing: shy, cool, elegant, energetic, diva...
  *
- * Rifatti guardando i "caratteri" del Photo Booth di VRoid Hub (Standard,
+ * Remade by watching the "characters" of VRoid Hub's Photo Booth (Standard,
  * Innocent, Cool, Ladylike, Shy, Energetic, Flamboyant, Gentleman, Powerful)
- * fotogramma per fotogramma, di fronte e di lato, e riscritti da zero con
- * gli strumenti del corpo procedurale: nessun dato preso da loro.
+ * frame by frame, front and side, and rewritten from scratch with the
+ * procedural body's tools: no data taken from them.
  *
- * Ogni modo ha una `base` (come tiene piedi, busto, testa e braccia, sempre)
- * e delle `phrases` che si alternano, ognuna per qualche secondo (la cool
- * tiene una mano sul fianco, poi incrocia le braccia). Le mani della base
- * sono richieste "base": cedono il passo ai gesti del parlato, al pensiero,
- * alle azioni, cosi' le braccia non si incastrano mai.
+ * Each mode has a `base` (how it holds feet, torso, head and arms, always)
+ * and `phrases` that alternate, each for a few seconds (the cool one keeps a
+ * hand on the hip, then folds the arms). The base's hands are "base"
+ * requests: they give way to speech gestures, thinking and actions, so the
+ * arms never get stuck.
  *
- * `sway` scala lo spostamento del peso da una gamba all'altra: un'elegante
- * sta composta, un'energica si muove di piu'. Le coordinate delle mani sono
- * per il lato sinistro e specchiate per il destro; `side` e' la mano
- * "dominante" della frase (la destra, come nel riferimento).
+ * `sway` scales the weight shift from one leg to the other: an elegant one
+ * stays composed, an energetic one moves more. Hand coordinates are for the
+ * left side and mirrored for the right; `side` is the phrase's "dominant"
+ * hand (the right, as in the reference).
  */
 
 import { clamp, curve, TAU } from './motion.js';
 
 const DOMINANT = 'right';
 const OTHER = 'left';
-/** Segno del lato dominante: +1 sinistra, -1 destra (vedi Pose.side). */
+/** Sign of the dominant side: +1 left, -1 right (see Pose.side). */
 const S = -1;
 
-// ------------------------------------------------------------ pezzi comuni
+// ------------------------------------------------------------ shared pieces
 function handOnHip(pose, side, k) {
-  // Polso alla vita (sopra il bacino), gomito ben in fuori.
+  // Wrist at the waist (above the pelvis), elbow well out.
   pose.reach(side, 'hips', [0.155, 0.1, 0.0], [1, 0.2, -0.4], k, -0.3, true);
   pose.fingers[side] += 0.25 * k;
 }
@@ -52,13 +52,13 @@ function handsBehind(pose, k) {
   pose.both('Shoulder', 0, 0.1, -0.02, k);
 }
 
-/** Piedi vicini (negativo) o larghi (positivo), in metri per piede. */
+/** Feet close (negative) or wide (positive), in metres per foot. */
 function feetWidth(pose, amount, k) {
   pose.feet.left.x += amount * k;
   pose.feet.right.x -= amount * k;
 }
 
-/** Ci si piega sui fianchi (l'inchino): il bacino arretra per restare in equilibrio. */
+/** Bending at the hips (the bow): the pelvis moves back to keep balance. */
 function bow(pose, amount) {
   pose.add('hips', 0.55 * amount, 0, 0);
   pose.add('spine', 0.25 * amount, 0, 0);
@@ -67,9 +67,9 @@ function bow(pose, amount) {
   pose.hips.z -= 0.06 * amount;
 }
 
-// ------------------------------------------------------------------ modi
+// ------------------------------------------------------------------ modes
 export const STANCES = {
-  /** Com'e' sempre stata: peso che passa da una gamba all'altra, gesti spontanei. */
+  /** As she has always been: weight moving from one leg to the other, spontaneous gestures. */
   standard: {
     label: 'Normale',
     sway: 1,
@@ -77,7 +77,7 @@ export const STANCES = {
       { hold: [10, 16] },
       {
         hold: [3.5, 4.5],
-        /** Mano al mento, pensierosa, guardando di lato. */
+        /** Hand on the chin, thoughtful, looking aside. */
         run(pose, k, p) {
           const on = curve(p, [[0, 0], [0.2, 1], [0.8, 1], [1, 0]]) * k;
           pose.reach(DOMINANT, 'head', [0.03, -0.1, 0.1], [1, -1, -0.2], on, 0.4, true);
@@ -91,15 +91,15 @@ export const STANCES = {
     ],
   },
 
-  /** Innocente: mani dietro la schiena, si dondola, testa inclinata; ogni tanto un dito alle labbra. */
+  /** Innocent: hands behind the back, rocking, head tilted; now and then a finger to the lips. */
   innocent: {
     label: 'Innocente',
     sway: 0.35,
     base(pose, k, t) {
       handsBehind(pose, k);
       feetWidth(pose, -0.015, k);
-      // Si dondola da un piede all'altro: busto e testa si inclinano, il
-      // ginocchio della gamba scarica si piega in avanti.
+      // Rocks from one foot to the other: torso and head tilt, the knee of the
+      // unloaded leg bends forward.
       const rock = Math.sin(t * 1.6);
       pose.hips.x += 0.024 * rock * k;
       pose.add('hips', 0, 0, -0.05 * rock * k);
@@ -129,7 +129,7 @@ export const STANCES = {
     ],
   },
 
-  /** Cool: mento su, peso su una gamba; mano sul fianco, poi braccia incrociate. */
+  /** Cool: chin up, weight on one leg; hand on the hip, then arms folded. */
   cool: {
     label: 'Cool',
     sway: 0.55,
@@ -152,7 +152,7 @@ export const STANCES = {
     ],
   },
 
-  /** Elegante: piedi uniti, schiena dritta, mani giunte davanti; sorriso a occhi chiusi. */
+  /** Elegant: feet together, straight back, hands joined in front; smile with closed eyes. */
   ladylike: {
     label: 'Elegante',
     sway: 0.2,
@@ -176,7 +176,7 @@ export const STANCES = {
     ],
   },
 
-  /** Timida: ginocchia unite, spalle chiuse, sguardo basso; pugno al petto, mano ai capelli, dita che si intrecciano. */
+  /** Shy: knees together, shoulders closed, eyes down; fist to the chest, hand in the hair, fingers intertwining. */
   shy: {
     label: 'Timida',
     sway: 0.3,
@@ -220,7 +220,7 @@ export const STANCES = {
     ],
   },
 
-  /** Energica: gambe larghe, petto in fuori, un piccolo rimbalzo; ogni tanto guarda lontano. */
+  /** Energetic: legs wide, chest out, a little bounce; now and then she looks far away. */
   energetic: {
     label: 'Energica',
     sway: 1.2,
@@ -250,7 +250,7 @@ export const STANCES = {
     ],
   },
 
-  /** Diva: di tre quarti, una gamba incrociata, mento alto; mano sul fianco, "ohoho", colpo di capelli. */
+  /** Diva: three-quarter view, one leg crossed, chin high; hand on the hip, "ohoho", hair flip. */
   flamboyant: {
     label: 'Diva',
     sway: 0.4,
@@ -289,7 +289,7 @@ export const STANCES = {
     ],
   },
 
-  /** Gentiluomo: composto, mani giunte davanti; ogni tanto un inchino con la mano sul cuore. */
+  /** Gentleman: composed, hands joined in front; now and then a bow with the hand on the heart. */
   gentleman: {
     label: 'Gentiluomo',
     sway: 0.2,
@@ -315,7 +315,7 @@ export const STANCES = {
     ],
   },
 
-  /** Potente: gambe larghe, petto in fuori; braccia incrociate, mani sui fianchi, pugno al cielo, dito puntato. */
+  /** Powerful: legs wide, chest out; arms folded, hands on the hips, fist to the sky, finger pointing. */
   powerful: {
     label: 'Potente',
     sway: 0.45,
@@ -363,14 +363,14 @@ export const STANCES = {
 export const STANCE_NAMES = Object.keys(STANCES);
 
 /**
- * Chi sta in piedi e come: il modo scelto sfuma in quello nuovo, e dentro il
- * modo le frasi si alternano, ognuna per qualche secondo.
+ * Who stands and how: the chosen mode fades into the new one, and within the
+ * mode the phrases alternate, each for a few seconds.
  */
 export class StanceMixer {
   constructor() {
     this.current = 'standard';
     this.weights = Object.fromEntries(STANCE_NAMES.map((name) => [name, name === 'standard' ? 1 : 0]));
-    // Ogni modo ha le sue frasi: quando si cambia modo quelle vecchie sfumano, non scattano.
+    // Each mode has its phrases: when the mode changes the old ones fade, they don't snap.
     this.phrases = Object.fromEntries(
       STANCE_NAMES.map((name) => {
         const list = STANCES[name].phrases ?? [];
@@ -388,14 +388,14 @@ export class StanceMixer {
     state.hold = randomHold(STANCES[name].phrases?.[0]);
   }
 
-  /** Quanto spostare il peso da una gamba all'altra, secondo i modi attivi. */
+  /** How much to shift the weight from one leg to the other, according to the active modes. */
   get sway() {
     let total = 0;
     for (const name of STANCE_NAMES) total += this.weights[name] * (STANCES[name].sway ?? 1);
     return total;
   }
 
-  /** Applica i modi (in piedi, peso `w`) alla posa del frame. */
+  /** Applies the modes (standing, weight `w`) to the frame's pose. */
   apply(pose, dt, t, w) {
     for (const name of STANCE_NAMES) {
       const def = STANCES[name];

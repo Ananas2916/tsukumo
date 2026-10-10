@@ -1,18 +1,20 @@
-"""Hook di Claude Code e Codex: avvisa Tsukumo quando hanno finito.
+"""Claude Code and Codex hook: tells Tsukumo when they've finished.
 
-Lo lanciano i due programmi (vedi backend/notify.py, che lo collega dal
-pannello):
+The two programs launch it (see backend/notify.py, which connects it from
+the panel):
 
-* Claude Code: ``tsukumo_notify.py claude``, con il JSON dell'hook sullo
-  standard input (``Stop`` o ``Notification``);
-* Codex: ``tsukumo_notify.py codex '<json>'``, con il JSON come ultimo argomento.
+* Claude Code: ``tsukumo_notify.py claude``, with the hook's JSON on
+  standard input: ``Stop`` and ``Notification`` for the notifications,
+  ``UserPromptSubmit`` (it started) and ``PostToolUse`` of the task-list
+  tools for the agents' dashboard;
+* Codex: ``tsukumo_notify.py codex '<json>'``, with the JSON as the last argument.
 
-Deve essere istantaneo e non fallire mai: se Tsukumo e' spento (niente
-``state/running.json``) esce subito, senza nemmeno provare a connettersi. Gli
-agenti lanciati da Tsukumo stesso hanno ``TSUKUMO_INTERNAL=1`` e non avvisano:
-la risposta la sta gia' dicendo lei.
+It must be instant and never fail: if Tsukumo is off (no
+``state/running.json``) it exits right away, without even trying to connect.
+Agents launched by Tsukumo herself have ``TSUKUMO_INTERNAL=1`` and don't
+notify: she's already saying the answer.
 
-Solo libreria standard: gira con qualunque Python.
+Standard library only: it runs with any Python.
 """
 
 from __future__ import annotations
@@ -27,8 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def state_folders() -> list[Path]:
-    """Dove puo' stare lo stato di Tsukumo: dal progetto (sviluppo) o dai dati
-    dell'utente (app installata, vedi electron/main.js)."""
+    """Where Tsukumo's state can be: in the project (development) or in the
+    user's data (installed app, see electron/main.js)."""
     folders = [os.environ.get("DC_STATE_DIR"), ROOT / "state"]
     if os.environ.get("APPDATA"):
         folders.append(Path(os.environ["APPDATA"]) / "Tsukumo" / "state")
@@ -49,7 +51,7 @@ def backend_url() -> str | None:
 
 
 def last_assistant_text(transcript: str) -> str:
-    """L'ultimo messaggio di Claude nella trascrizione JSONL della sessione."""
+    """Claude's last message in the session's JSONL transcript."""
     try:
         lines = Path(transcript).read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -72,32 +74,54 @@ def last_assistant_text(transcript: str) -> str:
     return ""
 
 
-#: Notifiche di Claude Code per cui vale la pena chiamarti: ti sta aspettando.
+#: Claude Code notifications worth calling you for: it's waiting for you.
 WAITING = {"permission_prompt", "agent_needs_input", "elicitation_dialog", "elicitation_url_dialog"}
+#: The task-list tools (the other PostToolUse don't arrive: there's the matcher).
+TASK_TOOLS = {"TodoWrite", "TaskCreate", "TaskUpdate"}
+
+
+def _where(payload: dict, source: str) -> dict:
+    """Which session and in which folder: the dashboard keeps them apart."""
+    session = payload.get("session_id") or payload.get("thread-id") or payload.get("thread_id") or ""
+    cwd = str(payload.get("cwd") or "")
+    return {"source": source, "session": str(session)[:120], "project": Path(cwd).name if cwd else ""}
 
 
 def from_claude(payload: dict) -> dict | None:
     event = payload.get("hook_event_name")
+    where = _where(payload, "claude")
     if event == "Notification":
         kind = payload.get("notification_type")
-        # "idle_prompt", "auth_success"...: rumore (che ha finito lo dice gia' Stop).
+        # "idle_prompt", "auth_success"...: noise (Stop already says it has finished).
         if kind is not None and kind not in WAITING:
             return None
-        return {"source": "claude", "kind": "waiting", "message": str(payload.get("message") or "")}
+        return {**where, "kind": "waiting", "message": str(payload.get("message") or "")}
     if event == "Stop":
         if payload.get("stop_hook_active"):
             return None
         message = str(payload.get("last_assistant_message") or "")
         if not message:
             message = last_assistant_text(str(payload.get("transcript_path") or ""))
-        return {"source": "claude", "kind": "done", "message": message}
+        return {**where, "kind": "done", "message": message}
+    if event == "UserPromptSubmit":
+        return {**where, "kind": "working", "message": str(payload.get("prompt") or "")[:300]}
+    if event == "PostToolUse" and payload.get("tool_name") in TASK_TOOLS:
+        response = payload.get("tool_response")
+        return {
+            **where,
+            "kind": "tasks",
+            "tool": payload["tool_name"],
+            "input": payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {},
+            # The task number is enough: no long answers.
+            "response": response if isinstance(response, (dict, list)) and len(json.dumps(response)) < 4000 else str(response or "")[:400],
+        }
     return None
 
 
 def from_codex(payload: dict) -> dict | None:
     if payload.get("type") != "agent-turn-complete":
         return None
-    return {"source": "codex", "kind": "done", "message": str(payload.get("last-assistant-message") or "")}
+    return {**_where(payload, "codex"), "kind": "done", "message": str(payload.get("last-assistant-message") or "")}
 
 
 def send(url: str, body: dict) -> None:
@@ -127,7 +151,7 @@ def main(argv: list[str]) -> int:
         if body:
             send(url, body)
     except Exception:
-        pass  # un avviso perso non deve mai bloccare l'agente
+        pass  # a lost notification must never block the agent
     return 0
 
 

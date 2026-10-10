@@ -1,21 +1,21 @@
 /**
- * Accumulatore della posa di un frame (vedi body.js).
+ * Accumulator of a frame's pose (see body.js).
  */
 
 import * as THREE from 'three';
 
 import { EPSILON, MOODS, SIDES } from './constants.js';
 
-/** Le dita che si possono tendere una per una (vedi `Pose.extend`). */
+/** The fingers that can be extended one by one (see `Pose.extend`). */
 export const FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Little'];
 
-/** Restituito da `Pose.get` per un bone che nessuno strato ha toccato. */
+/** Returned by `Pose.get` for a bone no layer touched. */
 const _zero = new THREE.Vector3();
 
 /**
- * Accumulatore della posa di un frame. Ogni strato (postura, respiro, gesti,
- * azioni, reazioni...) somma il suo contributo gia' pesato; alla fine si
- * applica tutto in un colpo solo.
+ * Accumulator of a frame's pose. Each layer (posture, breathing, gestures,
+ * actions, reactions...) adds its already weighted contribution; at the end
+ * everything is applied in one go.
  */
 export class Pose {
   constructor() {
@@ -25,11 +25,11 @@ export class Pose {
     this.heel = { left: 0, right: 0 };
     this.fingers = { left: 0, right: 0 };
     /**
-     * Dita tese una per una (0..1), sopra la chiusura di `fingers`: la V
-     * e' la mano chiusa con Index e Middle tesi, la pistola Index e Thumb.
+     * Fingers extended one by one (0..1), on top of the `fingers` curl: the V
+     * is the closed hand with Index and Middle extended, the gun Index and Thumb.
      */
     this.extend = { left: {}, right: {} };
-    /** Indice e medio divaricati (la V), 0..1. */
+    /** Index and middle spread apart (the V), 0..1. */
     this.spread = { left: 0, right: 0 };
     this.hands = { left: [], right: [] };
     this.expr = {};
@@ -48,17 +48,17 @@ export class Pose {
       this.spread[side] = 0;
       for (const finger of FINGERS) this.extend[side][finger] = 0;
     }
-    /** Rotazione del corpo intero intorno ai piedi (giravolta, mettersi in mostra), radianti. */
+    /** Rotation of the whole body around the feet (twirl, showing off), radians. */
     this.rootYaw = 0;
     for (const mood of MOODS) this.expr[mood] = 0;
     this.gaze.yaw = 0;
     this.gaze.pitch = 0;
     this.gaze.weight = 0;
-    /** Peso dell'IK delle gambe: 1 = piedi piantati a terra. */
+    /** Weight of the leg IK: 1 = feet planted on the ground. */
     this.legIK = 0;
-    /** Chiusura forzata degli occhi (0..1), oltre al battito di ciglia. */
+    /** Forced eye closing (0..1), on top of blinking. */
     this.eyesClosed = 0;
-    /** Bocca aperta senza voce (lo sbadiglio), 0..1: si somma al lip-sync. */
+    /** Mouth open without voice (the yawn), 0..1: added to the lip-sync. */
     this.mouthOpen = 0;
   }
 
@@ -77,7 +77,7 @@ export class Pose {
     return this.rot.get(bone) ?? _zero.set(0, 0, 0);
   }
 
-  /** Rotazione di un bone laterale scritta per il lato sinistro. */
+  /** Rotation of a side bone written for the left side. */
   side(side, part, x, y, z, w = 1) {
     const s = side === 'left' ? 1 : -1;
     this.add(side + part, x * w, y * s * w, z * s * w);
@@ -88,7 +88,7 @@ export class Pose {
     this.side('right', part, x, y, z, w);
   }
 
-  /** Tende le dita elencate (`['Index', 'Middle']`) del peso `w`. */
+  /** Extends the listed fingers (`['Index', 'Middle']`) by weight `w`. */
   point(side, fingers, w) {
     for (const finger of fingers) this.extend[side][finger] += w;
   }
@@ -98,12 +98,11 @@ export class Pose {
   }
 
   /**
-   * Porta una mano in un punto, espresso rispetto a un bone di riferimento
-   * (`head`, `upperChest`, `hips`...) e scritto per il lato sinistro: per il
-   * destro la X viene specchiata. `pole` e' la direzione verso cui punta il
-   * gomito, `twist` ruota l'avambraccio sul suo asse (palmo in su/in giu').
-   * Le richieste `base` (le mani appoggiate da seduta o da sdraiata) cedono
-   * il passo a gesti e azioni.
+   * Brings a hand to a point, expressed relative to a reference bone (`head`,
+   * `upperChest`, `hips`...) and written for the left side: for the right one
+   * X is mirrored. `pole` is the direction the elbow points to, `twist`
+   * rotates the forearm on its axis (palm up/down). `base` requests (hands
+   * resting while sitting or lying down) give way to gestures and actions.
    */
   reach(side, anchor, offset, pole, weight, twist = 0, base = false) {
     if (weight <= EPSILON) return;
@@ -118,7 +117,7 @@ export class Pose {
     });
   }
 
-  /** Come `reach`, ma verso un punto fisso del mondo (il bordo dello schermo). */
+  /** Like `reach`, but towards a fixed point in the world (the screen edge). */
   reachWorld(side, point, pole, weight, twist = 0) {
     if (weight <= EPSILON) return;
     const s = side === 'left' ? 1 : -1;

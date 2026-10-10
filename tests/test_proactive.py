@@ -1,4 +1,4 @@
-"""Commenti spontanei: quando parla, cosa dice, quando sta zitta."""
+"""Spontaneous comments: when she speaks, what she says, when she keeps quiet."""
 
 import random
 import time
@@ -47,7 +47,7 @@ class FakeNews:
 
 @pytest.fixture
 def rig(client, monkeypatch):
-    """Un Proactive vero sul companion del server, con tutto il mondo finto intorno."""
+    """A real Proactive on the server's companion, with a whole fake world around it."""
     instance = server.app.state.companion
     sent = []
 
@@ -70,7 +70,7 @@ def rig(client, monkeypatch):
     )
     engine.readings = readings
     engine.sent = sent
-    # La sessione parte all'ora vera, i test usano ore finte: le pause si provano a parte.
+    # The session starts at the real time, the tests use fake times: breaks are tested separately.
     engine.next_break_minutes = 10**9
     return engine
 
@@ -89,7 +89,7 @@ def test_late_night_while_coding(client, rig):
     [text] = spoken(rig)
     assert "l'una e 12" in text.lower()
     assert "yawn" in gestures(rig)
-    # Subito dopo sta zitta: fra due commenti passano almeno 8 minuti.
+    # Right after she keeps quiet: at least 8 minutes pass between two comments.
     assert client.portal.call(rig.tick, at(1, 13)) is None
 
 
@@ -112,7 +112,7 @@ def test_battery_warns_once_per_level_until_plugged(client, rig):
     assert "18 per cento" in spoken(rig)[-1]
     assert client.portal.call(rig.tick, at(15, 1)) is None
     rig.readings["value"] = Battery(percent=4, plugged=False)
-    assert client.portal.call(rig.tick, at(15, 2)) == "battery:4"  # critica: anche subito dopo
+    assert client.portal.call(rig.tick, at(15, 2)) == "battery:4"  # critical: even right after
     rig.readings["value"] = Battery(percent=40, plugged=True)
     client.portal.call(rig.tick, at(15, 3))
     assert rig.battery_warned == set()
@@ -127,8 +127,8 @@ def test_break_after_two_hours(client, rig):
 
 
 def test_weather_morning_heat_and_rain(client, rig):
-    # La sessione parte all'ora vera: a seconda di quando giri i test, alle 14
-    # finte sarebbe gia' ora di una pausa. Qui si prova solo il meteo.
+    # The session starts at the real time: depending on when you run the tests, at the fake
+    # 14:00 a break could already be due. Only the weather is tested here.
     rig.preferences.update({"topics": {"breaks": False}}, save=False)
     rig.weather = FakeWeather(Weather(temperature=24, apparent=25, code=0, is_day=True))
     assert client.portal.call(rig.tick, at(8)) == "weather:morning-clear"
@@ -144,6 +144,8 @@ def test_weather_morning_heat_and_rain(client, rig):
 
 
 def test_youtube_comment_uses_the_brain_with_a_hidden_prompt(client, rig, monkeypatch):
+    # The session starts at the real time: at the fake 21:30 a break could be due. Only YouTube here.
+    rig.preferences.update({"topics": {"breaks": False}}, save=False)
     instance = server.app.state.companion
     brain = Scripted(["Che canale divertente!"])
     monkeypatch.setattr(instance, "llm", brain)
@@ -151,14 +153,14 @@ def test_youtube_comment_uses_the_brain_with_a_hidden_prompt(client, rig, monkey
     now = at(21)
     rig.context.update(1, False, window("Attraversare il paese con 0€ - YouTube - Google Chrome", "chrome.exe"))
     rig.context.activity_since = now.timestamp() - 30
-    assert client.portal.call(rig.tick, now) is None  # guardato da troppo poco
+    assert client.portal.call(rig.tick, now) is None  # watched for too short a time
     rig.context.activity_since = now.timestamp() - 60
     assert client.portal.call(rig.tick, now) == "youtube:Attraversare il paese con 0€"
     assert "Attraversare il paese con 0€" in brain.messages[-1].content
     assert spoken(rig) == ["Che canale divertente!"]
-    assert not [m for m in rig.sent if m["type"] == "user"]  # la richiesta resta nascosta
+    assert not [m for m in rig.sent if m["type"] == "user"]  # the request stays hidden
     rig.last_any = 0
-    assert client.portal.call(rig.tick, at(21, 30)) is None  # lo stesso video non si ricommenta
+    assert client.portal.call(rig.tick, at(21, 30)) is None  # the same video isn't commented again
 
 
 def test_youtube_without_a_brain_uses_a_ready_line(client, rig):
@@ -177,9 +179,9 @@ def test_chatter_waits_for_a_pause_then_comments_the_news(client, rig, monkeypat
     rig.news = FakeNews("Scoperto un nuovo pianeta")
     rig.preferences.update({"topics": {"facts": False, "films": False}}, save=False)
     now = at(18)
-    assert client.portal.call(rig.tick, now) is None  # la prima volta fissa quando
+    assert client.portal.call(rig.tick, now) is None  # the first time sets when
     rig.next_chatter_at = now.timestamp() - 1
-    assert client.portal.call(rig.tick, now) is None  # sta programmando: aspetta
+    assert client.portal.call(rig.tick, now) is None  # she's programming: wait
     rig.context.update(2, False, window("Meteo - Google Chrome", "chrome.exe"))
     assert client.portal.call(rig.tick, now) == "news:Scoperto un nuovo pianeta"
     assert "Scoperto un nuovo pianeta" in brain.messages[-1].content and "Il Post" in brain.messages[-1].content
@@ -207,7 +209,7 @@ def test_min_gap_is_reasonable():
 
 
 # ---------------------------------------------------------------------------
-# Servizi: meteo, notizie, preferenze
+# Services: weather, news, preferences
 # ---------------------------------------------------------------------------
 def test_weather_service_geocodes_the_city_and_caches(client):
     calls = []
@@ -222,7 +224,7 @@ def test_weather_service_geocodes_the_city_and_caches(client):
     weather = client.portal.call(service.get, "Milano", "it")
     assert (weather.city, round(weather.temperature), weather.condition, weather.feel) == ("Milano", 21, "rain", "mild")
     client.portal.call(service.get, "Milano", "it")
-    assert len(calls) == 2  # la seconda volta dalla cache
+    assert len(calls) == 2  # the second time from the cache
 
 
 def test_weather_service_never_raises(client):

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tsukumo</title>
+    <link rel="stylesheet" href="./src/panel.css" />
+    <link rel="stylesheet" href="./src/dashboard.css" />
+  </head>
+  <body class="dashboard">
+    <div class="dash">
+      <!-- Header: the window is dragged from here. "−" minimizes it: the companion goes back to the desktop. -->
+      <header class="dash-header">
+        <div class="dash-hello">
+          <span class="dash-logo" aria-hidden="true"></span>
+          <div>
+            <strong id="greeting" data-i18n>Hi</strong>
+            <span id="today-line" class="subtitle"></span>
+          </div>
+        </div>
+        <span class="spacer"></span>
+        <div id="now-playing" class="now-playing hidden" title="Playing on Spotify" data-i18n-attrs="title">
+          <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span id="now-playing-text" class="now-playing-text"></span>
+        </div>
+        <div class="dash-actions" id="dash-actions"></div>
+      </header>
+
+      <div class="dash-body">
+        <main class="dash-grid" id="dash-grid"></main>
+
+        <!-- The chat (the panel's own) and, above the text field, her corner. -->
+        <aside class="dash-side">
+          <section id="view-chat" class="view chat-view">
+            <div class="chat-toolbar">
+              <button id="engine-chip" class="engine-chip" type="button" title="Change brain" data-i18n-attrs="title">
+                <span class="dot" data-state="unknown"></span>
+                <span id="engine-chip-text">…</span>
+              </button>
+              <span class="spacer"></span>
+              <button id="btn-screen" class="ghost-btn hidden" type="button" title="Show her the screen" data-i18n-attrs="title"></button>
+              <button id="btn-new-chat" class="ghost-btn" type="button" title="Forget the conversation and start over" data-i18n-attrs="title"></button>
+            </div>
+            <div id="messages" class="messages" aria-live="polite"></div>
+            <div id="stage" class="stage">
+              <div id="stage-bubble" class="stage-bubble"></div>
+            </div>
+            <div class="composer-wrap">
+              <div id="typing" class="typing hidden"><i></i><i></i><i></i><span data-i18n>thinking</span></div>
+              <div id="attachments" class="attachments hidden"></div>
+              <input id="file-input" type="file" multiple hidden />
+              <form id="composer" class="composer" autocomplete="off">
+                <button id="btn-mic" class="composer-icon" type="button" title="Talk (Ctrl+Space)" data-i18n-attrs="title"></button>
+                <button id="btn-attach" class="composer-icon" type="button" title="Attach a file (or drop it here)" data-i18n-attrs="title"></button>
+                <textarea id="input" rows="1" placeholder="Write her something…" aria-label="Message" data-i18n-attrs="placeholder,aria-label"></textarea>
+                <button id="btn-read" class="composer-icon" type="button" title="Just have the text read aloud, without the brain" data-i18n-attrs="title"></button>
+                <button id="btn-send" class="send" type="submit" title="Send (Enter)" data-i18n-attrs="title"></button>
+              </form>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <script type="module" src="./src/dashboard.js"></script>
+  </body>
+</html>

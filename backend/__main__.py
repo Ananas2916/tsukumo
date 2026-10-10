@@ -1,4 +1,4 @@
-"""Permette di avviare il backend con: python -m backend"""
+"""Lets you start the backend with: python -m backend"""
 
 from .server import main
 

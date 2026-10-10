@@ -1,23 +1,24 @@
 /**
- * Scheda Agenda: timer, promemoria, sveglie e azioni programmate.
+ * Agenda tab: timers, reminders, alarms and scheduled actions.
  *
- * Si aggiungono a parole, come si direbbe a lei ("tra 20 minuti ricordami di
- * bere", "timer 5 minuti", "domani alle 9 ricordami la riunione"), oppure coi
- * timer rapidi. Lo stesso si puo' fare direttamente in chat o a voce: il
- * backend capisce la richiesta e la mette qui. L'elenco arriva dal backend
- * (`GET /api/reminders` e il messaggio `reminders`), con il conto alla
- * rovescia aggiornato ogni secondo.
+ * They're added in words, as you'd say them to her ("remind me to drink in
+ * 20 minutes", "timer 5 minutes", "tomorrow at 9 remind me to call Anna"),
+ * or with the quick timers. The same works straight in the chat or by
+ * voice: the backend understands the request and puts it here. The list
+ * comes from the backend (`GET /api/reminders` and the `reminders` message),
+ * with the countdown updated every second.
  */
 
 import { apiUrl } from '../config.js';
 import { el, iconButton } from '../dom.js';
+import { LOCALE, t, tx } from '../i18n.js';
 import { icon } from '../icons.js';
 
 const KIND_ICON = { timer: 'clock', reminder: 'bell', alarm: 'bell', task: 'robot' };
 const QUICK_TIMERS = [1, 5, 10, 25];
-const EXAMPLES = ['tra 20 minuti ricordami di bere', 'domani alle 9 ricordami la riunione', 'ogni giorno alle 13 ricordami di pranzare'];
+const EXAMPLES = [t('remind me to drink in 20 minutes'), t('tomorrow at 9 remind me to call Anna'), t('every day at 1pm remind me to have lunch')];
 
-/** "4:32", "1:05:09": il conto alla rovescia dei timer. */
+/** "4:32", "1:05:09": the timers' countdown. */
 function countdown(seconds) {
   const total = Math.max(0, Math.round(seconds));
   const h = Math.floor(total / 3600);
@@ -27,17 +28,17 @@ function countdown(seconds) {
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-/** Quando scatta, per chi legge: "tra 4:32", "oggi alle 18:00", "dom 29 dic, 12:00". */
+/** When it goes off, for the reader: "in 4:32", "today at 18:00", "Sun 29 Dec, 12:00". */
 function whenText(item, now = Date.now()) {
   const due = new Date(item.dueIso);
   const left = (due.getTime() - now) / 1000;
-  if (left < 3600) return `tra ${countdown(left)}`;
-  const time = due.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  if (left < 3600) return t('in {time}', { time: countdown(left) });
+  const time = due.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
   const today = new Date(now);
   const days = Math.round((new Date(due.toDateString()) - new Date(today.toDateString())) / 86400000);
-  if (days === 0) return `oggi alle ${time}`;
-  if (days === 1) return `domani alle ${time}`;
-  const day = due.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+  if (days === 0) return t('today at {time}', { time });
+  if (days === 1) return t('tomorrow at {time}', { time });
+  const day = due.toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
   return `${day}, ${time}`;
 }
 
@@ -51,13 +52,13 @@ export class AgendaView {
     this.input = el('input', {
       class: 'field-input',
       type: 'text',
-      placeholder: 'Es. «tra 20 minuti ricordami di bere»',
-      'aria-label': 'Nuovo promemoria',
+      placeholder: t('E.g. "remind me to drink in 20 minutes"'),
+      'aria-label': t('New reminder'),
       onKeydown: (event) => {
         if (event.key === 'Enter') this.addPhrase();
       },
     });
-    this.addButton = el('button', { class: 'btn primary', type: 'button', onClick: () => this.addPhrase() }, icon('check', 15), el('span', {}, 'Aggiungi'));
+    this.addButton = el('button', { class: 'btn primary', type: 'button', onClick: () => this.addPhrase() }, icon('check', 15), el('span', {}, t('Add')));
     this.error = el('p', { class: 'hint error hidden' });
     const quick = el(
       'div',
@@ -69,7 +70,7 @@ export class AgendaView {
     const examples = el(
       'div',
       { class: 'agenda-examples' },
-      el('span', { class: 'card-sub' }, 'Si può chiedere anche in chat o a voce, per esempio:'),
+      el('span', { class: 'card-sub' }, t('You can also ask in the chat or by voice, for example:')),
       ...EXAMPLES.map((text) => el('button', { class: 'link-btn', type: 'button', onClick: () => this._fill(text) }, `«${text}»`)),
     );
 
@@ -87,7 +88,7 @@ export class AgendaView {
       el(
         'section',
         { class: 'card' },
-        el('header', { class: 'card-head' }, el('span', { class: 'card-icon' }, icon('clock', 16)), el('h3', {}, 'In programma')),
+        el('header', { class: 'card-head' }, el('span', { class: 'card-icon' }, icon('clock', 16)), el('h3', {}, t('Scheduled'))),
         this.list,
       ),
     );
@@ -110,7 +111,7 @@ export class AgendaView {
       const response = await fetch(apiUrl('/api/reminders'));
       if (response.ok) this._set((await response.json()).reminders ?? []);
     } catch {
-      /* il messaggio `reminders` arrivera' comunque */
+      /* the `reminders` message will arrive anyway */
     }
   }
 
@@ -129,7 +130,7 @@ export class AgendaView {
     try {
       await fetch(apiUrl(`/api/reminders/${encodeURIComponent(item.id)}`), { method: 'DELETE' });
     } catch (error) {
-      this.app.toast(`Non riesco a toglierlo: ${error.message}`, 'error');
+      this.app.toast(t("Couldn't remove it: {error}", { error: error.message }), 'error');
     }
   }
 
@@ -143,7 +144,7 @@ export class AgendaView {
         body: JSON.stringify(body),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+      if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
       return true;
     } catch (error) {
       this.error.textContent = error.message;
@@ -163,7 +164,7 @@ export class AgendaView {
     this.items = items;
     this._render();
     clearInterval(this.timer);
-    // Il conto alla rovescia serve solo se c'e' qualcosa entro l'ora.
+    // The countdown is needed only if something is due within the hour.
     if (items.some((item) => new Date(item.dueIso).getTime() - Date.now() < 3700 * 1000)) {
       this.timer = setInterval(() => this._tick(), 1000);
     }
@@ -178,7 +179,7 @@ export class AgendaView {
 
   _render() {
     if (!this.items.length) {
-      this.list.replaceChildren(el('p', { class: 'hint' }, 'Niente in programma. Chiedile un timer o un promemoria.'));
+      this.list.replaceChildren(el('p', { class: 'hint' }, t('Nothing scheduled. Ask her for a timer or a reminder.')));
       return;
     }
     this.list.replaceChildren(
@@ -195,10 +196,10 @@ export class AgendaView {
               'small',
               {},
               el('span', { class: 'agenda-when' }, whenText(item)),
-              item.repeat === 'daily' ? el('span', { class: 'badge info' }, icon('repeat', 11), 'ogni giorno') : null,
+              item.repeat === 'daily' ? el('span', { class: 'badge info' }, icon('repeat', 11), t('every day')) : null,
             ),
           ),
-          iconButton('trash', { title: 'Togli', onClick: () => this.remove(item) }),
+          iconButton('trash', { title: t('Remove'), onClick: () => this.remove(item) }),
         ),
       ),
     );

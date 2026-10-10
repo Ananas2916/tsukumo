@@ -1,11 +1,11 @@
-"""Sintesi locale con Piper.
+"""Local synthesis with Piper.
 
-Piper e' molto piu' leggero di Kokoro: gira bene anche su CPU modeste e su
-Raspberry Pi, al prezzo di una voce un po' meno espressiva. Ogni voce e' una
-coppia di file (``.onnx`` + ``.onnx.json``) da scaricare da
+Piper is much lighter than Kokoro: it runs well even on modest CPUs and on a
+Raspberry Pi, at the price of a slightly less expressive voice. Every voice
+is a pair of files (``.onnx`` + ``.onnx.json``) to download from
 huggingface.co/rhasspy/piper-voices.
 
-Restituisce PCM a 16 bit, quindi non serve alcun decoder audio.
+It returns 16-bit PCM, so no audio decoder is needed.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class PiperTTS(TTSEngine):
-    """Sintesi locale tramite il pacchetto ``piper-tts``."""
+    """Local synthesis through the ``piper-tts`` package."""
 
     name = "piper"
 
@@ -30,27 +30,27 @@ class PiperTTS(TTSEngine):
             from piper import PiperVoice
         except ImportError as exc:
             raise RuntimeError(
-                "Il motore Piper richiede il pacchetto 'piper-tts'. "
-                "Installalo con: pip install piper-tts"
+                "The Piper engine needs the 'piper-tts' package. "
+                "Install it with: pip install piper-tts"
             ) from exc
 
         path = Path(model_path).expanduser()
         if not path.is_file():
             raise RuntimeError(
-                f"Voce Piper non trovata: {path}. Scaricane una da "
-                "huggingface.co/rhasspy/piper-voices e indicala in DC_PIPER_MODEL."
+                f"Piper voice not found: {path}. Download one from "
+                "huggingface.co/rhasspy/piper-voices and set it in DC_PIPER_MODEL."
             )
 
         self.model_path = path
-        # Una installazione di Piper = una voce; il nome del file dice la lingua (it_IT-...).
+        # One Piper installation = one voice; the file name says the language (it_IT-...).
         self.default_voice = path.stem
         self.default_speed = default_speed
         self._voice = PiperVoice.load(str(path))
-        logger.info("Piper caricato: %s", path.name)
+        logger.info("Piper loaded: %s", path.name)
 
     # ------------------------------------------------------------------
     def voices(self) -> list[str]:
-        # Una installazione di Piper = una voce: per cambiarla si cambia file.
+        # One Piper installation = one voice: to change it you change the file.
         return [self.model_path.stem]
 
     # ------------------------------------------------------------------
@@ -72,13 +72,13 @@ class PiperTTS(TTSEngine):
                 meta={"engine": self.name},
             )
 
-        # In Piper la "lunghezza" e' l'inverso della velocita'.
+        # In Piper "length" is the inverse of speed.
         length_scale = 1.0 / chosen_speed if chosen_speed > 0 else 1.0
 
         chunks: list[np.ndarray] = []
         for chunk in self._voice.synthesize(clean, length_scale=length_scale):
             raw = getattr(chunk, "audio_int16_bytes", None)
-            if raw is None:  # versioni piu' vecchie restituiscono i byte grezzi
+            if raw is None:  # older versions return the raw bytes
                 raw = bytes(chunk)
             chunks.append(np.frombuffer(raw, dtype="<i2"))
 

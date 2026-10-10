@@ -1,36 +1,39 @@
 /**
- * Cattura dal microfono e rilevamento del parlato.
+ * Microphone capture and speech detection.
  *
- * Produce direttamente PCM a 16 kHz mono, che e' quello che Whisper vuole e
- * che il backend sa leggere senza alcun decoder audio. Il ricampionamento non
- * lo facciamo a mano: basta chiedere `new AudioContext({ sampleRate: 16000 })`
- * e ci pensa il browser.
+ * It produces 16 kHz mono PCM directly, which is what Whisper wants and what
+ * the backend can read without any audio decoder. We don't resample by
+ * hand: asking for `new AudioContext({ sampleRate: 16000 })` is enough and
+ * the browser takes care of it.
  *
- * Tre modi di parlare, come chiesto:
+ * Three ways of talking, as requested:
  *
- * - `push`  premi e parla: registra finche' tieni premuto;
- * - `vad`   sempre in ascolto: riconosce da solo inizio e fine della frase;
- * - `wake`  a chiamata: come `vad`, ma la frase vale solo se comincia con la
- *           parola di attivazione (il filtro sta nel testo trascritto, vedi
+ * - `push`  push to talk: records while you hold the key;
+ * - `vad`   always listening: detects the start and end of a sentence by itself;
+ * - `wake`  wake word: like `vad`, but the sentence counts only if it starts
+ *           with the wake word (the filter is on the transcribed text, see
  *           `matchesWakeWord`).
  *
- * # Perche' non ascoltiamo mentre il companion parla
+ * # Why we don't listen while the companion speaks
  *
- * Senza cuffie il microfono risente la voce sintetizzata, il rilevatore la
- * scambia per parlato dell'utente e il companion finisce per rispondere a se
- * stesso in un ciclo infinito. Per questo `setMuted(true)` viene chiamato
- * mentre sta parlando: e' lo stesso accorgimento che usa Open-LLM-VTuber.
+ * Without headphones the microphone hears the synthesized voice again, the
+ * detector takes it for the user's speech and the companion ends up
+ * answering itself in an endless loop. That's why `setMuted(true)` is called
+ * while it's speaking: the same trick Open-LLM-VTuber uses.
  */
 
-/** Frequenza richiesta al browser: quella nativa dei modelli di riconoscimento. */
+import { t } from './i18n.js';
+
+/** Sample rate asked of the browser: the speech-recognition models' native one. */
 export const SAMPLE_RATE = 16000;
 
-/** Chiave (localStorage condiviso fra personaggio e pannello) del microfono scelto; vuoto = predefinito. */
+/** Key (localStorage shared by the character and the panel) of the chosen microphone; empty = default. */
 export const MIC_SETTING = 'dc:mic-device';
 
 /**
- * Apre il microfono indicato, o quello predefinito di sistema. Se quello scelto
- * non c'e' piu' (cuffie scollegate) ripiega sul predefinito invece di restare muto.
+ * Opens the given microphone, or the system default. If the chosen one is
+ * gone (headphones unplugged) it falls back to the default instead of
+ * staying mute.
  */
 export async function openMicrophone(deviceId = '') {
   const audio = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true };
@@ -39,15 +42,16 @@ export async function openMicrophone(deviceId = '') {
       return await navigator.mediaDevices.getUserMedia({ audio: { ...audio, deviceId: { exact: deviceId } } });
     } catch (error) {
       if (error.name !== 'OverconstrainedError' && error.name !== 'NotFoundError') throw error;
-      console.warn('[mic] microfono scelto non trovato, uso il predefinito');
+      console.warn('[mic] chosen microphone not found, using the default');
     }
   }
   return navigator.mediaDevices.getUserMedia({ audio });
 }
 
 /**
- * I microfoni collegati, `[{id, label}]`. I nomi il browser li rivela solo dopo
- * il permesso: se mancano, apre e richiude il microfono una volta.
+ * The connected microphones, `[{id, label}]`. The browser reveals the names
+ * only after permission: if they're missing, it opens and closes the
+ * microphone once.
  */
 export async function listMicrophones() {
   let inputs = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audioinput');
@@ -56,43 +60,43 @@ export async function listMicrophones() {
     stream.getTracks().forEach((track) => track.stop());
     inputs = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audioinput');
   }
-  // "default" e "communications" sono alias di Windows di un microfono vero: la voce "predefinito" li copre.
+  // "default" and "communications" are Windows aliases of a real microphone: the "default" entry covers them.
   return inputs
     .filter((device) => device.deviceId && device.deviceId !== 'default' && device.deviceId !== 'communications')
-    .map((device, index) => ({ id: device.deviceId, label: device.label || `Microfono ${index + 1}` }));
+    .map((device, index) => ({ id: device.deviceId, label: device.label || t('Microphone {n}', { n: index + 1 }) }));
 }
 
-/** Dimensione del buffer di analisi: ~64 ms a 16 kHz, abbastanza reattivo. */
+/** Size of the analysis buffer: ~64 ms at 16 kHz, responsive enough. */
 const FRAME = 1024;
 
-/** Sotto questa durata e' un colpo di tosse o un click, non una frase. */
+/** Below this length it's a cough or a click, not a sentence. */
 const MIN_UTTERANCE = 0.35;
 
-/** Oltre questa durata chiudiamo comunque, per non accumulare audio all'infinito. */
+/** Beyond this length we close anyway, so as not to pile up audio forever. */
 const MAX_UTTERANCE = 30;
 
-/** Quanto audio teniamo *prima* dell'attacco, per non tagliare la prima sillaba. */
+/** How much audio we keep *before* the onset, so as not to cut the first syllable. */
 const PREROLL = 0.3;
 
 /**
- * Ascolto sorvegliato (lei sta parlando): la soglia si moltiplica per questo
- * fattore e la voce forte deve riempire quasi tutta l'ultima mezza secondo
- * (`BARGE_FRAMES` frame su `BARGE_WINDOW`). La cancellazione dell'eco del
- * browser toglie quasi tutta la sua voce dal microfono; quello che resta e'
- * debole e a raffiche, una persona che parla no.
+ * Guarded listening (she's speaking): the threshold is multiplied by this
+ * factor and the loud voice must fill almost all of the last half second
+ * (`BARGE_FRAMES` frames out of `BARGE_WINDOW`). The browser's echo
+ * cancellation removes almost all of her voice from the microphone; what's
+ * left is weak and bursty, a person talking isn't.
  */
 const GUARD_FACTOR = 2.5;
 const BARGE_WINDOW = 8;
 const BARGE_FRAMES = 6;
-/** Nell'ascolto sorvegliato il preroll e' piu' lungo: la frase e' gia' iniziata. */
+/** In guarded listening the preroll is longer: the sentence has already started. */
 const GUARD_PREROLL = 0.8;
 
 export class VoiceInput {
   /**
    * @param {object} options
-   * @param {(pcm16: ArrayBuffer, seconds: number) => void} options.onUtterance frase completa
-   * @param {(level: number) => void} [options.onLevel] livello 0-1, per l'indicatore
-   * @param {(speaking: boolean) => void} [options.onActivity] inizio/fine parlato
+   * @param {(pcm16: ArrayBuffer, seconds: number) => void} options.onUtterance a complete sentence
+   * @param {(level: number) => void} [options.onLevel] level 0-1, for the meter
+   * @param {(speaking: boolean) => void} [options.onActivity] speech start/end
    * @param {(error: Error) => void} [options.onError]
    */
   constructor(options = {}) {
@@ -100,7 +104,7 @@ export class VoiceInput {
     this.onLevel = options.onLevel ?? (() => {});
     this.onActivity = options.onActivity ?? (() => {});
     this.onError = options.onError ?? ((error) => console.error('[mic]', error));
-    /** Qualcuno ha parlato sopra di lei abbastanza a lungo: va interrotta. */
+    /** Someone talked over her long enough: she must be interrupted. */
     this.onBargeIn = options.onBargeIn ?? (() => {});
 
     this.mode = 'push';
@@ -113,14 +117,14 @@ export class VoiceInput {
     this.processor = null;
 
     this.running = false;
-    /** Apertura in corso (una sola alla volta) e quante volte e' stato chiuso. */
+    /** Opening in progress (one at a time) and how many times it was closed. */
     this._starting = null;
     this._generation = 0;
     this.muted = false;
-    /** Lei sta parlando: si ascolta solo chi la interrompe davvero. */
+    /** She's speaking: we only listen to whoever really interrupts her. */
     this.guarded = false;
     this.guardWindow = [];
-    this.capturing = false; // sta accumulando una frase
+    this.capturing = false; // collecting a sentence
     this.buffers = [];
     this.preroll = [];
     this.silentFrames = 0;
@@ -131,14 +135,14 @@ export class VoiceInput {
     return this.running;
   }
 
-  /** Apre il microfono. Va chiamato da un gesto dell'utente la prima volta. */
+  /** Opens the microphone. The first time it must be called from a user gesture. */
   async start({ mode = 'push', threshold = 0.02, silenceSeconds = 0.8, deviceId = '' } = {}) {
     this.mode = mode;
     this.threshold = threshold;
     this.silenceSeconds = silenceSeconds;
     if (this.running) return true;
-    // Due pressioni ravvicinate aprivano due flussi: il primo restava acceso
-    // (con la spia del microfono) e nessuno lo chiudeva piu'.
+    // Two presses close together opened two streams: the first stayed on (with
+    // the microphone indicator) and nobody closed it any more.
     this._starting ??= this._open(deviceId).finally(() => {
       this._starting = null;
     });
@@ -151,37 +155,37 @@ export class VoiceInput {
     try {
       stream = await openMicrophone(deviceId);
     } catch (error) {
-      this.onError(new Error(`Microfono non disponibile: ${error.message}`));
+      this.onError(new Error(t('Microphone unavailable: {error}', { error: error.message })));
       return false;
     }
     if (generation !== this._generation) {
-      // stop() e' arrivato mentre Windows apriva il microfono.
+      // stop() arrived while Windows was opening the microphone.
       stream.getTracks().forEach((track) => track.stop());
       return false;
     }
     this.stream = stream;
 
     try {
-      // Chiedere direttamente 16 kHz evita di ricampionare a mano.
+      // Asking for 16 kHz directly avoids resampling by hand.
       this.context = new AudioContext({ sampleRate: SAMPLE_RATE });
       if (this.context.state === 'suspended') await this.context.resume();
     } catch (error) {
       this.stop();
-      this.onError(new Error(`Microfono non disponibile: ${error.message}`));
+      this.onError(new Error(t('Microphone unavailable: {error}', { error: error.message })));
       return false;
     }
-    if (generation !== this._generation) return false; // chiuso durante resume()
+    if (generation !== this._generation) return false; // closed during resume()
 
     this.source = this.context.createMediaStreamSource(this.stream);
-    // ScriptProcessor e' deprecato ma qui e' la scelta giusta: il lavoro per
-    // frame e' banale (una media e una copia) e non richiede di caricare un
-    // modulo AudioWorklet separato, che in Electron complica il bundling.
+    // ScriptProcessor is deprecated but here it's the right choice: the
+    // per-frame work is trivial (a mean and a copy) and doesn't need a separate
+    // AudioWorklet module, which complicates bundling in Electron.
     this.processor = this.context.createScriptProcessor(FRAME, 1, 1);
     this.processor.onaudioprocess = (event) => this._onFrame(event.inputBuffer.getChannelData(0));
 
     this.source.connect(this.processor);
-    // Il ScriptProcessor non gira se non e' collegato a un'uscita; un guadagno
-    // a zero lo tiene vivo senza far sentire il microfono in altoparlante.
+    // The ScriptProcessor doesn't run unless it's connected to an output; a
+    // zero gain keeps it alive without playing the microphone on the speakers.
     const silence = this.context.createGain();
     silence.gain.value = 0;
     this.processor.connect(silence);
@@ -191,7 +195,7 @@ export class VoiceInput {
     return true;
   }
 
-  /** Chiude il microfono e libera la spia di registrazione del sistema. */
+  /** Closes the microphone and turns off the system's recording indicator. */
   stop() {
     this._generation += 1;
     this.running = false;
@@ -205,7 +209,7 @@ export class VoiceInput {
     this.processor = this.source = this.stream = this.context = null;
   }
 
-  /** Cambia modo senza riaprire il microfono. */
+  /** Changes mode without reopening the microphone. */
   setMode(mode) {
     if (mode === this.mode) return;
     if (this.capturing) this._flush();
@@ -213,31 +217,31 @@ export class VoiceInput {
   }
 
   /**
-   * Sospende l'ascolto senza chiudere il microfono.
-   * Usato mentre il companion parla, per non fargli sentire la propria voce.
+   * Pauses listening without closing the microphone.
+   * Used while the companion speaks, so it doesn't hear its own voice.
    */
   setMuted(muted) {
     if (muted && this.capturing && this.mode !== 'push') {
-      // Quello che stava arrivando e' quasi certamente la sua stessa voce.
+      // What was coming in is almost certainly her own voice.
       this._discard();
     }
     this.muted = muted;
   }
 
   /**
-   * Ascolto sorvegliato mentre lei parla (modi `vad` e `wake`): niente frasi
-   * finche' qualcuno non parla forte e a lungo, poi `onBargeIn` e la frase
-   * viene registrata dall'inizio.
+   * Guarded listening while she speaks (`vad` and `wake` modes): no sentences
+   * until someone talks loudly and long, then `onBargeIn` and the sentence is
+   * recorded from the start.
    */
   setGuarded(guarded) {
     if (guarded === this.guarded) return;
     this.guarded = guarded;
     this.guardWindow = [];
-    // Una frase iniziata mentre lei parlava e non ancora confermata non vale.
+    // A sentence started while she was speaking and not yet confirmed doesn't count.
     if (guarded && this.capturing && this.mode !== 'push') this._discard();
   }
 
-  /** Modo `push`: inizio a parlare. */
+  /** `push` mode: I start talking. */
   beginPush() {
     if (!this.running || this.mode !== 'push') return;
     this._reset();
@@ -245,7 +249,7 @@ export class VoiceInput {
     this.onActivity(true);
   }
 
-  /** Modo `push`: ho finito, manda quello che ho detto. */
+  /** `push` mode: I'm done, send what I said. */
   endPush() {
     if (this.mode !== 'push' || !this.capturing) return;
     this._flush();
@@ -262,7 +266,7 @@ export class VoiceInput {
 
     if (this.muted) return;
 
-    const frame = new Float32Array(input); // il buffer viene riusato: va copiato
+    const frame = new Float32Array(input); // the buffer is reused: it must be copied
     const seconds = input.length / SAMPLE_RATE;
 
     if (this.mode === 'push') {
@@ -273,7 +277,7 @@ export class VoiceInput {
       return;
     }
 
-    // Modi automatici: l'energia decide inizio e fine della frase.
+    // Automatic modes: the energy decides the start and end of the sentence.
     if (this.guarded && !this.capturing) {
       this.preroll.push(frame);
       const maxGuard = Math.ceil((GUARD_PREROLL * SAMPLE_RATE) / FRAME);
@@ -281,7 +285,7 @@ export class VoiceInput {
       this.guardWindow.push(level >= this.threshold * GUARD_FACTOR);
       if (this.guardWindow.length > BARGE_WINDOW) this.guardWindow.shift();
       if (this.guardWindow.filter(Boolean).length >= BARGE_FRAMES) {
-        // E' qualcuno che parla sopra di lei: la frase parte dal preroll.
+        // Someone is talking over her: the sentence starts from the preroll.
         this.guarded = false;
         this.guardWindow = [];
         this.capturing = true;
@@ -297,7 +301,7 @@ export class VoiceInput {
     const loud = level >= this.threshold;
 
     if (!this.capturing) {
-      // Teniamo un po' di audio precedente, o si perde l'attacco della prima parola.
+      // We keep a bit of earlier audio, or the onset of the first word gets lost.
       this.preroll.push(frame);
       const maxPreroll = Math.ceil((PREROLL * SAMPLE_RATE) / FRAME);
       if (this.preroll.length > maxPreroll) this.preroll.shift();
@@ -353,7 +357,7 @@ export class VoiceInput {
   }
 }
 
-/** Float32 -1..1 -> PCM 16 bit little-endian, il formato atteso dal backend. */
+/** Float32 -1..1 -> 16-bit little-endian PCM, the format the backend expects. */
 export function floatToPcm16(samples) {
   const out = new Int16Array(samples.length);
   for (let i = 0; i < samples.length; i += 1) {
@@ -363,7 +367,7 @@ export function floatToPcm16(samples) {
   return out.buffer;
 }
 
-/** ArrayBuffer -> base64, a blocchi per non sfondare lo stack con audio lungo. */
+/** ArrayBuffer -> base64, in chunks so long audio doesn't blow the stack. */
 export function toBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -375,21 +379,20 @@ export function toBase64(buffer) {
 }
 
 /**
- * Nel modo `wake`, la frase vale solo se comincia con la parola di attivazione.
- * Restituisce il testo ripulito dalla parola, oppure null se non c'e'.
+ * In `wake` mode the sentence counts only if it starts with the wake word.
+ * Returns the text without the word, or null if it isn't there.
  */
 export function matchesWakeWord(text, wakeWord) {
   if (!wakeWord) return text;
 
-  // Confrontiamo parola per parola invece che carattere per carattere: la
-  // normalizzazione cambia la lunghezza del testo (toglie punteggiatura e
-  // accenti), quindi qualunque conto sugli indici del testo originale
-  // sarebbe sbagliato.
+  // We compare word by word instead of character by character: normalization
+  // changes the text's length (it removes punctuation and accents), so any
+  // index arithmetic on the original text would be wrong.
   const normalise = (value) =>
     value
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '') // via gli accenti: "però" -> "pero"
+      .replace(/[̀-ͯ]/g, '') // strip the accents: "però" -> "pero"
       .replace(/[^\p{L}\p{N}]/gu, '');
 
   const needle = wakeWord.trim().split(/\s+/).map(normalise).filter(Boolean);
@@ -398,8 +401,8 @@ export function matchesWakeWord(text, wakeWord) {
   const words = text.trim().split(/\s+/);
   if (words.length < needle.length) return null;
 
-  // Deve stare all'inizio, cosi' non si attiva quando la parola viene
-  // nominata a meta' di un discorso rivolto a qualcun altro.
+  // It must be at the start, so it doesn't trigger when the word is mentioned
+  // in the middle of a conversation with someone else.
   const head = words.slice(0, needle.length).map(normalise);
   if (head.some((word, i) => word !== needle[i])) return null;
 

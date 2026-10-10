@@ -1,11 +1,12 @@
-"""Dichiarazione di tutti i provider disponibili.
+"""Declaration of every available provider.
 
-Questo modulo non importa ``config``: e' ``config`` a importare lui, per
-leggere dall'ambiente ogni campo qui dichiarato. Aggiungere un motore nuovo
-significa aggiungere uno ``spec`` qui e la sua implementazione nel package
-corrispondente — il pannello si adegua da solo.
+This module doesn't import ``config``: it's ``config`` that imports it, to
+read from the environment every field declared here. Adding a new engine
+means adding a ``spec`` here and its implementation in the matching package
+— the panel adapts by itself.
 
-Ordine di registrazione = ordine nel pannello, dentro ogni categoria.
+Registration order = order in the panel, within each category. The texts are
+English; the frontend's catalog has their Italian (frontend/src/i18n/it.js).
 """
 
 from __future__ import annotations
@@ -19,17 +20,17 @@ from .providers import (
 )
 
 # ---------------------------------------------------------------------------
-# Campi ricorrenti
+# Recurring fields
 # ---------------------------------------------------------------------------
 
 
 def _temperature() -> ProviderField:
     return ProviderField(
         env="TEMPERATURE",
-        label="Temperatura",
+        label="Temperature",
         type="number",
         default=0.7,
-        help="Quanto è creativa la risposta: 0 = sempre uguale, 1 = imprevedibile.",
+        help="How creative the reply is: 0 = always the same, 1 = unpredictable.",
         advanced=True,
     )
 
@@ -40,17 +41,17 @@ def _api_key(env: str, help_text: str = "", label: str = "API key") -> ProviderF
         label=label,
         type="password",
         secret=True,
-        help=help_text or "Resta sul tuo computer: il pannello non la rilegge mai.",
+        help=help_text or "It stays on your computer: the panel never reads it back.",
     )
 
 
 def _timeout(env: str, default: float = 120.0) -> ProviderField:
     return ProviderField(
         env=env,
-        label="Tempo massimo (s)",
+        label="Maximum time (s)",
         type="number",
         default=default,
-        help="Oltre questo tempo la risposta viene data per persa.",
+        help="Beyond this time the reply is given up as lost.",
         advanced=True,
     )
 
@@ -58,18 +59,18 @@ def _timeout(env: str, default: float = 120.0) -> ProviderField:
 def _workdir(env: str) -> ProviderField:
     return ProviderField(
         env=env,
-        label="Cartella di lavoro",
-        placeholder="vuoto = la tua cartella utente",
-        help="Dove l'agente può leggere file. Mettilo su un progetto se vuoi parlargliene.",
+        label="Working folder",
+        placeholder="empty = your user folder",
+        help="Where the agent can read files. Point it at a project if you want to talk to it about one.",
     )
 
 
 # ---------------------------------------------------------------------------
-# LLM — agenti
+# LLM — agents
 #
-# Un agente non e' solo un modello: ha memoria, personalita' e strumenti
-# propri. Il companion gli passa soltanto l'ultimo messaggio (piu' i vincoli
-# del parlato) e legge ad alta voce la sua risposta.
+# An agent isn't just a model: it has memory, personality and tools of its
+# own. The companion passes it only the last message (plus the speech
+# constraints) and reads its reply aloud.
 # ---------------------------------------------------------------------------
 
 LLM_REGISTRY.register(
@@ -79,11 +80,11 @@ LLM_REGISTRY.register(
         kind="llm",
         category="agent",
         pricing="free",
-        tagline="Il tuo agente OpenClaw, con la sua memoria e i suoi tool.",
+        tagline="Your OpenClaw agent, with its memory and its tools.",
         description=(
-            "Il companion diventa la voce e la faccia del tuo agente OpenClaw: "
-            "stessa personalità, stessa memoria, stessi strumenti. Parla col "
-            "Gateway sul tuo computer."
+            "The companion becomes the voice and face of your OpenClaw agent: "
+            "the same personality, the same memory, the same tools. It talks to the "
+            "Gateway on your computer."
         ),
         local=True,
         fields=(
@@ -95,13 +96,13 @@ LLM_REGISTRY.register(
             ),
             ProviderField(
                 env="OPENCLAW_AGENT_ID",
-                label="Agente",
+                label="Agent",
                 default="main",
-                help="Meglio un agente dedicato con pochi tool: il prompt è molto più corto.",
+                help="Better a dedicated agent with few tools: the prompt is much shorter.",
             ),
-            _api_key("OPENCLAW_TOKEN", "Vuoto = letto da ~/.openclaw/openclaw.json.", "Token"),
+            _api_key("OPENCLAW_TOKEN", "Empty = read from ~/.openclaw/openclaw.json.", "Token"),
         ),
-        requires=("Gateway OpenClaw acceso",),
+        requires=("OpenClaw Gateway running",),
         docs="https://docs.openclaw.ai",
     )
 )
@@ -114,57 +115,57 @@ LLM_REGISTRY.register(
         category="agent",
         pricing="subscription",
         recommended=True,
-        tagline="L'agente di Anthropic, col tuo abbonamento Claude.",
+        tagline="Anthropic's agent, with your Claude subscription.",
         description=(
-            "Usa il programma `claude` già installato e autenticato: niente chiavi "
-            "da copiare, consuma il tuo piano Claude. Ricorda la conversazione tra "
-            "un messaggio e l'altro e può cercare sul web."
+            "Uses the `claude` program already installed and signed in: no keys "
+            "to copy, it uses your Claude plan. It remembers the conversation from "
+            "one message to the next and can search the web."
         ),
         local=False,
         aliases=("claude-code", "claudecode"),
         fields=(
             ProviderField(
                 env="CLAUDE_CODE_MODEL",
-                label="Modello",
+                label="Model",
                 type="select",
                 default="",
                 options=(
-                    {"value": "", "label": "Quello predefinito del tuo account"},
-                    {"value": "opus", "label": "Opus — il più capace"},
-                    {"value": "sonnet", "label": "Sonnet — equilibrato"},
-                    {"value": "haiku", "label": "Haiku — il più rapido a rispondere"},
+                    {"value": "", "label": "Your account's default"},
+                    {"value": "opus", "label": "Opus — the most capable"},
+                    {"value": "sonnet", "label": "Sonnet — balanced"},
+                    {"value": "haiku", "label": "Haiku — the quickest to answer"},
                 ),
             ),
             _workdir("CLAUDE_CODE_CWD"),
             ProviderField(
                 env="CLAUDE_CODE_TOOLS",
-                label="Strumenti permessi",
+                label="Allowed tools",
                 default="WebSearch,WebFetch,Read,Glob,Grep",
-                help="Separati da virgola. Quelli non elencati vengono rifiutati: non può modificare file.",
+                help="Comma separated. Those not listed are refused: it can't modify files.",
                 advanced=True,
             ),
             ProviderField(
                 env="CLAUDE_CODE_PERMISSION",
-                label="Permessi",
+                label="Permissions",
                 type="select",
                 default="default",
                 options=(
-                    {"value": "default", "label": "Prudente — rifiuta ciò che non è permesso"},
-                    {"value": "acceptEdits", "label": "Puo' modificare file nella cartella"},
-                    {"value": "plan", "label": "Solo pianificazione"},
+                    {"value": "default", "label": "Careful — refuses what isn't allowed"},
+                    {"value": "acceptEdits", "label": "Can modify files in the folder"},
+                    {"value": "plan", "label": "Planning only"},
                 ),
                 advanced=True,
             ),
             ProviderField(
                 env="CLAUDE_CODE_COMMAND",
-                label="Programma",
+                label="Program",
                 default="claude",
-                help="Nome o percorso completo dell'eseguibile.",
+                help="Name or full path of the executable.",
                 advanced=True,
             ),
             _timeout("CLAUDE_CODE_TIMEOUT", 300.0),
         ),
-        requires=("Claude Code installato e autenticato",),
+        requires=("Claude Code installed and signed in",),
         docs="https://docs.claude.com/claude-code",
     )
 )
@@ -176,41 +177,41 @@ LLM_REGISTRY.register(
         kind="llm",
         category="agent",
         pricing="subscription",
-        tagline="L'agente di OpenAI, col tuo account ChatGPT.",
+        tagline="OpenAI's agent, with your ChatGPT account.",
         description=(
-            "Usa `codex exec`, lo stesso motore dell'estensione di VS Code: se "
-            "l'estensione è installata il programma viene trovato da solo. "
-            "Ricorda la conversazione e di default lavora in sola lettura."
+            "Uses `codex exec`, the same engine as the VS Code extension: if the "
+            "extension is installed the program is found by itself. "
+            "It remembers the conversation and by default works read-only."
         ),
         local=False,
         fields=(
             ProviderField(
                 env="CODEX_MODEL",
-                label="Modello",
-                placeholder="vuoto = quello del tuo config.toml",
+                label="Model",
+                placeholder="empty = the one in your config.toml",
             ),
             _workdir("CODEX_CWD"),
             ProviderField(
                 env="CODEX_SANDBOX",
-                label="Permessi",
+                label="Permissions",
                 type="select",
                 default="read-only",
                 options=(
-                    {"value": "read-only", "label": "Sola lettura"},
-                    {"value": "workspace-write", "label": "Puo' scrivere nella cartella"},
+                    {"value": "read-only", "label": "Read-only"},
+                    {"value": "workspace-write", "label": "Can write in the folder"},
                 ),
                 advanced=True,
             ),
             ProviderField(
                 env="CODEX_COMMAND",
-                label="Programma",
-                placeholder="vuoto = cercato da solo",
-                help="Percorso di codex.exe, se non viene trovato automaticamente.",
+                label="Program",
+                placeholder="empty = found by itself",
+                help="Path of codex.exe, if it isn't found automatically.",
                 advanced=True,
             ),
             _timeout("CODEX_TIMEOUT", 300.0),
         ),
-        requires=("Codex CLI o l'estensione Codex di VS Code, con login fatto",),
+        requires=("Codex CLI or the Codex VS Code extension, signed in",),
         docs="https://developers.openai.com/codex",
     )
 )
@@ -222,66 +223,66 @@ LLM_REGISTRY.register(
         kind="llm",
         category="agent",
         pricing="freemium",
-        tagline="L'agente di Google, con Gemini e Claude inclusi nel tuo account.",
+        tagline="Google's agent, with Gemini and Claude included in your account.",
         description=(
-            "Usa `agy`, la riga di comando di Google Antigravity: l'app o "
-            "l'estensione di VS Code la mettono in ~/.gemini/bin e viene trovata "
-            "da sola. Ricorda la conversazione. Senza la sua finestra non può "
-            "chiederti permessi: i tool che li richiedono vengono rifiutati, a "
-            "meno di cambiare i Permessi."
+            "Uses `agy`, Google Antigravity's command line: the app or the "
+            "VS Code extension put it in ~/.gemini/bin and it's found by "
+            "itself. It remembers the conversation. Without its window it can't "
+            "ask you for permissions: the tools that need them are refused, unless "
+            "you change the Permissions."
         ),
         local=False,
         aliases=("agy", "google_antigravity"),
         fields=(
             ProviderField(
                 env="ANTIGRAVITY_MODEL",
-                label="Modello",
-                placeholder="vuoto = quello predefinito",
-                help="L'elenco con `agy models`: per esempio gemini-3.1-pro-high o claude-sonnet-4-6.",
+                label="Model",
+                placeholder="empty = the default",
+                help="The list with `agy models`: for example gemini-3.1-pro-high or claude-sonnet-4-6.",
             ),
             _workdir("ANTIGRAVITY_CWD"),
             ProviderField(
                 env="ANTIGRAVITY_PERMISSION",
-                label="Permessi",
+                label="Permissions",
                 type="select",
                 default="default",
                 options=(
-                    {"value": "default", "label": "Prudente — rifiuta ciò che chiederebbe conferma"},
-                    {"value": "plan", "label": "Solo pianificazione"},
-                    {"value": "accept-edits", "label": "Puo' modificare file nella cartella"},
-                    {"value": "skip", "label": "Approva tutto da solo (anche i comandi) — rischioso"},
+                    {"value": "default", "label": "Careful — refuses what would ask for confirmation"},
+                    {"value": "plan", "label": "Planning only"},
+                    {"value": "accept-edits", "label": "Can modify files in the folder"},
+                    {"value": "skip", "label": "Approves everything by itself (commands too) — risky"},
                 ),
                 help=(
-                    "Con «Approva tutto» esegue qualunque comando senza chiedere: chi riesce a "
-                    "parlarle (o un testo che le fai leggere) puo' agire sul tuo PC. Sceglilo solo se sai cosa fai."
+                    "With \"Approve everything\" it runs any command without asking: whoever manages to "
+                    "talk to her (or a text you have her read) can act on your PC. Choose it only if you know what you're doing."
                 ),
                 advanced=True,
             ),
             ProviderField(
                 env="ANTIGRAVITY_COMMAND",
-                label="Programma",
-                placeholder="vuoto = cercato da solo",
-                help="Percorso di agy.exe, se non viene trovato automaticamente.",
+                label="Program",
+                placeholder="empty = found by itself",
+                help="Path of agy.exe, if it isn't found automatically.",
                 advanced=True,
             ),
             _timeout("ANTIGRAVITY_TIMEOUT", 300.0),
         ),
-        requires=("Antigravity (app o estensione di VS Code) con login fatto",),
+        requires=("Antigravity (app or VS Code extension) signed in",),
         docs="https://antigravity.google",
     )
 )
 
 
-#: Agenti da riga di comando senza un client dedicato: id -> comando predefinito.
-#: Il factory li lancia con ``CommandAgentClient``, il riconoscimento cerca il programma.
+#: Command-line agents without a dedicated client: id -> default command.
+#: The factory runs them with ``CommandAgentClient``, the detection looks for the program.
 CLI_AGENT_PRESETS: dict[str, str] = {}
 
 
 def _cli_agent(provider_id: str, label: str, command: str, tagline: str, pricing: str, install: str, docs: str) -> None:
-    """Un agente che ha una modalita' non interattiva: basta sapere come lanciarlo.
+    """An agent with a non-interactive mode: knowing how to run it is enough.
 
-    Il comando e' un campo modificabile: se una versione nuova cambia opzioni,
-    lo si aggiusta dal pannello senza aspettare un aggiornamento.
+    The command is an editable field: if a new version changes options, it's
+    fixed from the panel without waiting for an update.
     """
     prefix = provider_id.upper()
     CLI_AGENT_PRESETS[provider_id] = command
@@ -294,17 +295,17 @@ def _cli_agent(provider_id: str, label: str, command: str, tagline: str, pricing
             pricing=pricing,  # type: ignore[arg-type]
             tagline=tagline,
             description=(
-                f"{tagline} Il companion lancia `{command}` a ogni messaggio e legge "
-                "quello che stampa. A ogni lancio l'agente riparte da zero: gli si "
-                "rimandano gli ultimi scambi."
+                f"{tagline} The companion runs `{command}` at every message and reads "
+                "what it prints. At every run the agent starts from scratch: the last "
+                "exchanges are sent to it again."
             ),
             local=False,
             fields=(
                 ProviderField(
                     env=f"{prefix}_COMMAND",
-                    label="Comando",
+                    label="Command",
                     default=command,
-                    help="{prompt} = il tuo messaggio; senza, arriva sullo standard input. Cambialo se la tua versione usa altre opzioni.",
+                    help="{prompt} = your message; without it, it arrives on standard input. Change it if your version uses other options.",
                 ),
                 _workdir(f"{prefix}_CWD"),
                 _timeout(f"{prefix}_TIMEOUT", 300.0),
@@ -319,108 +320,108 @@ _cli_agent(
     "cline",
     "Cline",
     "cline {prompt}",
-    "L'agente open source di VS Code, dal terminale, con i modelli che hai scelto in Cline.",
+    "VS Code's open-source agent, from the terminal, with the models you chose in Cline.",
     "freemium",
-    "npm install -g cline, poi `cline auth`. Con -y approva tutto da solo.",
+    "npm install -g cline, then `cline auth`. With -y it approves everything by itself.",
     "https://docs.cline.bot/cline-cli/overview",
 )
 _cli_agent(
     "gemini_cli",
     "Gemini CLI",
     "gemini -p {prompt}",
-    "L'agente open source di Google nel terminale, gratis con un account Google.",
+    "Google's open-source agent in the terminal, free with a Google account.",
     "freemium",
-    "npm install -g @google/gemini-cli, poi `gemini` una volta per il login",
+    "npm install -g @google/gemini-cli, then `gemini` once to sign in",
     "https://github.com/google-gemini/gemini-cli",
 )
 _cli_agent(
     "cursor_agent",
     "Cursor CLI",
     "cursor-agent -p {prompt} --output-format text",
-    "L'agente di Cursor fuori dall'editor, col tuo abbonamento Cursor.",
+    "Cursor's agent outside the editor, with your Cursor subscription.",
     "subscription",
-    "Cursor CLI installata, poi `cursor-agent login`",
+    "Cursor CLI installed, then `cursor-agent login`",
     "https://cursor.com/cli",
 )
 _cli_agent(
     "copilot",
     "GitHub Copilot CLI",
     "copilot -p {prompt}",
-    "L'agente di GitHub, con il tuo piano Copilot (anche quello gratuito).",
+    "GitHub's agent, with your Copilot plan (the free one too).",
     "freemium",
-    "npm install -g @github/copilot, poi `copilot` una volta per il login",
+    "npm install -g @github/copilot, then `copilot` once to sign in",
     "https://docs.github.com/copilot/how-tos/use-copilot-agents/use-copilot-cli",
 )
 _cli_agent(
     "opencode",
     "OpenCode",
     "opencode run {prompt}",
-    "Agente open source che funziona con quasi ogni modello, anche gratuiti.",
+    "An open-source agent that works with almost any model, free ones too.",
     "free",
-    "npm install -g opencode-ai, poi `opencode auth login`",
+    "npm install -g opencode-ai, then `opencode auth login`",
     "https://opencode.ai/docs/cli",
 )
 _cli_agent(
     "qwen_code",
     "Qwen Code",
     "qwen -p {prompt}",
-    "L'agente di Alibaba per i modelli Qwen, con una quota gratuita.",
+    "Alibaba's agent for the Qwen models, with a free quota.",
     "freemium",
-    "npm install -g @qwen-code/qwen-code, poi `qwen` una volta per il login",
+    "npm install -g @qwen-code/qwen-code, then `qwen` once to sign in",
     "https://github.com/QwenLM/qwen-code",
 )
 _cli_agent(
     "amp",
     "Amp",
     "amp -x {prompt}",
-    "L'agente di Sourcegraph, con un piano gratuito.",
+    "Sourcegraph's agent, with a free plan.",
     "freemium",
-    "npm install -g @sourcegraph/amp, poi `amp login`",
+    "npm install -g @sourcegraph/amp, then `amp login`",
     "https://ampcode.com/manual",
 )
 _cli_agent(
     "goose",
     "Goose",
     "goose run -t {prompt}",
-    "L'agente open source di Block, con il modello che preferisci.",
+    "Block's open-source agent, with the model you prefer.",
     "free",
-    "Goose CLI installato e configurato con `goose configure`",
+    "Goose CLI installed and configured with `goose configure`",
     "https://block.github.io/goose",
 )
 _cli_agent(
     "crush",
     "Crush",
     "crush run {prompt}",
-    "L'agente da terminale di Charm, con il modello che preferisci.",
+    "Charm's terminal agent, with the model you prefer.",
     "free",
-    "Crush installato e con un modello configurato",
+    "Crush installed and with a model configured",
     "https://github.com/charmbracelet/crush",
 )
 _cli_agent(
     "droid",
     "Factory Droid",
     "droid exec {prompt}",
-    "L'agente di Factory; in modalità exec di default non modifica nulla.",
+    "Factory's agent; in exec mode by default it modifies nothing.",
     "freemium",
-    "Droid CLI installato e con login fatto",
+    "Droid CLI installed and signed in",
     "https://docs.factory.ai/cli/droid-exec/overview",
 )
 _cli_agent(
     "continue_cli",
     "Continue CLI",
     "cn -p {prompt}",
-    "L'agente di Continue fuori dall'editor, con i tuoi modelli.",
+    "Continue's agent outside the editor, with your models.",
     "free",
-    "npm install -g @continuedev/cli, poi `cn login`",
+    "npm install -g @continuedev/cli, then `cn login`",
     "https://docs.continue.dev/cli/overview",
 )
 _cli_agent(
     "kiro",
     "Kiro CLI",
     "kiro-cli chat --no-interactive {prompt}",
-    "L'agente di AWS, con il tuo account Kiro.",
+    "AWS's agent, with your Kiro account.",
     "freemium",
-    "Kiro CLI installato, poi `kiro-cli login`",
+    "Kiro CLI installed, then `kiro-cli login`",
     "https://kiro.dev/docs/cli",
 )
 
@@ -431,26 +432,26 @@ LLM_REGISTRY.register(
         kind="llm",
         category="agent",
         pricing="free",
-        tagline="L'agente open source di Nous Research, via il suo API server.",
+        tagline="Nous Research's open-source agent, through its API server.",
         description=(
-            "Hermes Agent espone un endpoint compatibile OpenAI quando attivi il "
-            "suo API server (API_SERVER_ENABLED=true nel suo .env). Il companion "
-            "ci parla come a un modello qualsiasi."
+            "Hermes Agent exposes an OpenAI-compatible endpoint when you turn on "
+            "its API server (API_SERVER_ENABLED=true in its .env). The companion "
+            "talks to it like to any model."
         ),
         local=True,
         aliases=("hermes-agent", "hermes_agent"),
         fields=(
             ProviderField(
                 env="HERMES_BASE_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="http://127.0.0.1:8642/v1",
             ),
-            ProviderField(env="HERMES_MODEL", label="Modello", default="hermes-agent"),
-            _api_key("HERMES_API_KEY", "Serve solo se hai impostato API_SERVER_KEY."),
+            ProviderField(env="HERMES_MODEL", label="Model", default="hermes-agent"),
+            _api_key("HERMES_API_KEY", "Needed only if you set API_SERVER_KEY."),
             _timeout("HERMES_TIMEOUT", 300.0),
         ),
-        requires=("hermes gateway con l'API server attivo",),
+        requires=("hermes gateway with the API server on",),
         docs="https://hermes-agent.nousresearch.com/docs",
     )
 )
@@ -458,49 +459,49 @@ LLM_REGISTRY.register(
 LLM_REGISTRY.register(
     ProviderSpec(
         id="command",
-        label="Altro agente (riga di comando)",
+        label="Another agent (command line)",
         kind="llm",
         category="agent",
         pricing="free",
-        tagline="Qualunque programma che risponde da terminale.",
+        tagline="Any program that answers from the terminal.",
         description=(
-            "Per gli agenti che non hanno un'integrazione dedicata: il companion "
-            "lancia il comando a ogni messaggio e legge quello che stampa. "
-            "{prompt} viene sostituito dal messaggio; senza {prompt} il messaggio "
-            "arriva sullo standard input."
+            "For agents without a dedicated integration: the companion "
+            "runs the command at every message and reads what it prints. "
+            "{prompt} is replaced by the message; without {prompt} the message "
+            "arrives on standard input."
         ),
         local=True,
         aliases=("cli", "custom"),
         fields=(
             ProviderField(
                 env="AGENT_COMMAND",
-                label="Comando",
+                label="Command",
                 placeholder="hermes chat -q {prompt}",
-                help="Esempi: `hermes chat -q {prompt}`, `aider --message {prompt}`, `ollama run llama3.2`.",
+                help="Examples: `hermes chat -q {prompt}`, `aider --message {prompt}`, `ollama run llama3.2`.",
             ),
             _workdir("AGENT_CWD"),
             _timeout("AGENT_TIMEOUT", 300.0),
         ),
-        requires=("Il programma installato e nel PATH",),
+        requires=("The program installed and in the PATH",),
     )
 )
 
 # ---------------------------------------------------------------------------
-# LLM — modelli locali
+# LLM — local models
 # ---------------------------------------------------------------------------
 
 LLM_REGISTRY.register(
     ProviderSpec(
         id="openai",
-        label="LM Studio / server OpenAI",
+        label="LM Studio / OpenAI server",
         kind="llm",
         category="local",
         pricing="free",
         recommended=True,
-        tagline="LM Studio, llama.cpp, vLLM: qualunque server locale stile OpenAI.",
+        tagline="LM Studio, llama.cpp, vLLM: any OpenAI-style local server.",
         description=(
-            "Qualunque server locale con API stile OpenAI: LM Studio, llama.cpp "
-            "server, vLLM, text-generation-webui. Anche un agente che espone "
+            "Any local server with an OpenAI-style API: LM Studio, llama.cpp "
+            "server, vLLM, text-generation-webui. Also an agent that exposes "
             "/v1/chat/completions."
         ),
         local=True,
@@ -508,23 +509,23 @@ LLM_REGISTRY.register(
         fields=(
             ProviderField(
                 env="OPENAI_BASE_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="http://127.0.0.1:1234/v1",
-                help="LM Studio usa la porta 1234 (tab Developer -> Start Server).",
+                help="LM Studio uses port 1234 (Developer tab -> Start Server).",
             ),
             ProviderField(
                 env="OPENAI_MODEL",
-                label="Modello",
+                label="Model",
                 default="auto",
                 source="models",
-                help="`auto` usa il primo modello già caricato dal server.",
+                help="`auto` uses the first model already loaded by the server.",
             ),
-            _api_key("OPENAI_API_KEY", "Quasi mai necessaria per un server locale."),
+            _api_key("OPENAI_API_KEY", "Almost never needed for a local server."),
             _timeout("OPENAI_TIMEOUT"),
             _temperature(),
         ),
-        requires=("Server locale in esecuzione",),
+        requires=("Local server running",),
         docs="https://lmstudio.ai",
     )
 )
@@ -536,38 +537,38 @@ LLM_REGISTRY.register(
         kind="llm",
         category="local",
         pricing="free",
-        tagline="Modelli locali serviti da Ollama.",
-        description="Modelli locali serviti da Ollama. Nessuna chiave, nessuna rete.",
+        tagline="Local models served by Ollama.",
+        description="Local models served by Ollama. No key, no network.",
         local=True,
         fields=(
             ProviderField(
                 env="OLLAMA_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="http://127.0.0.1:11434",
             ),
             ProviderField(
                 env="OLLAMA_MODEL",
-                label="Modello",
+                label="Model",
                 default="llama3.2",
                 placeholder="llama3.2",
                 source="models",
-                help="Un modello già scaricato con `ollama pull`.",
+                help="A model already downloaded with `ollama pull`.",
             ),
             _timeout("OLLAMA_TIMEOUT"),
             _temperature(),
         ),
-        requires=("Ollama in esecuzione",),
+        requires=("Ollama running",),
         docs="https://ollama.com",
     )
 )
 
 # ---------------------------------------------------------------------------
-# LLM — servizi cloud
+# LLM — cloud services
 #
-# Groq, OpenRouter, DeepSeek, Mistral e Together parlano tutti l'API OpenAI:
-# cambia solo l'indirizzo, quindi riusano lo stesso client. Anthropic e Gemini
-# hanno invece un formato di messaggi proprio e un client dedicato.
+# Groq, OpenRouter, DeepSeek, Mistral and Together all speak the OpenAI API:
+# only the address changes, so they reuse the same client. Anthropic and
+# Gemini instead have a message format of their own and a dedicated client.
 # ---------------------------------------------------------------------------
 
 LLM_REGISTRY.register(
@@ -577,41 +578,41 @@ LLM_REGISTRY.register(
         kind="llm",
         category="cloud",
         pricing="paid",
-        tagline="I modelli Claude con una chiave API, a consumo.",
-        description="I modelli Claude tramite l'API ufficiale Anthropic.",
+        tagline="Claude models with an API key, pay per use.",
+        description="Claude models through the official Anthropic API.",
         local=False,
         aliases=("claude",),
         fields=(
-            _api_key("ANTHROPIC_API_KEY", "Si crea su console.anthropic.com."),
+            _api_key("ANTHROPIC_API_KEY", "Created at console.anthropic.com."),
             ProviderField(
                 env="ANTHROPIC_MODEL",
-                label="Modello",
+                label="Model",
                 type="select",
                 default="claude-opus-5",
                 options=(
-                    {"value": "claude-opus-5", "label": "Opus 5 — il più capace"},
-                    {"value": "claude-sonnet-5", "label": "Sonnet 5 — equilibrato"},
-                    {"value": "claude-haiku-4-5", "label": "Haiku 4.5 — il più rapido ed economico"},
+                    {"value": "claude-opus-5", "label": "Opus 5 — the most capable"},
+                    {"value": "claude-sonnet-5", "label": "Sonnet 5 — balanced"},
+                    {"value": "claude-haiku-4-5", "label": "Haiku 4.5 — the quickest and cheapest"},
                 ),
             ),
             ProviderField(
                 env="ANTHROPIC_BASE_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="https://api.anthropic.com",
-                help="Da cambiare solo se passi da un proxy.",
+                help="Change it only if you go through a proxy.",
                 advanced=True,
             ),
             ProviderField(
                 env="ANTHROPIC_MAX_TOKENS",
-                label="Token massimi",
+                label="Maximum tokens",
                 type="number",
                 default=1024,
-                help="Il companion risponde in poche frasi: non serve alzarlo.",
+                help="The companion answers in a few sentences: no need to raise it.",
                 advanced=True,
             ),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
         docs="https://console.anthropic.com",
     )
 )
@@ -623,28 +624,28 @@ LLM_REGISTRY.register(
         kind="llm",
         category="cloud",
         pricing="freemium",
-        tagline="I modelli Gemini, con un piano gratuito.",
-        description="I modelli Gemini tramite l'API Google AI Studio.",
+        tagline="Gemini models, with a free plan.",
+        description="Gemini models through the Google AI Studio API.",
         local=False,
         aliases=("google",),
         fields=(
-            _api_key("GEMINI_API_KEY", "Si crea su aistudio.google.com/apikey."),
+            _api_key("GEMINI_API_KEY", "Created at aistudio.google.com/apikey."),
             ProviderField(
                 env="GEMINI_MODEL",
-                label="Modello",
+                label="Model",
                 default="gemini-2.5-flash",
                 placeholder="gemini-2.5-flash",
             ),
             ProviderField(
                 env="GEMINI_BASE_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="https://generativelanguage.googleapis.com/v1beta",
                 advanced=True,
             ),
             _temperature(),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
         docs="https://aistudio.google.com/apikey",
     )
 )
@@ -674,22 +675,22 @@ def _openai_like_cloud(
                 _api_key(f"{provider_id.upper()}_API_KEY", signup_help),
                 ProviderField(
                     env=f"{provider_id.upper()}_MODEL",
-                    label="Modello",
+                    label="Model",
                     default=model_default,
                     placeholder=model_default,
                     source="models",
                 ),
                 ProviderField(
                     env=f"{provider_id.upper()}_BASE_URL",
-                    label="Indirizzo",
+                    label="Address",
                     type="url",
                     default=base_url,
-                    help="Da cambiare solo se passi da un proxy.",
+                    help="Change it only if you go through a proxy.",
                     advanced=True,
                 ),
                 _temperature(),
             ),
-            requires=("Chiave API",),
+            requires=("API key",),
             docs=docs,
         )
     )
@@ -700,8 +701,8 @@ _openai_like_cloud(
     "Groq",
     "https://api.groq.com/openai/v1",
     "llama-3.3-70b-versatile",
-    "Inferenza velocissima, con un piano gratuito generoso.",
-    "Si crea su console.groq.com.",
+    "Very fast inference, with a generous free plan.",
+    "Created at console.groq.com.",
     "freemium",
     "https://console.groq.com/keys",
 )
@@ -711,8 +712,8 @@ _openai_like_cloud(
     "OpenRouter",
     "https://openrouter.ai/api/v1",
     "anthropic/claude-haiku-4.5",
-    "Un solo account per centinaia di modelli, alcuni gratuiti.",
-    "Si crea su openrouter.ai/keys.",
+    "One account for hundreds of models, some of them free.",
+    "Created at openrouter.ai/keys.",
     "freemium",
     "https://openrouter.ai/keys",
 )
@@ -722,8 +723,8 @@ _openai_like_cloud(
     "DeepSeek",
     "https://api.deepseek.com/v1",
     "deepseek-chat",
-    "Modelli economici con buone capacità di ragionamento.",
-    "Si crea su platform.deepseek.com.",
+    "Cheap models with good reasoning abilities.",
+    "Created at platform.deepseek.com.",
     "paid",
     "https://platform.deepseek.com",
 )
@@ -733,8 +734,8 @@ _openai_like_cloud(
     "Mistral",
     "https://api.mistral.ai/v1",
     "mistral-small-latest",
-    "Modelli europei, con un piano gratuito per sperimentare.",
-    "Si crea su console.mistral.ai.",
+    "European models, with a free plan to experiment.",
+    "Created at console.mistral.ai.",
     "freemium",
     "https://console.mistral.ai",
 )
@@ -744,28 +745,78 @@ _openai_like_cloud(
     "Together AI",
     "https://api.together.xyz/v1",
     "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "Catalogo ampio di modelli aperti in hosting.",
-    "Si crea su api.together.xyz.",
+    "A wide catalogue of hosted open models.",
+    "Created at api.together.xyz.",
     "paid",
     "https://api.together.xyz",
+)
+
+# gpt4free runs on the PC as an OpenAI server but passes the questions on to
+# public chat sites: for the panel it's a cloud service, free and keyless.
+# With `auto` it goes through g4f.dev's credit service, which answers 402
+# after a minute (tried with g4f 8.6.5): that's why the default is a precise
+# model. Gemini sends the text in pieces and without ChatGPT's source pills
+# (see openai_compatible.strip_source_pills).
+LLM_REGISTRY.register(
+    ProviderSpec(
+        id="g4f",
+        label="GPT4Free",
+        kind="llm",
+        category="cloud",
+        pricing="free",
+        tagline="Free models without a key, through public chat sites.",
+        description=(
+            "gpt4free (g4f) uses ChatGPT, Gemini and other chat sites as a browser "
+            "would, without an account. It isn't an official service: the working "
+            "models change often and the messages go through third-party sites, "
+            "so no personal data."
+        ),
+        local=False,
+        aliases=("gpt4free",),
+        fields=(
+            ProviderField(
+                env="G4F_BASE_URL",
+                label="Address",
+                type="url",
+                default="http://127.0.0.1:1337/v1",
+                help=(
+                    "Install with `pip install -U \"g4f[api]\"` and start `g4f api --bind 127.0.0.1:1337 --no-gui`: "
+                    "without --bind it stays open to the whole network."
+                ),
+            ),
+            ProviderField(
+                env="G4F_MODEL",
+                label="Model",
+                default="gemini-2.5-flash",
+                placeholder="gemini-2.5-flash",
+                source="models",
+                help="Tried: gemini-2.5-flash, gpt-4o-mini, gpt-4o. Avoid `auto`: it goes through paid credits.",
+            ),
+            _api_key("G4F_API_KEY", "Needed only if you start g4f with --g4f-api-key."),
+            _timeout("G4F_TIMEOUT", 60.0),
+            _temperature(),
+        ),
+        requires=("g4f api running",),
+        docs="https://github.com/xtekky/gpt4free",
+    )
 )
 
 LLM_REGISTRY.register(
     ProviderSpec(
         id="mock",
-        label="Risponditore offline",
+        label="Offline answerer",
         kind="llm",
         category="test",
         pricing="free",
-        tagline="Risposte predefinite, per provare la catena senza modelli.",
-        description="Risposte predefinite, senza alcun modello. Utile per provare voce e animazioni.",
+        tagline="Canned replies, to try the chain without models.",
+        description="Canned replies, without any model. Handy to try voice and animations.",
         local=True,
         aliases=("offline", "none"),
     )
 )
 
 # ---------------------------------------------------------------------------
-# TTS — voci locali
+# TTS — local voices
 # ---------------------------------------------------------------------------
 
 TTS_REGISTRY.register(
@@ -776,28 +827,28 @@ TTS_REGISTRY.register(
         category="local",
         pricing="free",
         recommended=True,
-        tagline="Voce neurale sul tuo computer, con il lip-sync più preciso.",
+        tagline="A neural voice on your computer, with the most precise lip-sync.",
         description=(
-            "Sintesi neurale in-process via ONNX: nessuna rete, buona qualità e "
-            "tempi esatti per ogni fonema, quindi la bocca è perfettamente a tempo."
+            "In-process neural synthesis via ONNX: no network, good quality and "
+            "exact timings for every phoneme, so the mouth is perfectly in time."
         ),
         local=True,
         has_voices=True,
         fields=(
             ProviderField(
                 env="KOKORO_MODEL",
-                label="Percorso del modello",
+                label="Model path",
                 default="models/kokoro-v1.0.onnx",
                 advanced=True,
             ),
             ProviderField(
                 env="KOKORO_VOICES",
-                label="Percorso delle voci",
+                label="Voices path",
                 default="models/voices-v1.0.bin",
                 advanced=True,
             ),
         ),
-        requires=("Pesi Kokoro scaricati (scripts/download_models.py)",),
+        requires=("Kokoro weights downloaded (scripts/download_models.py)",),
     )
 )
 
@@ -808,19 +859,19 @@ TTS_REGISTRY.register(
         kind="tts",
         category="local",
         pricing="free",
-        tagline="Un server Kokoro già avviato, per esempio su GPU.",
-        description="Un server Kokoro già avviato, utile se lo fai girare su GPU.",
+        tagline="A Kokoro server already running, for example on a GPU.",
+        description="A Kokoro server already running, handy if you run it on a GPU.",
         local=True,
         has_voices=True,
         fields=(
             ProviderField(
                 env="KOKORO_HTTP_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="http://127.0.0.1:8880",
             ),
         ),
-        requires=("Server Kokoro-FastAPI in esecuzione",),
+        requires=("Kokoro-FastAPI server running",),
     )
 )
 
@@ -831,19 +882,19 @@ TTS_REGISTRY.register(
         kind="tts",
         category="local",
         pricing="free",
-        tagline="Sintesi locale leggerissima, gira su qualunque CPU.",
-        description="Sintesi locale molto leggera: gira bene anche su CPU modeste.",
+        tagline="Very light local synthesis, it runs on any CPU.",
+        description="Very light local synthesis: it runs well even on modest CPUs.",
         local=True,
         has_voices=True,
         fields=(
             ProviderField(
                 env="PIPER_MODEL",
-                label="Percorso del modello .onnx",
+                label="Path of the .onnx model",
                 placeholder="models/piper/it_IT-riccardo-x_low.onnx",
-                help="Le voci si scaricano da huggingface.co/rhasspy/piper-voices.",
+                help="Voices are downloaded from huggingface.co/rhasspy/piper-voices.",
             ),
         ),
-        requires=("pip install piper-tts", "Una voce Piper scaricata"),
+        requires=("pip install piper-tts", "A Piper voice downloaded"),
         docs="https://huggingface.co/rhasspy/piper-voices",
     )
 )
@@ -855,52 +906,52 @@ TTS_REGISTRY.register(
         kind="tts",
         category="local",
         pricing="free",
-        tagline="Qualita' da record tra i modelli aperti, ma serve una GPU NVIDIA.",
+        tagline="Record quality among open models, but it needs an NVIDIA GPU.",
         description=(
-            "Il modello open source di Resemble AI: in ascolti alla cieca batte "
-            "spesso anche ElevenLabs. Clona una voce da pochi secondi di audio: "
-            "dalla scheda Personaggio, \"Clona una voce\". Multilingua, italiano "
-            "incluso. Su CPU è troppo lento per l'uso in tempo reale."
+            "Resemble AI's open-source model: in blind listening tests it often beats "
+            "even ElevenLabs. It clones a voice from a few seconds of audio: "
+            "from the Character tab, \"Clone a voice\". Multilingual, Italian "
+            "included. On the CPU it's too slow for real-time use."
         ),
         local=True,
         has_voices=True,
         fields=(
             ProviderField(
                 env="CHATTERBOX_DEVICE",
-                label="Dispositivo",
+                label="Device",
                 type="select",
                 default="auto",
                 options=(
                     {"value": "auto", "label": "automatico"},
-                    {"value": "cuda", "label": "GPU NVIDIA"},
-                    {"value": "cpu", "label": "CPU (molto lento)"},
+                    {"value": "cuda", "label": "NVIDIA GPU"},
+                    {"value": "cpu", "label": "CPU (very slow)"},
                 ),
             ),
             ProviderField(
                 env="CHATTERBOX_LANGUAGE",
-                label="Lingua della voce predefinita",
+                label="Language of the default voice",
                 default="it",
                 placeholder="it",
-                help="Le voci clonate hanno ognuna la sua lingua, scelta quando le cloni.",
+                help="Cloned voices each have their own language, chosen when you clone them.",
             ),
             ProviderField(
                 env="CHATTERBOX_EXAGGERATION",
-                label="Espressivita'",
+                label="Expressiveness",
                 type="number",
                 default=0.5,
-                help="0 = piatta, 1 = molto marcata.",
+                help="0 = flat, 1 = very marked.",
                 advanced=True,
             ),
             ProviderField(
                 env="CHATTERBOX_CFG_WEIGHT",
-                label="Aderenza al riferimento",
+                label="Adherence to the reference",
                 type="number",
                 default=0.5,
-                help="Piu' alta = piu' fedele alla voce di riferimento, ma piu' rigida.",
+                help="Higher = more faithful to the reference voice, but stiffer.",
                 advanced=True,
             ),
         ),
-        requires=("pip install chatterbox-tts", "GPU NVIDIA consigliata (~3GB di VRAM)"),
+        requires=("pip install chatterbox-tts", "NVIDIA GPU recommended (~3GB of VRAM)"),
         docs="https://github.com/resemble-ai/chatterbox",
     )
 )
@@ -908,14 +959,14 @@ TTS_REGISTRY.register(
 TTS_REGISTRY.register(
     ProviderSpec(
         id="system",
-        label="Voce di sistema",
+        label="System voice",
         kind="tts",
         category="local",
         pricing="free",
-        tagline="Le voci già installate in Windows.",
+        tagline="The voices already installed in Windows.",
         description=(
-            "Le voci già installate nel sistema operativo (SAPI su Windows, "
-            "NSSpeechSynthesizer su macOS, espeak su Linux). Sempre disponibile."
+            "The voices already installed in the operating system (SAPI on Windows, "
+            "NSSpeechSynthesizer on macOS, espeak on Linux). Always available."
         ),
         local=True,
         has_voices=True,
@@ -925,7 +976,7 @@ TTS_REGISTRY.register(
 )
 
 # ---------------------------------------------------------------------------
-# TTS — voci in rete
+# TTS — online voices
 # ---------------------------------------------------------------------------
 
 TTS_REGISTRY.register(
@@ -936,68 +987,68 @@ TTS_REGISTRY.register(
         category="cloud",
         pricing="freemium",
         recommended=True,
-        tagline="Le voci più naturali in circolazione. Piano gratuito, poi a consumo.",
+        tagline="The most natural voices around. Free plan, then pay per use.",
         description=(
-            "Qualità altissima e voci clonate. Il companion chiede anche i tempi "
-            "di ogni lettera, così il lip-sync resta preciso come con Kokoro. "
-            "La verifica mostra quanti caratteri ti restano nel mese."
+            "Very high quality and cloned voices. The companion also asks for the timings "
+            "of every letter, so the lip-sync stays as precise as with Kokoro. "
+            "The check shows how many characters you have left this month."
         ),
         local=False,
         has_voices=True,
         fields=(
-            _api_key("ELEVENLABS_API_KEY", "Si crea su elevenlabs.io (Profilo -> API Keys)."),
+            _api_key("ELEVENLABS_API_KEY", "Created at elevenlabs.io (Profile -> API Keys)."),
             ProviderField(
                 env="ELEVENLABS_VOICE",
-                label="Voce",
+                label="Voice",
                 default="Rachel",
                 source="voices",
-                help="Nome o ID di una voce del tuo account: premi Verifica per l'elenco.",
+                help="Name or ID of a voice in your account: press Check for the list.",
             ),
             ProviderField(
                 env="ELEVENLABS_MODEL",
-                label="Modello",
+                label="Model",
                 type="select",
                 default="eleven_flash_v2_5",
                 options=(
-                    {"value": "eleven_flash_v2_5", "label": "Flash v2.5 — rapidissimo, mezzo credito a carattere"},
-                    {"value": "eleven_turbo_v2_5", "label": "Turbo v2.5 — rapido, buona qualità"},
-                    {"value": "eleven_multilingual_v2", "label": "Multilingual v2 — la più espressiva"},
-                    {"value": "eleven_v3", "label": "v3 — emozioni e intonazione, più lento"},
+                    {"value": "eleven_flash_v2_5", "label": "Flash v2.5 — very fast, half a credit per character"},
+                    {"value": "eleven_turbo_v2_5", "label": "Turbo v2.5 — fast, good quality"},
+                    {"value": "eleven_multilingual_v2", "label": "Multilingual v2 — the most expressive"},
+                    {"value": "eleven_v3", "label": "v3 — emotions and intonation, slower"},
                 ),
             ),
             ProviderField(
                 env="ELEVENLABS_STABILITY",
-                label="Stabilità",
+                label="Stability",
                 type="number",
                 default=0.5,
-                help="0 = molto espressiva e variabile, 1 = sempre uguale.",
+                help="0 = very expressive and variable, 1 = always the same.",
                 advanced=True,
             ),
             ProviderField(
                 env="ELEVENLABS_SIMILARITY",
-                label="Somiglianza",
+                label="Similarity",
                 type="number",
                 default=0.75,
-                help="Quanto resta fedele alla voce originale.",
+                help="How faithful it stays to the original voice.",
                 advanced=True,
             ),
             ProviderField(
                 env="ELEVENLABS_STYLE",
-                label="Stile",
+                label="Style",
                 type="number",
                 default=0.0,
-                help="Esagera lo stile della voce (costa un po' di latenza).",
+                help="Exaggerates the voice's style (it costs a little latency).",
                 advanced=True,
             ),
             ProviderField(
                 env="ELEVENLABS_LANGUAGE",
-                label="Lingua",
-                placeholder="vuoto = automatica (es. it, en)",
-                help="Forza la lingua con i modelli Flash e Turbo.",
+                label="Language",
+                placeholder="empty = automatic (e.g. it, en)",
+                help="Forces the language with the Flash and Turbo models.",
                 advanced=True,
             ),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
         docs="https://elevenlabs.io/app/settings/api-keys",
     )
 )
@@ -1009,20 +1060,20 @@ TTS_REGISTRY.register(
         kind="tts",
         category="cloud",
         pricing="paid",
-        tagline="Le voci di OpenAI, a cui puoi dire con che tono parlare.",
+        tagline="OpenAI's voices, which you can tell what tone to speak in.",
         description=(
-            "gpt-4o-mini-tts accetta istruzioni sul tono (\"allegra, a bassa "
-            "voce\"). Funziona anche con qualunque server compatibile "
-            "/v1/audio/speech: basta cambiare indirizzo."
+            "gpt-4o-mini-tts accepts instructions on the tone (\"cheerful, in a low "
+            "voice\"). It also works with any compatible server "
+            "/v1/audio/speech: just change the address."
         ),
         local=False,
         has_voices=True,
         aliases=("openai-tts",),
         fields=(
-            _api_key("OPENAI_TTS_API_KEY", "Si crea su platform.openai.com/api-keys."),
+            _api_key("OPENAI_TTS_API_KEY", "Created at platform.openai.com/api-keys."),
             ProviderField(
                 env="OPENAI_TTS_VOICE",
-                label="Voce",
+                label="Voice",
                 type="select",
                 default="coral",
                 options=tuple(
@@ -1035,32 +1086,32 @@ TTS_REGISTRY.register(
             ),
             ProviderField(
                 env="OPENAI_TTS_MODEL",
-                label="Modello",
+                label="Model",
                 type="select",
                 default="gpt-4o-mini-tts",
                 options=(
-                    {"value": "gpt-4o-mini-tts", "label": "gpt-4o-mini-tts — segue le istruzioni sul tono"},
-                    {"value": "tts-1", "label": "tts-1 — rapido"},
-                    {"value": "tts-1-hd", "label": "tts-1-hd — qualità più alta"},
+                    {"value": "gpt-4o-mini-tts", "label": "gpt-4o-mini-tts — follows the tone instructions"},
+                    {"value": "tts-1", "label": "tts-1 — fast"},
+                    {"value": "tts-1-hd", "label": "tts-1-hd — higher quality"},
                 ),
             ),
             ProviderField(
                 env="OPENAI_TTS_INSTRUCTIONS",
-                label="Tono",
+                label="Tone",
                 type="textarea",
-                placeholder="Parla in modo caldo e allegro, come un'amica.",
-                help="Solo con gpt-4o-mini-tts.",
+                placeholder="Speak in a warm, cheerful way, like a friend.",
+                help="Only with gpt-4o-mini-tts.",
             ),
             ProviderField(
                 env="OPENAI_TTS_BASE_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="https://api.openai.com/v1",
-                help="Cambialo per un server compatibile (Kokoro-FastAPI, openedai-speech...).",
+                help="Change it for a compatible server (Kokoro-FastAPI, openedai-speech...).",
                 advanced=True,
             ),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
         docs="https://platform.openai.com/api-keys",
     )
 )
@@ -1072,31 +1123,31 @@ TTS_REGISTRY.register(
         kind="tts",
         category="cloud",
         pricing="freemium",
-        tagline="Centinaia di voci neurali Microsoft, 500 mila caratteri gratis al mese.",
+        tagline="Hundreds of Microsoft neural voices, 500 thousand free characters a month.",
         description=(
-            "Le voci neurali di Azure, con ottime voci italiane e multilingua. Il "
-            "piano gratuito (F0) basta per l'uso di tutti i giorni."
+            "Azure's neural voices, with excellent Italian and multilingual voices. The "
+            "free plan (F0) is enough for everyday use."
         ),
         local=False,
         has_voices=True,
         aliases=("azure_tts", "microsoft"),
         fields=(
-            _api_key("AZURE_SPEECH_KEY", "Portale Azure -> risorsa Speech -> Chiavi ed endpoint."),
+            _api_key("AZURE_SPEECH_KEY", "Azure portal -> Speech resource -> Keys and endpoint."),
             ProviderField(
                 env="AZURE_SPEECH_REGION",
-                label="Area",
+                label="Region",
                 default="westeurope",
                 placeholder="westeurope",
             ),
             ProviderField(
                 env="AZURE_SPEECH_VOICE",
-                label="Voce",
+                label="Voice",
                 default="it-IT-IsabellaMultilingualNeural",
                 source="voices",
-                help="Premi Verifica per l'elenco completo.",
+                help="Press Check for the full list.",
             ),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
         docs="https://portal.azure.com",
     )
 )
@@ -1108,25 +1159,25 @@ TTS_REGISTRY.register(
         kind="tts",
         category="cloud",
         pricing="freemium",
-        tagline="Le voci WaveNet, Neural2 e Chirp di Google, con quota gratuita mensile.",
+        tagline="Google's WaveNet, Neural2 and Chirp voices, with a free monthly quota.",
         description=(
-            "Le voci di Google Cloud Text-to-Speech. Serve una chiave API di un "
-            "progetto con l'API Text-to-Speech attiva."
+            "Google Cloud Text-to-Speech voices. It needs an API key of a "
+            "project with the Text-to-Speech API enabled."
         ),
         local=False,
         has_voices=True,
         aliases=("google_cloud_tts", "gcloud"),
         fields=(
-            _api_key("GOOGLE_TTS_API_KEY", "console.cloud.google.com -> API e servizi -> Credenziali."),
+            _api_key("GOOGLE_TTS_API_KEY", "console.cloud.google.com -> APIs & Services -> Credentials."),
             ProviderField(
                 env="GOOGLE_TTS_VOICE",
-                label="Voce",
+                label="Voice",
                 default="it-IT-Chirp3-HD-Aoede",
                 source="voices",
-                help="Premi Verifica per l'elenco completo.",
+                help="Press Check for the full list.",
             ),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
         docs="https://console.cloud.google.com/apis/library/texttospeech.googleapis.com",
     )
 )
@@ -1138,37 +1189,37 @@ TTS_REGISTRY.register(
         kind="tts",
         category="cloud",
         pricing="freemium",
-        tagline="Voci realistiche con latenza bassissima.",
-        description="Le voci Sonic di Cartesia: molto naturali e tra le più rapide a rispondere.",
+        tagline="Realistic voices with very low latency.",
+        description="Cartesia's Sonic voices: very natural and among the quickest to answer.",
         local=False,
         has_voices=True,
         fields=(
-            _api_key("CARTESIA_API_KEY", "Si crea su play.cartesia.ai/keys."),
+            _api_key("CARTESIA_API_KEY", "Created at play.cartesia.ai/keys."),
             ProviderField(
                 env="CARTESIA_VOICE",
-                label="Voce",
-                placeholder="ID della voce",
+                label="Voice",
+                placeholder="Voice ID",
                 source="voices",
-                help="Premi Verifica per scegliere dall'elenco.",
+                help="Press Check to choose from the list.",
             ),
             ProviderField(
                 env="CARTESIA_MODEL",
-                label="Modello",
+                label="Model",
                 type="select",
                 default="sonic-2",
                 options=(
-                    {"value": "sonic-2", "label": "Sonic 2 — qualità migliore"},
-                    {"value": "sonic-turbo", "label": "Sonic Turbo — latenza minima"},
+                    {"value": "sonic-2", "label": "Sonic 2 — best quality"},
+                    {"value": "sonic-turbo", "label": "Sonic Turbo — minimal latency"},
                 ),
             ),
             ProviderField(
                 env="CARTESIA_LANGUAGE",
-                label="Lingua",
+                label="Language",
                 default="it",
                 placeholder="it",
             ),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
         docs="https://play.cartesia.ai/keys",
     )
 )
@@ -1180,10 +1231,10 @@ TTS_REGISTRY.register(
         kind="tts",
         category="cloud",
         pricing="free",
-        tagline="Le voci neurali di Microsoft Edge, gratis e senza chiave.",
+        tagline="Microsoft Edge's neural voices, free and keyless.",
         description=(
-            "Le voci neurali di Microsoft Edge: molto naturali e senza chiave, "
-            "ma passano da internet e il servizio non è ufficiale."
+            "Microsoft Edge's neural voices: very natural and keyless, "
+            "but they go through the internet and the service isn't official."
         ),
         local=False,
         has_voices=True,
@@ -1191,7 +1242,7 @@ TTS_REGISTRY.register(
         fields=(
             ProviderField(
                 env="EDGE_VOICE",
-                label="Voce",
+                label="Voice",
                 default="it-IT-ElsaNeural",
                 placeholder="it-IT-ElsaNeural",
                 source="voices",
@@ -1204,14 +1255,14 @@ TTS_REGISTRY.register(
 TTS_REGISTRY.register(
     ProviderSpec(
         id="formant",
-        label="Sintetizzatore a formanti",
+        label="Formant synthesizer",
         kind="tts",
         category="test",
         pricing="free",
-        tagline="Solo vocali: serve a provare il lip-sync senza scaricare nulla.",
+        tagline="Vowels only: it's for trying the lip-sync without downloading anything.",
         description=(
-            "Genera le vocali A/E/I/O/U corrette. Non è una voce vera: serve a "
-            "verificare il lip-sync senza scaricare nulla."
+            "It generates correct A/E/I/O/U vowels. It isn't a real voice: it's for "
+            "checking the lip-sync without downloading anything."
         ),
         local=True,
         aliases=("test",),
@@ -1219,7 +1270,7 @@ TTS_REGISTRY.register(
 )
 
 # ---------------------------------------------------------------------------
-# STT — riconoscimento vocale
+# STT — speech recognition
 # ---------------------------------------------------------------------------
 
 STT_REGISTRY.register(
@@ -1230,43 +1281,43 @@ STT_REGISTRY.register(
         category="local",
         pricing="free",
         recommended=True,
-        tagline="Whisper sul tuo computer: preciso e privato.",
+        tagline="Whisper on your computer: precise and private.",
         description=(
-            "Whisper reimplementato con CTranslate2: molto più rapido "
-            "dell'originale a parita' di qualità. È la scelta consigliata."
+            "Whisper reimplemented with CTranslate2: much faster than the "
+            "original at the same quality. It's the recommended choice."
         ),
         local=True,
         aliases=("whisper",),
         fields=(
             ProviderField(
                 env="WHISPER_MODEL",
-                label="Modello",
+                label="Model",
                 type="select",
                 default="base",
                 options=(
-                    {"value": "tiny", "label": "tiny — rapidissimo, impreciso"},
-                    {"value": "base", "label": "base — buon compromesso"},
-                    {"value": "small", "label": "small — più accurato"},
-                    {"value": "medium", "label": "medium — lento su CPU"},
-                    {"value": "large-v3", "label": "large-v3 — richiede GPU"},
+                    {"value": "tiny", "label": "tiny — very fast, imprecise"},
+                    {"value": "base", "label": "base — a good compromise"},
+                    {"value": "small", "label": "small — more accurate"},
+                    {"value": "medium", "label": "medium — slow on the CPU"},
+                    {"value": "large-v3", "label": "large-v3 — needs a GPU"},
                 ),
             ),
             ProviderField(
                 env="WHISPER_DEVICE",
-                label="Dispositivo",
+                label="Device",
                 type="select",
                 default="auto",
                 options=(
                     {"value": "auto", "label": "automatico"},
                     {"value": "cpu", "label": "CPU"},
-                    {"value": "cuda", "label": "GPU NVIDIA"},
+                    {"value": "cuda", "label": "NVIDIA GPU"},
                 ),
             ),
             ProviderField(
                 env="WHISPER_LANGUAGE",
-                label="Lingua",
+                label="Language",
                 default="auto",
-                help="`auto` la riconosce da sola; indicarla è più preciso e rapido.",
+                help="`auto` detects it by itself; setting it is more precise and faster.",
             ),
         ),
         requires=("pip install faster-whisper",),
@@ -1280,18 +1331,18 @@ STT_REGISTRY.register(
         kind="stt",
         category="local",
         pricing="free",
-        tagline="Un server whisper.cpp già avviato.",
-        description="Un server whisper.cpp già avviato, utile se lo hai già in casa.",
+        tagline="A whisper.cpp server already running.",
+        description="A whisper.cpp server already running, handy if you already have one.",
         local=True,
         fields=(
             ProviderField(
                 env="WHISPER_CPP_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="http://127.0.0.1:8080",
             ),
         ),
-        requires=("Server whisper.cpp in esecuzione",),
+        requires=("whisper.cpp server running",),
     )
 )
 
@@ -1302,49 +1353,49 @@ STT_REGISTRY.register(
         kind="stt",
         category="cloud",
         pricing="paid",
-        tagline="Trascrizione in rete con un endpoint compatibile OpenAI.",
-        description="Trascrizione remota con un endpoint compatibile OpenAI (OpenAI, Groq...).",
+        tagline="Online transcription with an OpenAI-compatible endpoint.",
+        description="Remote transcription with an OpenAI-compatible endpoint (OpenAI, Groq...).",
         local=False,
         fields=(
             _api_key("STT_API_KEY"),
             ProviderField(
                 env="STT_BASE_URL",
-                label="Indirizzo",
+                label="Address",
                 type="url",
                 default="https://api.openai.com/v1",
             ),
-            ProviderField(env="STT_MODEL", label="Modello", default="whisper-1"),
+            ProviderField(env="STT_MODEL", label="Model", default="whisper-1"),
         ),
-        requires=("Chiave API",),
+        requires=("API key",),
     )
 )
 
 STT_REGISTRY.register(
     ProviderSpec(
         id="browser",
-        label="Riconoscimento del browser",
+        label="Browser recognition",
         kind="stt",
         category="cloud",
         pricing="free",
-        tagline="Quello integrato in Chrome/Electron: passa dai server di Google.",
+        tagline="The one built into Chrome/Electron: it goes through Google's servers.",
         description=(
-            "Usa il riconoscimento vocale integrato in Chrome/Electron: niente da "
-            "installare, ma passa dai server di Google."
+            "Uses the speech recognition built into Chrome/Electron: nothing to "
+            "install, but it goes through Google's servers."
         ),
         local=False,
-        requires=("Chrome o Electron",),
+        requires=("Chrome or Electron",),
     )
 )
 
 STT_REGISTRY.register(
     ProviderSpec(
         id="none",
-        label="Disattivato",
+        label="Off",
         kind="stt",
         category="test",
         pricing="free",
-        tagline="Si parla solo scrivendo.",
-        description="Nessun input vocale: si parla col companion solo scrivendo.",
+        tagline="You talk only by typing.",
+        description="No voice input: you talk to the companion only by typing.",
         local=True,
         aliases=("off", "disabled"),
     )

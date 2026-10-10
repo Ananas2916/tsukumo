@@ -1,13 +1,13 @@
-"""Sintesi locale con Chatterbox (Resemble AI), su GPU.
+"""Local synthesis with Chatterbox (Resemble AI), on the GPU.
 
-Qualita' nettamente superiore a Kokoro e cloning vocale da pochi secondi di
-audio di riferimento. Usa il modello multilingua, che copre anche l'italiano.
+Clearly better quality than Kokoro and voice cloning from a few seconds of
+reference audio. It uses the multilingual model, which covers Italian too.
 
-Le voci sono file audio in ``voices_dir``: quella predefinita e' inclusa nel
-modello, le altre si aggiungono clonandole dal pannello (o copiando un .wav
-nella cartella). ``voices.json`` accanto ai file ne ricorda nome e lingua: la
-stessa voce clonata puo' parlare qualunque lingua, ma la lingua scelta decide
-l'accento e in che lingua risponde il cervello.
+Voices are audio files in ``voices_dir``: the default one is included in the
+model, the others are added by cloning them from the panel (or copying a .wav
+into the folder). ``voices.json`` beside the files remembers their name and
+language: the same cloned voice can speak any language, but the chosen
+language decides the accent and the language the brain answers in.
 """
 
 from __future__ import annotations
@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "default"
 AUDIO_SUFFIXES = (".wav", ".mp3", ".flac", ".ogg")
 SAMPLE_RATE = 24000
-#: Il modello usa solo i primi 10 s del riferimento; ne teniamo un po' di piu'.
+#: The model uses only the first 10 s of the reference; we keep a little more.
 MAX_REFERENCE_S = 20.0
 MIN_REFERENCE_S = 3.0
 
 
 class ChatterboxTTS(TTSEngine):
-    """Wrapper thread-safe attorno a ``ChatterboxMultilingualTTS``."""
+    """Thread-safe wrapper around ``ChatterboxMultilingualTTS``."""
 
     name = "chatterbox"
     can_clone = True
@@ -51,8 +51,8 @@ class ChatterboxTTS(TTSEngine):
             from chatterbox.mtl_tts import SUPPORTED_LANGUAGES, ChatterboxMultilingualTTS
         except ImportError as exc:
             raise RuntimeError(
-                "Il motore Chatterbox richiede il pacchetto 'chatterbox-tts' "
-                "(che porta con se' PyTorch). Installalo con: "
+                "The Chatterbox engine needs the 'chatterbox-tts' package "
+                "(which brings PyTorch along). Install it with: "
                 "pip install chatterbox-tts"
             ) from exc
 
@@ -60,18 +60,18 @@ class ChatterboxTTS(TTSEngine):
         self.supported_languages = set(SUPPORTED_LANGUAGES)
         chosen_device = device if device in ("cuda", "cpu") else ("cuda" if torch.cuda.is_available() else "cpu")
         if chosen_device == "cpu":
-            logger.warning("Chatterbox su CPU: la sintesi sara' molto lenta")
+            logger.warning("Chatterbox on the CPU: synthesis will be very slow")
 
-        logger.info("Carico Chatterbox su %s", chosen_device)
+        logger.info("Loading Chatterbox on %s", chosen_device)
         self._model = ChatterboxMultilingualTTS.from_local(_checkpoint_dir(), device=chosen_device)
-        # In fp32 il modello sfiora i 3.3 GB e su Windows, con la VRAM condivisa
-        # con altri programmi, finisce in RAM di sistema: 5-7 volte piu' lento.
-        # In bf16 sta in 2.2 GB e genera piu' in fretta del tempo reale.
+        # In fp32 the model nears 3.3 GB and on Windows, with VRAM shared with other
+        # programs, it ends up in system RAM: 5-7 times slower. In bf16 it fits in
+        # 2.2 GB and generates faster than real time.
         self._dtype = torch.bfloat16 if chosen_device == "cuda" and torch.cuda.is_bf16_supported() else None
         if self._dtype is not None:
             self._model.t3.to(dtype=self._dtype)
 
-        self._lock = threading.Lock()  # un solo modello torch, niente generazioni in parallelo
+        self._lock = threading.Lock()  # a single torch model, no generations in parallel
         self.exaggeration = exaggeration
         self.cfg_weight = cfg_weight
         self._conds: dict[str, object] = {DEFAULT_VOICE: self._cast(self._model.conds)}
@@ -80,11 +80,11 @@ class ChatterboxTTS(TTSEngine):
         self.language = self._check_language(language)
         self.default_voice = DEFAULT_VOICE
 
-        # La prima generazione compila i kernel CUDA: meglio adesso che alla
-        # prima risposta.
-        self.synthesize("Ciao.")
+        # The first generation compiles the CUDA kernels: better now than at the
+        # first reply.
+        self.synthesize("Hello.")
 
-    # ------------------------------------------------------------------ voci
+    # ------------------------------------------------------------------ voices
     def voices(self) -> list[str]:
         return [DEFAULT_VOICE, *self._clones()]
 
@@ -93,10 +93,10 @@ class ChatterboxTTS(TTSEngine):
         catalog = [
             VoiceInfo(
                 id=DEFAULT_VOICE,
-                name="Predefinita",
+                name="Default",
                 language=self.language,
                 gender="female",
-                description="inclusa nel modello",
+                description="included in the model",
             )
         ]
         for voice_id in self._clones():
@@ -118,7 +118,7 @@ class ChatterboxTTS(TTSEngine):
         return self.language
 
     def add_voice(self, name: str, data: bytes, language: str) -> str:
-        """Clona una voce da un file audio e restituisce il suo id."""
+        """Clones a voice from an audio file and returns its id."""
         import io
 
         import librosa
@@ -128,10 +128,10 @@ class ChatterboxTTS(TTSEngine):
         try:
             audio, _ = librosa.load(io.BytesIO(data), sr=SAMPLE_RATE, mono=True, duration=MAX_REFERENCE_S)
         except Exception as exc:
-            raise ValueError("Non riesco a leggere il file: usa un .wav, .mp3, .flac o .ogg.") from exc
+            raise ValueError("I can't read the file: use a .wav, .mp3, .flac or .ogg.") from exc
         audio, _ = librosa.effects.trim(audio, top_db=35)
         if len(audio) < MIN_REFERENCE_S * SAMPLE_RATE:
-            raise ValueError(f"Serve almeno {MIN_REFERENCE_S:.0f} secondi di voce parlata.")
+            raise ValueError(f"At least {MIN_REFERENCE_S:.0f} seconds of spoken voice are needed.")
         peak = float(np.max(np.abs(audio))) or 1.0
         audio = audio / peak * 0.95
 
@@ -140,12 +140,12 @@ class ChatterboxTTS(TTSEngine):
         index = self._index()
         index[voice_id] = {"name": name.strip() or voice_id, "language": language}
         self._write_index(index)
-        logger.info("Voce clonata: %s (%s)", voice_id, language)
+        logger.info("Voice cloned: %s (%s)", voice_id, language)
         return voice_id
 
     def remove_voice(self, voice_id: str) -> None:
         if voice_id == DEFAULT_VOICE or voice_id not in self._clones():
-            raise ValueError(f"Voce sconosciuta: {voice_id}")
+            raise ValueError(f"Unknown voice: {voice_id}")
         path = self._reference(voice_id)
         if path is not None:
             path.unlink()
@@ -155,7 +155,7 @@ class ChatterboxTTS(TTSEngine):
         with self._lock:
             self._conds.pop(voice_id, None)
 
-    # ---------------------------------------------------------------- sintesi
+    # ---------------------------------------------------------------- synthesis
     def synthesize(
         self,
         text: str,
@@ -174,14 +174,14 @@ class ChatterboxTTS(TTSEngine):
         chosen = voice if voice in self.voices() else DEFAULT_VOICE
         language = self.language_of(chosen) or self.language
 
-        # Il modello non ha un parametro di velocita'.
+        # The model has no speed parameter.
         with self._lock:
             self._model.conds = self._conditionals(chosen)
             wav = self._model.generate(
                 clean,
                 language_id=language,
-                # Il valore gia' convertito in bf16: se differisse da quello
-                # delle condizioni, generate() le ricostruirebbe in fp32.
+                # The value already converted to bf16: if it differed from the conditions'
+                # one, generate() would rebuild them in fp32.
                 exaggeration=float(self._model.conds.t3.emotion_adv[0, 0, 0]),
                 cfg_weight=self.cfg_weight,
             )
@@ -200,9 +200,9 @@ class ChatterboxTTS(TTSEngine):
         if self._torch.cuda.is_available():
             self._torch.cuda.empty_cache()
 
-    # ------------------------------------------------------------- interni
+    # ------------------------------------------------------------- internals
     def _conditionals(self, voice_id: str):
-        """Le condizioni (impronta della voce) di ``voice_id``, calcolate una volta sola."""
+        """The conditions (voice fingerprint) of ``voice_id``, computed only once."""
         cached = self._conds.get(voice_id)
         if cached is not None:
             return cached
@@ -243,9 +243,9 @@ class ChatterboxTTS(TTSEngine):
         (self.voices_dir / "voices.json").write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def _unique_id(self, name: str) -> str:
-        base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "voce"
+        base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "voice"
         if base == DEFAULT_VOICE:
-            base = "voce"
+            base = "voice"
         voice_id, n = base, 2
         while self._reference(voice_id) is not None:
             voice_id, n = f"{base}-{n}", n + 1
@@ -254,12 +254,12 @@ class ChatterboxTTS(TTSEngine):
     def _check_language(self, language: str) -> str:
         code = (language or "it").strip().lower()[:2]
         if code not in self.supported_languages:
-            raise ValueError(f"Chatterbox non parla {language!r}. Lingue: {', '.join(sorted(self.supported_languages))}")
+            raise ValueError(f"Chatterbox doesn't speak {language!r}. Languages: {', '.join(sorted(self.supported_languages))}")
         return code
 
 
 def _checkpoint_dir() -> Path:
-    """I pesi dalla cache locale; scaricati da Hugging Face solo la prima volta."""
+    """The weights from the local cache; downloaded from Hugging Face only the first time."""
     from chatterbox.mtl_tts import REPO_ID
     from huggingface_hub import snapshot_download
 
@@ -267,5 +267,5 @@ def _checkpoint_dir() -> Path:
     try:
         return Path(snapshot_download(repo_id=REPO_ID, allow_patterns=files, local_files_only=True))
     except Exception:
-        logger.info("Scarico i pesi di Chatterbox (circa 3 GB, solo la prima volta)")
+        logger.info("Downloading Chatterbox's weights (about 3 GB, only the first time)")
         return Path(snapshot_download(repo_id=REPO_ID, allow_patterns=files))

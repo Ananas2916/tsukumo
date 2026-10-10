@@ -1,34 +1,34 @@
 /**
- * Risoluzione degli endpoint del backend.
+ * Where the backend endpoints are.
  *
- * Due scenari:
- *  1. build servita da FastAPI (http://127.0.0.1:8770)  -> stessa origine
- *  2. dev server Vite (http://localhost:5173)           -> proxy verso il backend
+ * Two cases:
+ *  1. build served by FastAPI (http://127.0.0.1:8770)  -> same origin
+ *  2. Vite dev server (http://localhost:5173)          -> proxied to the backend
  *
- * Prima c'era anche `?backend=http://host:porta`, salvato in localStorage:
- * bastava un link per far parlare la pagina con un server qualunque, per
- * sempre. Il backend ora accetta solo la propria origine (security.py),
- * quindi non servirebbe comunque.
+ * There used to be `?backend=http://host:port` too, saved in localStorage:
+ * one link was enough to make the page talk to any server, forever. The
+ * backend now accepts only its own origin (security.py), so it would not
+ * work anyway.
  */
 
 const DEFAULT_BACKEND = 'http://127.0.0.1:8770';
 
 try {
-  // Un override rimasto da una versione precedente non deve piu' contare.
+  // An override left over from an older version must not count any more.
   window.localStorage.removeItem('dc:backend');
 } catch {
-  /* localStorage puo' essere disabilitato: non e' un problema */
+  /* localStorage may be disabled: not a problem */
 }
 
-/** Origine HTTP del backend (senza slash finale). */
+/** HTTP origin of the backend (no trailing slash). */
 export const httpBase = (() => {
-  // Con i protocolli http/https usiamo la stessa origine: in dev ci pensa il
-  // proxy di Vite, in produzione il backend serve anche i file statici.
+  // With http/https we use the same origin: in dev Vite's proxy takes care of
+  // it, in production the backend also serves the static files.
   if (window.location.protocol.startsWith('http')) return '';
   return DEFAULT_BACKEND;
 })();
 
-/** URL completo del WebSocket. */
+/** Full URL of the WebSocket. */
 export const wsUrl = (() => {
   const base = httpBase || window.location.origin;
   const url = new URL('/ws', base);
@@ -36,13 +36,13 @@ export const wsUrl = (() => {
   return url.toString();
 })();
 
-/** Costruisce l'URL di una risorsa servita dal backend. */
+/** Builds the URL of a resource served by the backend. */
 export function apiUrl(path) {
   const clean = path.startsWith('/') ? path : `/${path}`;
   return `${httpBase}${clean}`;
 }
 
-/** Nome dei blendshape/espressioni per ciascun viseme (default VRoid/VRM). */
+/** Blendshape/expression name for each viseme (VRoid/VRM defaults). */
 export const DEFAULT_BLENDSHAPES = {
   a: { vrm0: 'fcl_mth_a', vrm1: 'aa' },
   i: { vrm0: 'fcl_mth_i', vrm1: 'ih' },
@@ -51,5 +51,5 @@ export const DEFAULT_BLENDSHAPES = {
   o: { vrm0: 'fcl_mth_o', vrm1: 'oh' },
 };
 
-/** I cinque visemi "aperti" nell'ordine usato dalla UI di debug. */
+/** The five "open" visemes, in the order used by the debug UI. */
 export const VISEME_KEYS = ['a', 'i', 'u', 'e', 'o'];

@@ -1,36 +1,37 @@
 /**
- * Il ritmo della musica che stai ascoltando.
+ * The rhythm of the music you're listening to.
  *
- * Spotify non espone piu' BPM ed "energy" alle app nuove, quindi il ritmo lo
- * ricaviamo dall'audio vero: Electron cattura l'audio di sistema (loopback,
- * quello che esce dalle casse) e qui lo analizziamo in tempo reale.
+ * Spotify no longer exposes BPM and "energy" to new apps, so we derive the
+ * rhythm from the real audio: Electron captures the system audio (loopback,
+ * what comes out of the speakers) and here we analyse it in real time.
  *
- *  - attacchi: flusso spettrale (quanto cresce l'energia banda per banda da un
- *    frame all'altro), con i bassi pesati di piu' perche' la cassa porta il tempo;
- *  - tempo: autocorrelazione degli ultimi secondi di attacchi (smussati),
- *    fra 70 e 180 BPM, sommata sui multipli del periodo (un battito vero si
- *    ripete anche a 2, 3, 4 periodi; un controtempo no), con una preferenza
- *    morbida per i tempi "da ballare" intorno ai 120;
- *  - fase: un oscillatore al tempo stimato, riallineato ogni mezzo secondo
- *    cercando lo sfasamento del "pettine" di battiti che raccoglie piu'
- *    attacchi negli ultimi secondi (vince la cassa, pesata di piu');
- *  - energia: volume relativo, normalizzato su un picco che si adatta, cosi'
- *    non dipende da quanto e' alto il volume del PC.
+ *  - onsets: spectral flux (how much the energy grows band by band from one
+ *    frame to the next), with the bass weighted more because the kick carries
+ *    the beat;
+ *  - tempo: autocorrelation of the last seconds of (smoothed) onsets,
+ *    between 70 and 180 BPM, summed over multiples of the period (a real beat
+ *    repeats at 2, 3, 4 periods too; an offbeat doesn't), with a soft
+ *    preference for "danceable" tempos around 120;
+ *  - phase: an oscillator at the estimated tempo, realigned every half second
+ *    by looking for the offset of the beat "comb" that collects the most
+ *    onsets in the last seconds (the kick wins, weighted more);
+ *  - energy: relative volume, normalized on an adaptive peak, so it doesn't
+ *    depend on how loud the PC's volume is.
  *
- * `BeatTracker` e' il calcolo puro (si prova anche in Node con segnali
- * sintetici), `MusicListener` ci aggiunge la cattura dell'audio.
+ * `BeatTracker` is the pure computation (also tested in Node with synthetic
+ * signals), `MusicListener` adds the audio capture.
  */
 
-const RATE = 50; // campioni al secondo dell'inviluppo degli attacchi
+const RATE = 50; // samples per second of the onset envelope
 const HISTORY = RATE * 8;
 const MIN_BPM = 70;
 const MAX_BPM = 180;
 const TEMPO_EVERY = 0.5; // s
-const SILENCE = 0.004; // RMS sotto cui e' silenzio (pausa, fine brano)
+const SILENCE = 0.004; // RMS below which it's silence (pause, end of track)
 
-/** Smussatura dell'inviluppo: un attacco vale anche un campione prima e dopo. */
+/** Envelope smoothing: an onset also counts one sample before and after. */
 const KERNEL = [0.25, 0.6, 1, 0.6, 0.25];
-/** Pesi dei multipli del periodo nel punteggio del tempo. */
+/** Weights of the period's multiples in the tempo score. */
 const HARMONICS = [1, 0.5, 0.33, 0.25];
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -65,22 +66,22 @@ export class BeatTracker {
   }
 
   /**
-   * Un frame di analisi.
-   * @param {number} dt secondi dall'ultimo frame
-   * @param {number} rms volume del frame
-   * @param {Float32Array} spectrumDb spettro in dB (come AnalyserNode.getFloatFrequencyData)
-   * @param {number} binHz larghezza di un bin in Hz
+   * One analysis frame.
+   * @param {number} dt seconds since the last frame
+   * @param {number} rms the frame's volume
+   * @param {Float32Array} spectrumDb spectrum in dB (like AnalyserNode.getFloatFrequencyData)
+   * @param {number} binHz width of a bin in Hz
    */
   process(dt, rms, spectrumDb, binHz) {
     if (dt <= 0) return;
 
-    // --- energia ----------------------------------------------------------
+    // --- energy -----------------------------------------------------------
     this.peak = Math.max(rms, this.peak * Math.exp(-dt / 6));
     const loud = rms > SILENCE;
     this.quietFor = loud ? 0 : this.quietFor + dt;
     this.energy = damp(this.energy, loud ? clamp(rms / Math.max(this.peak, 0.02), 0, 1) : 0, 6, dt);
 
-    // --- attacchi: flusso spettrale log-compresso, bassi pesati di piu' ---
+    // --- onsets: log-compressed spectral flux, bass weighted more ---------
     const bins = Math.min(spectrumDb.length, Math.ceil(4000 / binHz));
     const bass = Math.ceil(160 / binHz);
     if (!this.previous || this.previous.length !== bins) this.previous = new Float32Array(bins);
@@ -92,10 +93,10 @@ export class BeatTracker {
       if (rise > 0) flux += i <= bass ? rise * 3 : rise;
       this.previous[i] = magnitude;
     }
-    // Frame piu' lunghi accumulano piu' variazione: riportiamo a ~60 fps.
+    // Longer frames accumulate more change: we bring it back to ~60 fps.
     flux /= Math.max(0.5, dt * 60);
 
-    // Inviluppo a passo fisso: dentro un passo vale l'attacco piu' forte.
+    // Fixed-step envelope: within a step the strongest onset counts.
     this.pendingFlux = Math.max(this.pendingFlux, flux);
     this.accumulator += dt;
     const step = 1 / RATE;
@@ -105,7 +106,7 @@ export class BeatTracker {
       this.accumulator -= step;
     }
 
-    // --- fase: avanza al tempo stimato ------------------------------------
+    // --- phase: advances at the estimated tempo ---------------------------
     if (this.bpm > 0) this.phase += (dt * this.bpm) / 60;
 
     this.tempoTimer += dt;
@@ -125,7 +126,7 @@ export class BeatTracker {
     const n = this.filled;
     if (n < RATE * 4) return;
 
-    // Inviluppo in ordine cronologico, smussato e senza media.
+    // Envelope in chronological order, smoothed and without the mean.
     const raw = this.raw;
     for (let i = 0; i < n; i += 1) raw[i] = this.envelope[(this.head - n + i + HISTORY) % HISTORY];
     const x = this.work;
@@ -160,7 +161,7 @@ export class BeatTracker {
       }
       return count ? sum / count : 0;
     };
-    // Periodo con passo di mezzo campione: a 50 Hz un campione intero e' troppo grossolano.
+    // Period in half-sample steps: at 50 Hz a whole sample is too coarse.
     const minLag = (RATE * 60) / MAX_BPM;
     const maxLag = (RATE * 60) / MIN_BPM;
     let best = 0;
@@ -188,7 +189,7 @@ export class BeatTracker {
       this.bpm += (bpm - this.bpm) * 0.3;
       this.candidate = 0;
     } else if (this.candidate && Math.abs(bpm - this.candidate) / this.candidate < 0.05) {
-      // Cambio di tempo netto: lo accettiamo solo se si ripete, non per un'occhiata.
+      // A sharp tempo change: we accept it only if it repeats, not at a glance.
       this.candidateVotes += 1;
       if (this.candidateVotes >= 2) {
         this.bpm = bpm;
@@ -204,9 +205,9 @@ export class BeatTracker {
   }
 
   /**
-   * Fase: di quanti campioni fa e' caduto l'ultimo battito? Proviamo tutti gli
-   * sfasamenti di un "pettine" con i denti a distanza di un periodo e teniamo
-   * quello che raccoglie piu' attacchi negli ultimi secondi.
+   * Phase: how many samples ago did the last beat fall? We try every offset of
+   * a "comb" with teeth one period apart and keep the one that collects the
+   * most onsets in the last seconds.
    */
   _alignPhase(x, n) {
     const period = (RATE * 60) / this.bpm;
@@ -226,17 +227,17 @@ export class BeatTracker {
         bestOffset = offset;
       }
     }
-    // L'ultimo campione e' di `accumulator` secondi fa; l'attacco appare nello
-    // spettro circa mezzo frame dopo la cassa vera.
+    // The last sample is `accumulator` seconds old; the onset shows up in the
+    // spectrum about half a frame after the real kick.
     const since = (bestOffset + 0.5) / RATE + this.accumulator;
     const measured = (since * this.bpm) / 60;
     const error = wrap(this.phase - measured);
-    // Primo aggancio secco, poi correzioni morbide (niente scatti a tempo).
+    // A sharp first lock, then soft corrections (no jumps in time).
     this.phase -= this.locked ? error * 0.5 : error;
     this.locked = true;
   }
 
-  /** Stato letto dal corpo a ogni frame. `phase` e' 0 sul battito. */
+  /** State read by the body every frame. `phase` is 0 on the beat. */
   get state() {
     const beat = Math.floor(this.phase);
     return {
@@ -250,7 +251,7 @@ export class BeatTracker {
   }
 }
 
-/** Cattura l'audio di sistema (Electron) e lo passa al BeatTracker. */
+/** Captures the system audio (Electron) and passes it to the BeatTracker. */
 export class MusicListener {
   constructor() {
     this.tracker = new BeatTracker();
@@ -268,9 +269,9 @@ export class MusicListener {
     if (this.analyser) return;
     if (this.starting) return this.starting;
     this.starting = (async () => {
-      // In Electron, chromeMediaSource 'desktop' su audio E video senza un id
-      // di sorgente cattura lo schermo intero con il suo audio (loopback).
-      // Il video non ci serve: lo chiediamo minuscolo e lo fermiamo subito.
+      // In Electron, chromeMediaSource 'desktop' on audio AND video without a
+      // source id captures the whole screen with its audio (loopback). We don't
+      // need the video: we ask for it tiny and stop it right away.
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { mandatory: { chromeMediaSource: 'desktop' } },
         video: { mandatory: { chromeMediaSource: 'desktop', maxWidth: 32, maxHeight: 32, maxFrameRate: 1 } },
@@ -281,7 +282,7 @@ export class MusicListener {
       const analyser = context.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0;
-      // Solo verso l'analizzatore, mai verso le casse: sarebbe un'eco.
+      // Only towards the analyser, never towards the speakers: it would echo.
       context.createMediaStreamSource(stream).connect(analyser);
       this.stream = stream;
       this.context = context;
@@ -304,7 +305,7 @@ export class MusicListener {
     this.tracker.reset();
   }
 
-  /** Da chiamare a ogni frame; restituisce lo stato del ritmo. */
+  /** Call every frame; returns the rhythm's state. */
   update(dt) {
     if (this.analyser) {
       this.analyser.getFloatFrequencyData(this.spectrum);

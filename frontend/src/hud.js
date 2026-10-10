@@ -1,25 +1,31 @@
 /**
- * I due dock ad arco ai lati del personaggio.
+ * The right-click menu, in two forms, and the state they show.
  *
- * Ispirati all'immagine di riferimento, ma per quello che serve a un
- * assistente e non a un animaletto da accudire (niente fame e sete):
+ * **Flame (her usual form): the island** (island.js), black like Coucou's,
+ * born from her; she slides into it.
  *
- *  - a sinistra gli **anelli di stato**: il cervello (agente o modello,
- *    verde se risponde, ambra che gira mentre pensa, rosso se e' spento), la
- *    voce (l'anello si riempie col volume mentre parla; clic = muta), il
- *    microfono (livello mentre ascolta; clic = parla) e la musica (batte a
- *    tempo con Spotify; clic = balla o no) e i consumi degli agenti (l'anello
- *    e' il limite piu' vicino a finire di Claude Code o Codex; clic = scheda
- *    Lavoro; c'e' solo se si sa qualcosa);
- *  - a destra la **navigazione**: chat, personaggio, cambia forma (VRM o
- *    fiammella; senza corpo non c'e'), motori, spegni.
+ * **With the body (VRM): the two arc docks** beside the torso, inspired by
+ * the reference image, for what an assistant needs and not a pet to look
+ * after (no hunger or thirst):
  *
- * Si apre col tasto destro sul personaggio e si richiude da solo quando il
- * cursore se ne va. Gli archi seguono il busto: se si siede o si sdraia, i
- * dock vanno con lei.
+ *  - on the left the **status rings**: the brain (agent or model, green if
+ *    it answers, amber spinning while it thinks, red if it's off), the voice
+ *    (the ring fills with the volume while she speaks; click = mute), the
+ *    microphone (level while listening; click = talk) and the music (beats in
+ *    time with Spotify; click = dance or not) and the agents' usage (the ring
+ *    is the Claude Code or Codex limit closest to running out; click = Work
+ *    tab; only there if something is known);
+ *  - on the right the **navigation**: dashboard, chat, character, back to
+ *    the flame, engines, quit.
+ *
+ * It opens with a right-click on the character and closes by itself when
+ * the cursor leaves. The arcs follow the torso: if she sits or lies down,
+ * the docks go with her.
  */
 
+import { LOCALE, t, tx } from './i18n.js';
 import { iconSvg } from './icons.js';
+import { Island } from './island.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -31,10 +37,10 @@ const LEFT = [
   { id: 'usage', icon: 'gauge', color: 'var(--ok)' },
 ];
 
-/** Come si chiamano le finestre dei limiti, per la didascalia. */
-const WINDOW_WORDS = { 300: '5 ore', 10080: 'settimana', 43200: 'mese' };
+/** What the limit windows are called, for the caption. */
+const WINDOW_WORDS = { 300: t('5 hours'), 10080: t('week'), 43200: t('month') };
 
-/** Colore del limite: verde, ambra dal 70%, rosso dal 90%. */
+/** The limit's colour: green, amber from 70%, red from 90%. */
 function usageColor(used) {
   if (used >= 90) return 'var(--danger)';
   if (used >= 70) return 'var(--warn)';
@@ -45,22 +51,26 @@ function resetWords(epoch) {
   if (!epoch) return '';
   const moment = new Date(epoch * 1000);
   const now = new Date();
-  const clock = moment.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-  if (moment.toDateString() === now.toDateString()) return `si azzera alle ${clock}`;
+  const clock = moment.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
+  if (moment.toDateString() === now.toDateString()) return t('resets at {time}', { time: clock });
   const days = Math.ceil((moment - now) / 86_400_000);
-  return days <= 1 ? `si azzera domani alle ${clock}` : `si azzera tra ${days} giorni`;
+  return days <= 1 ? t('resets tomorrow at {time}', { time: clock }) : t('resets in {n} days', { n: days });
 }
 
 const RIGHT = [
+  { id: 'dashboard', icon: 'dashboard', label: 'Dashboard' },
   { id: 'chat', icon: 'chat', label: 'Chat' },
-  { id: 'character', icon: 'character', label: 'Personaggio' },
-  { id: 'form', icon: 'flame', label: 'Diventa fiammella' },
-  { id: 'engines', icon: 'engines', label: 'Motori' },
-  { id: 'power', icon: 'power', label: 'Chiudi Tsukumo' },
+  { id: 'character', icon: 'character', label: t('Character') },
+  { id: 'form', icon: 'flame', label: t('Back to the flame') },
+  { id: 'engines', icon: 'engines', label: t('Engines') },
+  { id: 'power', icon: 'power', label: t('Quit Tsukumo') },
 ];
 
-/** Dopo quanti ms senza il cursore sopra il HUD si richiude da solo. */
+/** After how many ms without the cursor over the HUD it closes by itself. */
 const AUTO_HIDE_MS = 7000;
+
+/** How many agent steps are remembered for the island (it shows the last ones). */
+const STEPS_KEPT = 8;
 
 const STATE_COLORS = {
   online: 'var(--ok)',
@@ -72,19 +82,22 @@ const STATE_COLORS = {
 };
 
 const STATE_WORDS = {
-  online: 'pronto',
-  degraded: 'con qualche problema',
-  offline: 'spento',
-  unknown: 'in verifica',
-  off: 'spento',
+  online: t('ready'),
+  degraded: t('having some trouble'),
+  offline: t('off'),
+  unknown: t('checking'),
+  off: t('off'),
 };
 
 export class Hud {
-  /** @param {HTMLElement} root */
-  constructor(root) {
+  /**
+   * @param {HTMLElement} root the VRM's docks (above the canvas)
+   * @param {HTMLElement} [islandRoot] the flame's island (under the canvas)
+   */
+  constructor(root, islandRoot) {
     this.root = root;
     this.visible = false;
-    /** Chiamato con l'id del bottone premuto. */
+    /** Called with the id of the pressed button. */
     this.onAction = () => {};
 
     this.engines = null;
@@ -92,12 +105,17 @@ export class Hud {
     this.muted = false;
     this.mic = { available: false, enabled: false };
     this.musicPlaying = false;
-    this.form = 'vrm';
-    /** Senza corpo il bottone della forma sparisce. */
+    this.dancing = true;
+    this.form = 'flame';
+    /** 'island' around the flame, 'docks' beside the VRM. */
+    this.layout = 'island';
+    /** Without a body the body button offers to give her one. */
     this.bodiless = false;
-    /** Il limite piu' vicino a finire: `{agent, label, limit}` o null (vedi setUsage). */
+    /** The limit closest to running out: `{agent, label, limit}` or null (see setUsage). */
     this.usage = null;
-    /** Bottoni nascosti: non occupano posto sull'arco. */
+    /** The agent's steps in the current (or last) turn, for the island. */
+    this.steps = [];
+    /** Hidden buttons: they take no room on the arc. */
     this.hidden = new Set(['usage']);
     this.activeTab = null;
     this.frame = null;
@@ -108,6 +126,7 @@ export class Hud {
     this._levels = { voice: 0, mic: 0, music: 0 };
 
     this._build();
+    this.island = islandRoot ? new Island(islandRoot, this) : null;
   }
 
   // ------------------------------------------------------------------ DOM
@@ -186,7 +205,7 @@ export class Hud {
       }
       this.onAction(id);
     });
-    // Il tasto destro su un bottone non deve richiudere/riaprire il HUD.
+    // Right-click on a button must not close/reopen the HUD.
     button.addEventListener('contextmenu', (event) => event.stopPropagation());
   }
 
@@ -205,7 +224,7 @@ export class Hud {
     }, 3000);
   }
 
-  // ------------------------------------------------------- visibilita'
+  // ------------------------------------------------------------- visibility
   toggle() {
     if (this.visible) this.hide();
     else this.show();
@@ -213,19 +232,26 @@ export class Hud {
 
   show() {
     this.visible = true;
-    this.root.classList.add('visible');
-    this._layout(true);
+    if (this.layout === 'island' && this.island) {
+      document.body.classList.add('island-open');
+      this.island.show(this.frame);
+    } else {
+      this.root.classList.add('visible');
+      this._layout(true);
+    }
     this._keepOpen();
   }
 
   hide() {
     this.visible = false;
     this.root.classList.remove('visible');
+    this.island?.hide();
+    document.body.classList.remove('island-open');
     clearTimeout(this._hideTimer);
     this.buttons.get('power')?.classList.remove('confirm');
   }
 
-  /** Il cursore e' sopra il personaggio o sui dock: non richiudere. */
+  /** The cursor is over the character or the menu: don't close. */
   touch() {
     if (this.visible) this._keepOpen();
   }
@@ -235,21 +261,38 @@ export class Hud {
     this._hideTimer = setTimeout(() => this.hide(), AUTO_HIDE_MS);
   }
 
-  // ------------------------------------------------------------ geometria
+  /** The top edge of the open menu, in window pixels: the speech bubble sits above it. */
+  get top() {
+    return this.layout === 'island' && this.island ? this.island.top : 0;
+  }
+
+  /** Where the flame must be while the island is open (window pixels), or null. */
+  get flameSlot() {
+    return this.visible && this.layout === 'island' && this.island ? this.island.slotRect() : null;
+  }
+
+  // --------------------------------------------------------------- geometry
   /**
-   * Dove sta il corpo nella finestra: centro orizzontale e altezza del petto,
-   * in pixel. Lo aggiorna main.js a ogni frame mentre il HUD e' aperto.
+   * Where the body is in the window: horizontal centre and chest height (or
+   * the flame's bulb), in pixels. main.js updates it every frame while the
+   * menu is open, and right before opening it.
    */
   setFrame(frame) {
     if (!frame) return;
+    if (!this.visible) {
+      this.frame = { x: frame.cx, y: frame.cy, cx: frame.cx, cy: frame.cy };
+      return;
+    }
     const previous = this.frame;
-    // Il busto oscilla col respiro: seguirlo al pixel farebbe tremare i dock.
+    // The torso sways with the breath: following it to the pixel would make the docks shake.
     const smooth = (a, b) => (previous ? a + (b - a) * 0.18 : b);
     this.frame = {
+      x: previous?.x ?? frame.cx,
+      y: previous?.y ?? frame.cy,
       cx: smooth(previous?.cx, frame.cx),
       cy: smooth(previous?.cy, frame.cy),
     };
-    if (this.visible) this._layout(false);
+    if (this.layout === 'docks') this._layout(false);
   }
 
   _layout(force) {
@@ -288,8 +331,8 @@ export class Hud {
     for (const [id, node] of this.buttons) node.style.display = this.hidden.has(id) ? 'none' : '';
     for (const [side, spec] of Object.entries(sides)) {
       const point = (angle) => [spec.center + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
-      // Dall'alto in basso. A sinistra l'angolo scende da π+θ a π-θ (verso
-      // antiorario sullo schermo, sweep 0); a destra sale da -θ a θ (sweep 1).
+      // Top to bottom. On the left the angle goes down from π+θ to π-θ
+      // (anticlockwise on screen, sweep 0); on the right it goes up from -θ to θ (sweep 1).
       const start = point(spec.base - spec.sign * theta);
       const end = point(spec.base + spec.sign * theta);
       const d =
@@ -301,7 +344,7 @@ export class Hud {
       this.shapes[side].border.style.strokeWidth = `${thickness + 2}px`;
 
       spec.items.forEach((item, index) => {
-        // Dall'alto in basso: l'angolo "in alto" e' quello con seno negativo.
+        // Top to bottom: the "top" angle is the one with a negative sine.
         const offset = (index - (spec.items.length - 1) / 2) * step;
         const angle = side === 'left' ? Math.PI - offset : offset;
         const [x, y] = point(angle);
@@ -317,23 +360,36 @@ export class Hud {
     this._placeCaption();
   }
 
-  /** Sotto i dock, ma dentro la finestra anche quando va a capo (la fiammella sta in fondo). */
+  /** Under the docks, but inside the window even when it wraps. */
   _placeCaption() {
     const limit = window.innerHeight - this.caption.offsetHeight - 8;
     this.caption.style.top = `${Math.max(0, Math.min(this._captionTop ?? limit, limit))}px`;
   }
 
-  // ---------------------------------------------------------------- stato
-  /** Stato dei motori dal backend (messaggio `engines`). */
+  // ------------------------------------------------------------------ state
+  /** The engines' state from the backend (`engines` message). */
   setEngines(status) {
     this.engines = status;
     this._renderStatic();
   }
 
-  /** 'thinking' | 'speaking' | 'idle' */
+  /**
+   * 'thinking' | 'speaking' | 'idle'. A new turn (she starts thinking) clears
+   * the agent's steps; when done, they stay until the next one.
+   */
   setBusy(state) {
+    if (state === 'thinking' && this.busy !== 'thinking') this.steps = [];
     this.busy = state;
     this._renderStatic();
+  }
+
+  /** One step of the agent (`working` message: "reads main.js"). */
+  setWorking(label) {
+    const text = String(label || '').trim();
+    if (!text) return;
+    const step = `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+    if (this.steps[this.steps.length - 1] !== step) this.steps = [...this.steps, step].slice(-STEPS_KEPT);
+    this.island?.render();
   }
 
   setMuted(muted) {
@@ -341,22 +397,44 @@ export class Hud {
     this._renderStatic();
   }
 
-  /** 'vrm' o 'flame': il bottone della forma propone l'altra. */
+  /** 'vrm' or 'flame': the body has the docks, the flame the island. */
   setForm(form) {
-    this.form = form;
-    this.buttons.get('form')?.setAttribute('aria-label', form === 'flame' ? 'Torna nel corpo' : 'Diventa fiammella');
+    this.form = form === 'vrm' ? 'vrm' : 'flame';
+    const layout = this.form === 'vrm' ? 'docks' : 'island';
+    if (layout !== this.layout) {
+      if (this.visible) this.hide();
+      this.layout = layout;
+    }
     this._renderCaption();
+    this.island?.render();
   }
 
-  /** Senza corpo non c'e' una forma da cambiare: il bottone sparisce. */
+  /** Without a body the body pill offers to give her one. */
   setBodiless(value) {
     this.bodiless = Boolean(value);
-    this._setHidden('form', this.bodiless);
+    this.island?.render();
+  }
+
+  /** Whether she dances to the music (the music pill says it and changes it). */
+  setDancing(value) {
+    this.dancing = Boolean(value);
+    this.island?.render();
+  }
+
+  /** The flame's colour (0xRRGGBB): in the island's card it gives her a halo of that colour. */
+  setTint(color) {
+    const rgb = [(color >> 16) & 255, (color >> 8) & 255, color & 255].join(', ');
+    this.island?.root.style.setProperty('--tint', rgb);
+  }
+
+  /** Colour of a brain state (for the island too). */
+  stateColor(state) {
+    return STATE_COLORS[state] ?? STATE_COLORS.unknown;
   }
 
   /**
-   * I consumi degli agenti (messaggio `usage` del backend). L'anello mostra il
-   * limite piu' vicino a finire, preferendo il cervello attivo se e' uno di loro.
+   * The agents' usage (the backend's `usage` message). The ring shows the
+   * limit closest to running out, preferring the active brain if it's one of them.
    */
   setUsage(snapshot, activeBrain) {
     let best = null;
@@ -374,6 +452,7 @@ export class Hud {
       this._dot('usage', color);
     }
     this._renderCaption();
+    this.island?.render();
   }
 
   _setHidden(id, hidden) {
@@ -381,7 +460,7 @@ export class Hud {
     if (hidden) this.hidden.add(id);
     else this.hidden.delete(id);
     if (this._hovered === id) this._hovered = null;
-    this._layout(true);
+    if (this.layout === 'docks') this._layout(true);
   }
 
   setMic(state) {
@@ -394,17 +473,24 @@ export class Hud {
     this._renderStatic();
   }
 
-  /** Scheda aperta nel pannello (per evidenziare il bottone giusto), o null. */
+  /** What the flame wears (`selection` as in the panel, 'auto' too) and her colour: for the island's wardrobe. */
+  setWardrobe(selection, color) {
+    this.wardrobe = { selection, color };
+    this.island?.render();
+  }
+
+  /** Tab open in the panel (to highlight the right button), or null. */
   setActiveTab(tab) {
     this.activeTab = tab;
     for (const item of RIGHT) {
       this.buttons.get(item.id).classList.toggle('active', item.id === tab);
     }
+    this.island?.render();
   }
 
-  /** Livelli istantanei, a ogni frame: voce che parla, microfono, musica. */
+  /** Instant levels, every frame: speaking voice, microphone, music. */
   update({ voice = 0, mic = 0, music = 0 } = {}) {
-    if (!this.visible) return;
+    if (!this.visible || this.layout !== 'docks') return;
     const ease = (from, to) => from + (to - from) * 0.35;
     this._levels.voice = ease(this._levels.voice, voice);
     this._levels.mic = ease(this._levels.mic, mic);
@@ -459,6 +545,7 @@ export class Hud {
     this._dot('music', this.musicPlaying ? 'var(--pink)' : null);
 
     this._renderCaption();
+    this.island?.render();
   }
 
   _renderCaption() {
@@ -472,34 +559,38 @@ export class Hud {
     const llm = this.engines?.llm;
     switch (id) {
       case 'agent': {
-        if (!llm) return 'Cervello: in verifica';
-        if (this.busy === 'thinking') return `${llm.label} sta pensando…`;
-        const detail = llm.state !== 'online' && llm.detail ? ` — ${llm.detail}` : '';
+        if (!llm) return t('Brain: checking');
+        if (this.busy === 'thinking') return t('{name} is thinking…', { name: llm.label });
+        const detail = llm.state !== 'online' && llm.detail ? ` — ${tx(llm.detail)}` : '';
         return `${llm.label}: ${STATE_WORDS[llm.state] ?? llm.state}${detail}`;
       }
       case 'voice': {
         const tts = this.engines?.tts;
-        if (this.muted) return 'Voce spenta — clic per riaccenderla';
-        return `${tts?.label ?? 'Voce'}${tts?.voice ? ` · ${tts.voice}` : ''} — clic per silenziarla`;
+        if (this.muted) return t('Voice off — click to turn it back on');
+        return t('{voice} — click to mute it', { voice: `${tts?.label ?? t('Voice')}${tts?.voice ? ` · ${tts.voice}` : ''}` });
       }
       case 'mic': {
         const stt = this.engines?.stt;
-        if (!stt || stt.state === 'off') return 'Ascolto spento — clic per sceglierne uno';
-        return this.mic.enabled ? 'Ti sto ascoltando — clic per smettere' : `${stt.label} — clic per parlarle`;
+        if (!stt || stt.state === 'off') return t('Listening off — click to choose one');
+        return this.mic.enabled ? t("I'm listening — click to stop") : t('{name} — click to talk to her', { name: stt.label });
       }
       case 'music':
-        return this.musicPlaying ? 'Balla con Spotify — clic per smettere' : 'Nessuna musica da Spotify';
+        if (!this.musicPlaying) return t('No music from Spotify');
+        return this.dancing ? t('Dancing to Spotify — click to stop') : t('Still — click to dance to Spotify');
       case 'usage': {
         if (!this.usage) return '';
         const { agent, limit } = this.usage;
-        const window = WINDOW_WORDS[limit.windowMinutes] ?? 'limite';
+        const window = WINDOW_WORDS[limit.windowMinutes] ?? t('limit');
         const reset = resetWords(limit.resetsAt);
         return `${agent}: ${Math.round(limit.used)}% (${window})${reset ? `, ${reset}` : ''}`;
       }
-      case 'power':
-        return this.buttons.get('power').classList.contains('confirm') ? 'Clicca ancora per chiudere' : 'Chiudi Tsukumo';
+      case 'power': {
+        const confirming = this.buttons.get('power').classList.contains('confirm') || this.island?.powerPill.classList.contains('confirm');
+        return confirming ? t('Click again to quit') : t('Quit Tsukumo');
+      }
       case 'form':
-        return this.form === 'flame' ? 'Torna nel corpo' : 'Diventa fiammella';
+        if (this.form === 'vrm') return t('Back to the flame');
+        return this.bodiless ? t('Give her a 3D body (optional)') : t('Enter the 3D body');
       default: {
         const nav = RIGHT.find((item) => item.id === id);
         return nav ? nav.label : '';

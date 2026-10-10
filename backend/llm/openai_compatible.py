@@ -1,25 +1,26 @@
-"""Client per qualunque server locale con API compatibile OpenAI.
+"""Client for any local server with an OpenAI-compatible API.
 
-Copre **LM Studio** (default: `http://127.0.0.1:1234/v1`), oltre a
-llama.cpp `server`, vLLM, text-generation-webui e simili: usano tutti lo
-stesso endpoint `POST /v1/chat/completions` in streaming SSE e lo stesso
-`GET /v1/models` per l'elenco modelli.
+It covers **LM Studio** (default: `http://127.0.0.1:1234/v1`), as well as
+llama.cpp `server`, vLLM, text-generation-webui, gpt4free and the like: they
+all use the same `POST /v1/chat/completions` endpoint with SSE streaming and
+the same `GET /v1/models` for the model list.
 
-Nota sui modelli "reasoning" (es. i minicpm, deepseek-r1, qwq, ...)
+A note on "reasoning" models (e.g. minicpm, deepseek-r1, qwq, ...)
 --------------------------------------------------------------------
-Questi modelli mandano il ragionamento interno in un campo separato,
-``delta.reasoning_content``, PRIMA del campo ``delta.content`` con la
-risposta vera. Se prendessimo tutto il testo streamato, il companion
-leggerebbe ad alta voce anche i suoi "pensieri" (verificato in pratica con
-LM Studio + minicpm5-2b: senza questo filtro arrivano frasi tipo "We need to
-respond with 'hi'..." prima della risposta reale). Qui ignoriamo sempre
-``reasoning_content`` e streamiamo solo ``content``.
+These models send their internal reasoning in a separate field,
+``delta.reasoning_content``, BEFORE the ``delta.content`` field with the real
+answer. If we took all the streamed text, the companion would also read its
+"thoughts" aloud (verified in practice with LM Studio + minicpm5-2b: without
+this filter sentences like "We need to respond with 'hi'..." arrive before
+the real answer). Here we always ignore ``reasoning_content`` and stream only
+``content``.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -31,8 +32,41 @@ from .base import LLMClient, Message, describe_error
 logger = logging.getLogger(__name__)
 
 
+def _error_text(body: str) -> str:
+    """The OpenAI standard's ``error.message``, if there is one, instead of the whole JSON."""
+    try:
+        error = json.loads(body).get("error")
+    except (ValueError, AttributeError):
+        return body
+    if isinstance(error, dict) and error.get("message"):
+        return str(error["message"])
+    return str(error) if isinstance(error, str) and error else body
+
+
+#: The source "pill" ChatGPT puts at the end of a paragraph when it searches
+#: the web. gpt4free derives it from the HTML by stripping the tags, and it
+#: arrives as initial + name + "+N" glued together ("Uuefa.com+1", "CClimate
+#: Data"): she would read it aloud. Only after a full stop, at the end of a
+#: line, and never if it ends with a real sentence's punctuation ("Aachen è
+#: bella." stays).
+_SOURCE_PILL = re.compile(r"(?<=[.!?:;)])[ \t]+([A-Z])(?i:\1)[^\n]{0,40}?(?<![.!?])(?=\n|$)")
+
+
+def strip_source_pills(text: str) -> str:
+    return _SOURCE_PILL.sub("", text)
+
+
+def _chat_models(data: list[dict[str, Any]]) -> list[str]:
+    """The ids of the text models.
+
+    gpt4free also lists the image models and the names of its providers, marked
+    with ``image``/``provider``: they're no use as a brain.
+    """
+    return [m.get("id", "") for m in data if not m.get("image") and not m.get("provider")]
+
+
 class OpenAICompatibleClient(LLMClient):
-    """Client generico per server locali stile OpenAI (LM Studio e affini)."""
+    """Generic client for OpenAI-style local servers (LM Studio and the like)."""
 
     name = "openai"
 
@@ -46,8 +80,8 @@ class OpenAICompatibleClient(LLMClient):
         name: str | None = None,
         hint: str | None = None,
     ) -> None:
-        # Lo stesso client serve LM Studio, i servizi cloud e Hermes: il nome
-        # dice al pannello quale dei tre sta rispondendo.
+        # The same client serves LM Studio, the cloud services and Hermes: the name
+        # tells the panel which of the three is answering.
         if name:
             self.name = name
         self._hint = hint
@@ -55,8 +89,8 @@ class OpenAICompatibleClient(LLMClient):
         self.model = model
         self.temperature = temperature
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        # connect breve (accorgersi subito se il server e' spento),
-        # read lungo (i modelli "reasoning" possono metterci un po').
+        # short connect (to notice right away if the server is off),
+        # long read ("reasoning" models may take a while).
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout, connect=5.0),
             headers=headers,
@@ -65,20 +99,20 @@ class OpenAICompatibleClient(LLMClient):
 
     # ------------------------------------------------------------------
     async def _resolve_model(self) -> str:
-        """Se il modello e' 'auto', prende il primo che il server ha caricato."""
+        """If the model is 'auto', it takes the first one the server has loaded."""
         if self._resolved_model:
             return self._resolved_model
 
         response = await self._client.get(f"{self.base_url}/models", timeout=10.0)
         response.raise_for_status()
-        models = response.json().get("data", [])
+        models = _chat_models(response.json().get("data", []))
         if not models:
             raise RuntimeError(
-                f"Nessun modello caricato su {self.base_url}. "
-                "Carica un modello in LM Studio (o nel tuo server) prima di parlare."
+                f"No model loaded on {self.base_url}. "
+                "Load a model in LM Studio (or your server) before talking."
             )
-        self._resolved_model = models[0]["id"]
-        logger.info("Modello risolto automaticamente: %s", self._resolved_model)
+        self._resolved_model = models[0]
+        logger.info("Model resolved automatically: %s", self._resolved_model)
         return self._resolved_model
 
     # ------------------------------------------------------------------
@@ -96,7 +130,7 @@ class OpenAICompatibleClient(LLMClient):
         ) as response:
             if response.status_code >= 400:
                 body = (await response.aread()).decode("utf-8", "replace")[:500]
-                raise RuntimeError(f"{self.base_url} ha risposto {response.status_code}: {body}")
+                raise RuntimeError(f"{self.base_url} answered {response.status_code}: {_error_text(body)}")
 
             async for line in response.aiter_lines():
                 line = line.strip()
@@ -108,17 +142,27 @@ class OpenAICompatibleClient(LLMClient):
                 try:
                     chunk: dict[str, Any] = json.loads(data)
                 except json.JSONDecodeError:
-                    logger.debug("Riga SSE non JSON ignorata: %r", data[:120])
+                    logger.debug("Non-JSON SSE line ignored: %r", data[:120])
                     continue
+
+                # gpt4free and OpenRouter, with the stream already open with 200, report a
+                # failure with an {"error": ...} chunk: without this check the reply would
+                # end up empty and mute.
+                if chunk.get("error"):
+                    raise RuntimeError(f"{self.base_url}: {_error_text(data)}")
 
                 choices = chunk.get("choices") or []
                 if not choices:
                     continue
                 delta = choices[0].get("delta") or {}
 
-                # Volutamente NON leggiamo delta.get("reasoning_content"):
-                # vedi il commento in testa al modulo.
+                # We deliberately DON'T read delta.get("reasoning_content"):
+                # see the comment at the top of the module.
                 piece = delta.get("content")
+                # gpt4free's ChatGPT provider sends the whole reply in a single chunk, so a
+                # pill is never left broken.
+                if piece and chunk.get("provider") == "ChatGPT":
+                    piece = strip_source_pills(piece)
                 if piece:
                     yield piece
 
@@ -127,7 +171,7 @@ class OpenAICompatibleClient(LLMClient):
         try:
             response = await self._client.get(f"{self.base_url}/models", timeout=3.0)
             response.raise_for_status()
-            models = [m.get("id", "") for m in response.json().get("data", [])]
+            models = _chat_models(response.json().get("data", []))
         except Exception as exc:
             return {
                 "backend": self.name,
@@ -135,7 +179,7 @@ class OpenAICompatibleClient(LLMClient):
                 "model": self.model,
                 "error": describe_error(exc),
                 "hint": self._hint
-                or "Avvia il server locale (es. LM Studio: tab 'Developer' -> Start Server)",
+                or "Start the local server (e.g. LM Studio: 'Developer' tab -> Start Server)",
             }
 
         if not models:
@@ -143,8 +187,8 @@ class OpenAICompatibleClient(LLMClient):
                 "backend": self.name,
                 "ok": False,
                 "model": self.model,
-                "error": "Nessun modello caricato",
-                "hint": "Carica un modello nel server prima di parlare",
+                "error": "No model loaded",
+                "hint": "Load a model in the server before talking",
             }
 
         loaded = self._resolved_model in models if self._resolved_model else True

@@ -1,4 +1,4 @@
-"""Avvisi da Claude Code e Codex: hook, collegamento, cosa dice lei."""
+"""Notifications from Claude Code and Codex: hooks, connection, what she says."""
 
 import json
 import subprocess
@@ -25,15 +25,15 @@ def test_summary_and_announcement():
 def test_claude_hooks_install_and_uninstall_keep_other_settings(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo mio"}]}]}}))
-    assert notify.install_claude(path) == "collegato"
-    assert notify.install_claude(path) == "già collegato"
+    assert notify.install_claude(path) == "connected"
+    assert notify.install_claude(path) == "already connected"
     data = json.loads(path.read_text())
     assert data["model"] == "opus" and len(data["hooks"]["Stop"]) == 2 and "Notification" in data["hooks"]
     ours = data["hooks"]["Stop"][1]["hooks"][0]
     assert ours["command"].endswith("python.exe") or "python" in ours["command"]
     assert ours["args"][-1] == "claude" and ours["args"][0].endswith("tsukumo_notify.py")
     assert (tmp_path / "settings.json.tsukumo-bak").is_file()
-    assert notify.uninstall_claude(path) == "scollegato"
+    assert notify.uninstall_claude(path) == "disconnected"
     data = json.loads(path.read_text())
     assert data["hooks"] == {"Stop": [{"hooks": [{"type": "command", "command": "echo mio"}]}]}
 
@@ -41,11 +41,11 @@ def test_claude_hooks_install_and_uninstall_keep_other_settings(tmp_path):
 def test_codex_notify_install_refuses_to_overwrite(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('model = "o4"\n\n[profiles.x]\nmodel = "y"\n')
-    assert notify.install_codex(path) == "collegato"
+    assert notify.install_codex(path) == "connected"
     text = path.read_text()
     assert text.index("notify =") < text.index("[profiles.x]") and "tsukumo_notify.py" in text
-    assert notify.install_codex(path) == "già collegato"
-    assert notify.uninstall_codex(path) == "scollegato"
+    assert notify.install_codex(path) == "already connected"
+    assert notify.uninstall_codex(path) == "disconnected"
     assert path.read_text() == 'model = "o4"\n\n[profiles.x]\nmodel = "y"\n'
     path.write_text('notify = ["mio-programma"]\n')
     with pytest.raises(ValueError):
@@ -67,7 +67,7 @@ def test_hook_reads_the_last_claude_message(tmp_path):
         encoding="utf-8",
     )
     body = tsukumo_notify.from_claude({"hook_event_name": "Stop", "transcript_path": str(transcript)})
-    assert body == {"source": "claude", "kind": "done", "message": "Ho finito il refactoring."}
+    assert body == {"source": "claude", "session": "", "project": "", "kind": "done", "message": "Ho finito il refactoring."}
     assert tsukumo_notify.from_claude({"hook_event_name": "Stop", "stop_hook_active": True}) is None
     waiting = tsukumo_notify.from_claude(
         {"hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission"}
@@ -77,7 +77,7 @@ def test_hook_reads_the_last_claude_message(tmp_path):
     direct = tsukumo_notify.from_claude({"hook_event_name": "Stop", "last_assistant_message": "Tutto fatto."})
     assert direct["message"] == "Tutto fatto."
     codex = tsukumo_notify.from_codex({"type": "agent-turn-complete", "last-assistant-message": "Done!"})
-    assert codex == {"source": "codex", "kind": "done", "message": "Done!"}
+    assert codex == {"source": "codex", "session": "", "project": "", "kind": "done", "message": "Done!"}
 
 
 def test_hook_exits_at_once_when_tsukumo_is_off_or_it_is_our_own_agent(tmp_path):

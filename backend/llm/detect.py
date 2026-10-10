@@ -1,14 +1,14 @@
-"""Quali cervelli sono gia' installati sul PC?
+"""Which brains are already installed on the PC?
 
-Serve in due momenti. Al primo avvio, se nessuno ha scelto un cervello, il
-companion prende il primo che trova invece di presentarsi con un Ollama che
-magari non c'e'. E nella scheda Motori, che mostra "Trovato sul PC".
+It's needed at two moments. At the first start, if nobody chose a brain, the
+companion takes the first one it finds instead of showing up with an Ollama
+that may not be there. And in the Engines tab, which shows "Found on the PC".
 
-Ogni controllo e' leggero e senza effetti collaterali: per i programmi si cerca
-solo l'eseguibile (nessun processo avviato, nemmeno ``--version``), per i
-servizi basta una GET con timeout di un secondo. Gira in background dopo
-l'avvio e mai dentro ``/api/health``: un servizio spento su Windows fa perdere
-secondi a ogni tentativo di connessione (vedi ``status.py``).
+Every check is light and has no side effects: for programs we only look for
+the executable (no process started, not even ``--version``), for services a
+GET with a one-second timeout is enough. It runs in the background after
+startup and never inside ``/api/health``: a service that's off on Windows
+loses seconds at every connection attempt (see ``status.py``).
 """
 
 from __future__ import annotations
@@ -25,13 +25,13 @@ from .cli_agents import find_antigravity, find_codex, resolve_executable, split_
 
 logger = logging.getLogger(__name__)
 
-#: Ordine di preferenza per la scelta automatica: prima gli agenti, che hanno
-#: memoria e strumenti propri, poi i modelli locali. Gli agenti "a comando"
-#: (Cline, Gemini CLI...) si riconoscono ma non si scelgono da soli: ripartono
-#: da zero a ogni messaggio.
+#: Order of preference for the automatic choice: first the agents, which have
+#: memory and tools of their own, then the local models. The "command" agents
+#: (Cline, Gemini CLI...) are recognized but never chosen by themselves: they
+#: start from scratch at every message.
 AUTO_ORDER = ("claude_code", "codex", "antigravity", "openclaw", "ollama", "openai")
 
-#: Quanto aspettare un servizio locale prima di darlo per spento.
+#: How long to wait for a local service before taking it as off.
 HTTP_TIMEOUT = 1.0
 
 Result = dict[str, Any]
@@ -43,45 +43,45 @@ def _result(found: bool, detail: str) -> Result:
 
 
 # ---------------------------------------------------------------------------
-# Programmi
+# Programs
 # ---------------------------------------------------------------------------
 async def _claude_code(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
     command = str(options.get("CLAUDE_CODE_COMMAND") or "claude")
     path = await asyncio.to_thread(resolve_executable, command)
-    return _result(True, path) if path else _result(False, f"{command} non e' nel PATH")
+    return _result(True, path) if path else _result(False, f"{command} is not in the PATH")
 
 
 async def _codex(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
     path = await asyncio.to_thread(find_codex, str(options.get("CODEX_COMMAND") or ""))
-    return _result(True, path) if path else _result(False, "codex non e' nel PATH ne' nelle estensioni dell'editor")
+    return _result(True, path) if path else _result(False, "codex is not in the PATH nor in the editor's extensions")
 
 
 async def _antigravity(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
     path = await asyncio.to_thread(find_antigravity, str(options.get("ANTIGRAVITY_COMMAND") or ""))
-    return _result(True, path) if path else _result(False, "agy non e' nel PATH ne' in ~/.gemini/bin")
+    return _result(True, path) if path else _result(False, "agy is not in the PATH nor in ~/.gemini/bin")
 
 
 def _preset(provider_id: str, default: str) -> Detector:
-    """Un agente "a comando": basta trovare il programma con cui comincia il comando."""
+    """A "command" agent: finding the program the command starts with is enough."""
 
     async def check(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
         command = str(options.get(f"{provider_id.upper()}_COMMAND") or default)
         program = (split_command(command) or [""])[0]
         path = await asyncio.to_thread(resolve_executable, program)
-        return _result(True, path) if path else _result(False, f"{program} non e' nel PATH")
+        return _result(True, path) if path else _result(False, f"{program} is not in the PATH")
 
     return check
 
 
 # ---------------------------------------------------------------------------
-# Servizi
+# Services
 # ---------------------------------------------------------------------------
 async def _get(http: httpx.AsyncClient, url: str) -> Result:
-    """Il servizio risponde? Un 401/403 conta: c'e', vuole solo una chiave."""
+    """Does the service answer? A 401/403 counts: it's there, it just wants a key."""
     try:
         response = await http.get(url)
     except httpx.HTTPError:
-        return _result(False, f"{url} non risponde")
+        return _result(False, f"{url} is not answering")
     if response.is_success or response.status_code in (401, 403):
         return _result(True, url)
     return _result(False, f"{url} risponde {response.status_code}")
@@ -103,6 +103,11 @@ async def _openai(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result
     return await _get(http, f"{base}/models")
 
 
+async def _g4f(options: Mapping[str, Any], http: httpx.AsyncClient) -> Result:
+    base = str(options.get("G4F_BASE_URL") or "http://127.0.0.1:1337/v1").rstrip("/")
+    return await _get(http, f"{base}/models")
+
+
 DETECTORS: dict[str, Detector] = {
     "claude_code": _claude_code,
     "codex": _codex,
@@ -110,6 +115,9 @@ DETECTORS: dict[str, Detector] = {
     "openclaw": _openclaw,
     "ollama": _ollama,
     "openai": _openai,
+    # Recognized but never chosen by itself: it isn't in AUTO_ORDER because the
+    # sites behind it change often and the messages leave the PC.
+    "g4f": _g4f,
     **{pid: _preset(pid, command) for pid, command in CLI_AGENT_PRESETS.items()},
 }
 
@@ -118,8 +126,8 @@ DETECTORS: dict[str, Detector] = {
 # API
 # ---------------------------------------------------------------------------
 async def _new_client() -> httpx.AsyncClient:
-    # Creare un client carica i certificati (~0,2 s): in un thread, per non
-    # fermare il loop del server, e uno solo per tutti i controlli.
+    # Creating a client loads the certificates (~0.2 s): in a thread, so as not
+    # to stop the server's loop, and one only for all the checks.
     return await asyncio.to_thread(httpx.AsyncClient, timeout=HTTP_TIMEOUT)
 
 
@@ -128,17 +136,17 @@ async def detect(
     options: Mapping[str, Any] | None = None,
     http: httpx.AsyncClient | None = None,
 ) -> Result:
-    """Il motore ``provider`` e' installato o acceso? Non solleva mai."""
+    """Is the ``provider`` engine installed or running? Never raises."""
     detector = DETECTORS.get(provider)
     if detector is None:
-        return _result(False, "riconoscimento automatico non disponibile")
+        return _result(False, "automatic detection unavailable")
     if http is None:
         async with await _new_client() as own:
             return await detect(provider, options, own)
     try:
         return await detector(options or {}, http)
-    except Exception as exc:  # un controllo rotto non deve fermare gli altri
-        logger.debug("Riconoscimento di %s fallito: %s", provider, exc)
+    except Exception as exc:  # a broken check must not stop the others
+        logger.debug("Detecting %s failed: %s", provider, exc)
         return _result(False, str(exc) or type(exc).__name__)
 
 
@@ -146,10 +154,10 @@ async def detect_all(
     options_for: Callable[[str], Mapping[str, Any]],
     providers: Iterable[str] | None = None,
 ) -> dict[str, Result]:
-    """Tutti i controlli in parallelo: in tutto circa un secondo, non cinque.
+    """All the checks in parallel: about a second in all, not five.
 
-    Senza ``providers`` controlla tutti i motori riconoscibili, per i badge
-    del pannello; la scelta automatica guarda poi solo ``AUTO_ORDER``.
+    Without ``providers`` it checks every detectable engine, for the panel's
+    badges; the automatic choice then looks only at ``AUTO_ORDER``.
     """
     ids = list(providers if providers is not None else DETECTORS)
     async with await _new_client() as http:
@@ -158,5 +166,5 @@ async def detect_all(
 
 
 def candidates(detected: Mapping[str, Result], order: Iterable[str] = AUTO_ORDER) -> list[str]:
-    """I motori trovati, nell'ordine in cui conviene provarli."""
+    """The engines found, in the order in which it's best to try them."""
     return [pid for pid in order if (detected.get(pid) or {}).get("found")]

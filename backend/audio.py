@@ -1,7 +1,7 @@
-"""Utility audio: encoding WAV, base64 e analisi dell'inviluppo di ampiezza.
+"""Audio utilities: WAV encoding, base64 and amplitude envelope analysis.
 
-Usiamo solo ``numpy`` + il modulo ``wave`` della standard library, cosi' il
-backend non dipende da libsndfile per funzionare.
+We use only ``numpy`` + the standard library's ``wave`` module, so the
+backend doesn't depend on libsndfile to work.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import numpy as np
 
 
 def to_int16(samples: np.ndarray) -> np.ndarray:
-    """Converte campioni float (-1..1) in PCM 16 bit con protezione da clipping."""
+    """Converts float samples (-1..1) to 16-bit PCM with clipping protection."""
     data = np.asarray(samples, dtype=np.float32).reshape(-1)
     if data.size == 0:
         return np.zeros(0, dtype=np.int16)
@@ -25,7 +25,7 @@ def to_int16(samples: np.ndarray) -> np.ndarray:
 
 
 def encode_wav(samples: np.ndarray, sample_rate: int) -> bytes:
-    """Serializza i campioni in un WAV mono 16 bit."""
+    """Serializes the samples into a 16-bit mono WAV."""
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:
         wav_file.setnchannels(1)
@@ -36,12 +36,12 @@ def encode_wav(samples: np.ndarray, sample_rate: int) -> bytes:
 
 
 def encode_wav_base64(samples: np.ndarray, sample_rate: int) -> str:
-    """WAV pronto per essere infilato dentro un messaggio JSON/WebSocket."""
+    """WAV ready to be put inside a JSON/WebSocket message."""
     return base64.b64encode(encode_wav(samples, sample_rate)).decode("ascii")
 
 
 def decode_wav(payload: bytes) -> tuple[np.ndarray, int]:
-    """Legge un WAV (mono o stereo, 8/16/32 bit) e restituisce float mono."""
+    """Reads a WAV (mono or stereo, 8/16/32 bit) and returns mono floats."""
     with wave.open(io.BytesIO(payload), "rb") as wav_file:
         channels = wav_file.getnchannels()
         width = wav_file.getsampwidth()
@@ -50,7 +50,7 @@ def decode_wav(payload: bytes) -> tuple[np.ndarray, int]:
 
     dtype = {1: np.uint8, 2: np.int16, 4: np.int32}.get(width)
     if dtype is None:
-        raise ValueError(f"Profondita' WAV non supportata: {width * 8} bit")
+        raise ValueError(f"Unsupported WAV depth: {width * 8} bit")
 
     data = np.frombuffer(frames, dtype=dtype).astype(np.float32)
     if width == 1:
@@ -68,10 +68,10 @@ def rms_envelope(
     hop_s: float = 0.01,
     window_s: float = 0.025,
 ) -> np.ndarray:
-    """Inviluppo RMS calcolato a finestre scorrevoli.
+    """RMS envelope computed over sliding windows.
 
-    Restituisce un array di lunghezza ``ceil(len(samples) / hop)`` con valori
-    non normalizzati (la normalizzazione avviene in ``normalize_envelope``).
+    Returns an array of length ``ceil(len(samples) / hop)`` with non-normalized
+    values (normalization happens in ``normalize_envelope``).
     """
     data = np.asarray(samples, dtype=np.float32).reshape(-1)
     hop = max(1, int(round(hop_s * sample_rate)))
@@ -79,10 +79,10 @@ def rms_envelope(
     if data.size == 0:
         return np.zeros(0, dtype=np.float32)
 
-    # Padding simmetrico per centrare la finestra sul campione corrente.
+    # Symmetric padding to centre the window on the current sample.
     pad = window // 2
     padded = np.pad(data, (pad, pad + window), mode="constant")
-    # Somma cumulativa dei quadrati -> RMS in O(n) invece che O(n*window).
+    # Cumulative sum of the squares -> RMS in O(n) instead of O(n*window).
     squared = np.concatenate(([0.0], np.cumsum(padded.astype(np.float64) ** 2)))
     starts = np.arange(0, data.size, hop)
     ends = starts + window
@@ -91,7 +91,7 @@ def rms_envelope(
 
 
 def normalize_envelope(envelope: np.ndarray, percentile: float = 95.0) -> np.ndarray:
-    """Normalizza l'inviluppo su un percentile alto (robusto ai picchi isolati)."""
+    """Normalizes the envelope on a high percentile (robust to isolated peaks)."""
     if envelope.size == 0:
         return envelope
     reference = float(np.percentile(envelope, percentile))
@@ -106,7 +106,7 @@ def trim_silence(
     threshold: float = 0.01,
     padding_s: float = 0.03,
 ) -> np.ndarray:
-    """Rimuove silenzio iniziale/finale lasciando un piccolo margine."""
+    """Removes leading/trailing silence, leaving a small margin."""
     data = np.asarray(samples, dtype=np.float32).reshape(-1)
     if data.size == 0:
         return data

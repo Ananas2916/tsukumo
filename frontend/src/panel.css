@@ -1,5 +1,5 @@
-/* Tsukumo - il pannello: chat, personaggio, motori. Stesso vetro scuro dei
-   dock accanto al personaggio, schede a pillola, un accento lilla. */
+/* Tsukumo - the panel: chat, character, engines. The same dark glass as the
+   menus beside the character, pill-shaped tabs, a lilac accent. */
 
 @import './theme.css';
 
@@ -77,7 +77,7 @@ a {
   padding: 14px;
 }
 
-/* ----------------------------------------------------------- struttura --- */
+/* ----------------------------------------------------------- structure --- */
 .app {
   position: fixed;
   inset: 0;
@@ -89,7 +89,7 @@ a {
   overflow: hidden;
 }
 
-/* Fuori da Electron il pannello e' una pagina normale. */
+/* Outside Electron the panel is a normal page. */
 body:not(:has(#window-actions:not(:empty))) .app {
   inset: 12px;
   box-shadow: var(--shadow);
@@ -223,11 +223,11 @@ body:not(:has(#window-actions:not(:empty))) .app {
   border-radius: 8px;
 }
 
-/* ------------------------------------------------------------- schede --- */
+/* ---------------------------------------------------------------- tabs --- */
 .tabs {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
+  /* Six tabs in 400 px: each as wide as its label, plus its share of the space. */
+  display: flex;
+  gap: 3px;
   margin: 0 12px 10px;
   padding: 4px;
   background: rgba(255, 255, 255, 0.04);
@@ -235,16 +235,17 @@ body:not(:has(#window-actions:not(:empty))) .app {
   border-radius: 13px;
 }
 
-/* Quattro schede in 400 px: icona sopra, etichetta sotto. */
+/* Six tabs in 400 px: icon above, label below. */
 .tab {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 6px 2px 5px;
-  font-size: 11.5px;
+  padding: 6px 3px 5px;
+  font-size: 11px;
   border: none;
   border-radius: 9px;
   background: transparent;
@@ -253,6 +254,13 @@ body:not(:has(#window-actions:not(:empty))) .app {
   transition:
     background 0.15s,
     color 0.15s;
+}
+
+.tab span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tab:hover {
@@ -594,7 +602,7 @@ body:not(:has(#window-actions:not(:empty))) .app {
   text-decoration: underline;
 }
 
-/* Stato vuoto */
+/* Empty state */
 .empty-state {
   margin: auto 0;
   padding: 18px 10px;
@@ -824,7 +832,7 @@ body:not(:has(#window-actions:not(:empty))) .app {
   box-shadow: none;
 }
 
-/* ------------------------------------------------------------- schede --- */
+/* ---------------------------------------------------------------- cards --- */
 .card {
   display: flex;
   flex-direction: column;
@@ -951,7 +959,7 @@ textarea.field-input {
   cursor: pointer;
 }
 
-/* Interruttori */
+/* Switches */
 .switch-row {
   display: flex;
   align-items: center;
@@ -1015,7 +1023,7 @@ textarea.field-input {
   box-shadow: 0 0 0 3px rgba(165, 139, 255, 0.3);
 }
 
-/* Voci */
+/* Voices */
 .search {
   padding-left: 10px;
 }
@@ -1043,6 +1051,133 @@ textarea.field-input {
   border-color: transparent;
   background: var(--accent);
   color: #fff;
+}
+
+/* The flame's colour: a round swatch per hue, the chosen one with a ring. */
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.swatch:hover {
+  transform: scale(1.1);
+}
+
+.swatch.on {
+  box-shadow:
+    0 0 0 2px var(--bg, #121217),
+    0 0 0 4px var(--text);
+}
+
+/* The free colour: a rainbow swatch with the hidden picker on top. */
+.swatch-free {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  background: conic-gradient(#ff6b6b, #ffd166, #4fd39c, #5cc8ff, #a58bff, #ff86bd, #ff6b6b);
+}
+
+.swatch-picker {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* The flame's wardrobe: previews in a grid, like Mochi's. */
+.wardrobe-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wardrobe-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wardrobe-now {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wardrobe {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wardrobe-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 2px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.wardrobe-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wardrobe-item svg {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.wardrobe-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-2);
+}
+
+.wardrobe-item:hover svg {
+  transform: translateY(-2px) rotate(-4deg);
+}
+
+.wardrobe-item.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wardrobe-item svg {
+    transition: none;
+  }
 }
 
 .voice-list {
@@ -1143,7 +1278,7 @@ textarea.field-input {
   transition: width 0.06s linear;
 }
 
-/* Azioni */
+/* Actions */
 .action-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1168,7 +1303,7 @@ textarea.field-input {
   color: var(--text);
 }
 
-/* Bottoni */
+/* Buttons */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -1213,7 +1348,7 @@ textarea.field-input {
   background: rgba(255, 107, 129, 0.12);
 }
 
-/* ----------------------------------------------------- avvisi agenti --- */
+/* ------------------------------------------------------- agent notices --- */
 .integration-list {
   display: flex;
   flex-direction: column;
@@ -1238,7 +1373,7 @@ textarea.field-input {
   font-size: 11.5px;
 }
 
-/* ------------------------------------------------ lavoro: consumi agenti --- */
+/* ---------------------------------------------------- work: agent usage --- */
 .usage-list {
   display: flex;
   flex-direction: column;
@@ -1329,7 +1464,7 @@ textarea.field-input {
   gap: 4px;
 }
 
-/* ------------------------------------------ presentazione: forma e setup --- */
+/* -------------------------------------------- introduction: form and setup --- */
 .welcome-forms {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1403,7 +1538,7 @@ textarea.field-input {
   color: var(--danger);
 }
 
-/* --------------------------------------------------------------- agenda --- */
+/* -------------------------------------------------------------- agenda --- */
 .agenda-add {
   display: flex;
   gap: 8px;
@@ -1477,7 +1612,25 @@ textarea.field-input {
   font-variant-numeric: tabular-nums;
 }
 
-/* --------------------------------------------------------------- motori --- */
+.agenda-day {
+  margin: 10px 2px 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agenda-day:first-child {
+  margin-top: 0;
+}
+
+.agenda-item.cancelled strong {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* ------------------------------------------------------------- engines --- */
 .segmented {
   position: sticky;
   top: 0;
@@ -1903,7 +2056,7 @@ textarea.field-input {
   background: var(--danger);
 }
 
-/* -------------------------------------------------------------- avvisi --- */
+/* ------------------------------------------------------------- notices --- */
 .panel-toast {
   position: fixed;
   left: 50%;
@@ -1928,7 +2081,7 @@ textarea.field-input {
   border-color: rgba(245, 196, 81, 0.4);
 }
 
-/* ----------------------------------------------------------- animazioni --- */
+/* ---------------------------------------------------------- animations --- */
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1978,7 +2131,7 @@ textarea.field-input {
   }
 }
 
-/* Chi è e cosa sa di te (panel/memory.js) */
+/* Who she is and what she knows about you (panel/memory.js) */
 .memory-traits {
   resize: vertical;
   min-height: 44px;
@@ -1994,7 +2147,7 @@ textarea.field-input {
   font-weight: 500;
 }
 
-/* Musica (panel/music.js) */
+/* Music (panel/music.js) */
 .music-setup,
 .music-connected {
   display: flex;
@@ -2030,7 +2183,7 @@ textarea.field-input {
   display: none;
 }
 
-/* Primo avvio (panel/welcome.js) */
+/* First start (panel/welcome.js) */
 .welcome {
   position: absolute;
   inset: 0;
@@ -2151,7 +2304,7 @@ textarea.field-input {
   align-items: center;
   gap: 8px;
   margin-top: 16px;
-  /* Sempre in vista: i passi lunghi scorrono sotto i bottoni. */
+  /* Always visible: long steps scroll under the buttons. */
   position: sticky;
   bottom: -14px;
   margin-bottom: -14px;

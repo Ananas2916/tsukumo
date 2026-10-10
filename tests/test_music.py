@@ -1,4 +1,4 @@
-"""Musica: etichette del cervello, comandi al volo, gusti e servizio (con uno Spotify finto)."""
+"""Music: the brain's tags, quick commands, taste and the service (with a fake Spotify)."""
 
 import asyncio
 from urllib.parse import parse_qs, urlparse
@@ -23,7 +23,7 @@ def _track(id_="t1", title="Motion Sickness", artist="Phoebe Bridgers", duration
 
 
 class FakeSpotify:
-    """Quello che MusicService usa di SpotifyClient, registrando le chiamate."""
+    """What MusicService uses of SpotifyClient, recording the calls."""
 
     def __init__(self, now=None, connected=True):
         self.connected = connected
@@ -84,7 +84,7 @@ def _service(tmp_path, now=None, connected=True):
 
 
 # ---------------------------------------------------------------------------
-# Etichette e comandi
+# Tags and commands
 # ---------------------------------------------------------------------------
 def test_music_tags_are_parsed():
     assert music_tag("[[music: play Phoebe Bridgers - Kyoto; boygenius - Not Strong Enough]]") == (
@@ -120,7 +120,7 @@ def test_player_commands(text, action):
 
 
 # ---------------------------------------------------------------------------
-# Gusti
+# Taste
 # ---------------------------------------------------------------------------
 def test_taste_learns_from_listening_and_survives_a_restart(tmp_path):
     path = tmp_path / "music_taste.json"
@@ -153,7 +153,7 @@ def test_liking_after_disliking_moves_the_song(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Servizio
+# Service
 # ---------------------------------------------------------------------------
 def test_directive_only_when_talking_about_music(tmp_path):
     service = _service(tmp_path, NowPlaying(_track(), playing=True, progress=40))
@@ -161,9 +161,9 @@ def test_directive_only_when_talking_about_music(tmp_path):
     async def run():
         assert await service.directive("che tempo fa domani?") == ""
         note = await service.directive("di che genere è questa canzone?")
-        # "vorrei sentirne di simili" non nomina la musica, ma e' il seguito.
+        # "vorrei sentirne di simili" doesn't name music, but it's the follow-up.
         follow = await service.directive("e dimmi, ne conosci altri così?")
-        assert await service.directive("scrivimi una mail") != ""  # ancora un turno in tema
+        assert await service.directive("scrivimi una mail") != ""  # one more turn on topic
         assert await service.directive("e poi?") == ""
         return note, follow
 
@@ -195,7 +195,9 @@ def test_play_problems_are_explained(tmp_path):
     service.spotify.catalog = {"Kyoto": _track("k", "Kyoto")}
     service.spotify.fail["play"] = SpotifyError("Premium required", "PREMIUM_REQUIRED", 403)
     assert "Premium" in asyncio.run(service.run_tags(["[[music: play Kyoto]]"]))
-    assert "Non ho trovato" in asyncio.run(service.run_tags(["[[music: play Nessuno - Mai]]"]))
+    assert "I didn't find" in asyncio.run(service.run_tags(["[[music: play Nessuno - Mai]]"]))
+    # Said aloud in the voice's language.
+    assert "Non ho trovato" in asyncio.run(service.run_tags(["[[music: play Nessuno - Mai]]"], "it"))
 
 
 def test_controls_fall_back_to_media_keys_without_premium(tmp_path, monkeypatch):
@@ -206,7 +208,7 @@ def test_controls_fall_back_to_media_keys_without_premium(tmp_path, monkeypatch)
     service.now = NowPlaying(_track(), playing=True)
 
     assert asyncio.run(service.command("metti in pausa la musica", "it")) == "Musica in pausa."
-    assert asyncio.run(service.command("riprendi la musica", "it")) == "Si riparte!"  # gia' in play: niente tasto
+    assert asyncio.run(service.command("riprendi la musica", "it")) == "Si riparte!"  # already playing: no key press
     assert asyncio.run(service.command("next song", "en")) == "Here's the next one."
     assert pressed == ["toggle", "next"]
     assert asyncio.run(service.command("che genere è?", "it")) is None
@@ -232,7 +234,7 @@ def test_listening_and_skipping_are_observed(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Collegamento
+# Connection
 # ---------------------------------------------------------------------------
 def test_authorize_url_uses_pkce_and_validates_the_client_id(tmp_path):
     client = SpotifyClient(tmp_path / "spotify.json")
@@ -244,7 +246,7 @@ def test_authorize_url_uses_pkce_and_validates_the_client_id(tmp_path):
     assert query["code_challenge_method"] == ["S256"] and len(query["code_challenge"][0]) == 43
     assert "user-modify-playback-state" in query["scope"][0]
     assert query["state"][0] in client._pending
-    # Il Client ID resta dopo un riavvio; senza token non e' "collegato".
+    # The Client ID stays after a restart; without a token it isn't "connected".
     again = SpotifyClient(tmp_path / "spotify.json")
     assert again.configured and not again.connected
 
@@ -256,7 +258,7 @@ def test_music_tags_are_executed_and_not_scheduled_as_reminders(client):
     seen = []
 
     class Recorder:
-        async def run_tags(self, tags):
+        async def run_tags(self, tags, language="en"):
             seen.extend(tags)
             return None
 

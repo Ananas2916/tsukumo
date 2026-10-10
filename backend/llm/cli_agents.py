@@ -1,34 +1,35 @@
-"""Agenti che si usano da riga di comando: Claude Code, Codex, Antigravity e un comando qualsiasi.
+"""Agents used from the command line: Claude Code, Codex, Antigravity and any command.
 
-Tutti funzionano allo stesso modo: a ogni messaggio il companion lancia
-il programma in modalita' non interattiva, gli passa il testo sullo standard
-input e legge quello che stampa, riga per riga, mentre lo stampa. Cosi' il
-personaggio comincia a parlare prima che l'agente abbia finito.
+They all work the same way: at every message the companion runs the program
+in non-interactive mode, passes it the text on standard input and reads what
+it prints, line by line, as it prints it. So the character starts speaking
+before the agent has finished.
 
-Formati verificati dal vivo (settembre 2026):
+Formats verified live (September 2026):
 
 * ``claude -p --output-format stream-json --verbose --include-partial-messages``
-  stampa un oggetto JSON per riga. Il testo arriva a pezzi in
-  ``stream_event`` -> ``content_block_delta`` -> ``text_delta``; il messaggio
-  completo arriva *anche* dopo, come evento ``assistant`` (da ignorare se lo
-  abbiamo gia' letto a pezzi). I ``thinking_delta`` sono il ragionamento: mai
-  letti ad alta voce. L'ultimo evento e' ``result``, con ``session_id`` per
-  riprendere la conversazione con ``--resume``.
-* ``codex exec --json`` stampa ``thread.started`` (con ``thread_id``), poi un
-  ``item.completed`` di tipo ``agent_message`` per ogni messaggio e infine
-  ``turn.completed`` (o ``turn.failed``). Si riprende con
+  prints one JSON object per line. The text arrives in pieces in
+  ``stream_event`` -> ``content_block_delta`` -> ``text_delta``; the complete
+  message arrives *also* afterwards, as an ``assistant`` event (to be ignored
+  if we already read it in pieces). The ``thinking_delta``s are the
+  reasoning: never read aloud. The last event is ``result``, with
+  ``session_id`` to resume the conversation with ``--resume``.
+* ``codex exec --json`` prints ``thread.started`` (with ``thread_id``), then
+  an ``item.completed`` of type ``agent_message`` for every message and
+  finally ``turn.completed`` (or ``turn.failed``). It resumes with
   ``codex exec resume <thread_id> -``.
-* ``agy --output-format stream-json --print=<testo>`` (Antigravity 1.2) stampa
-  ``init`` (con ``conversation_id``), poi ``step_update`` per ogni passo: il
-  testo arriva in ``text_delta`` dei passi ``agent_response``, i tool sono passi
-  ``tool``. L'ultimo e' ``result``, con ``denied_actions`` se un tool chiedeva
-  un permesso che senza finestra non si puo' dare. Si riprende con
-  ``--conversation <id>``. Il prompt va attaccato al flag: ``-p testo`` si
-  prenderebbe il flag successivo come prompt.
+* ``agy --output-format stream-json --print=<text>`` (Antigravity 1.2) prints
+  ``init`` (with ``conversation_id``), then ``step_update`` for every step:
+  the text arrives in ``text_delta`` of the ``agent_response`` steps, tools
+  are ``tool`` steps. The last is ``result``, with ``denied_actions`` if a
+  tool asked for a permission that can't be given without a window. It
+  resumes with ``--conversation <id>``. The prompt must be attached to the
+  flag: ``-p text`` would take the next flag as the prompt.
 
-I processi girano in thread normali e non con ``asyncio.create_subprocess_*``:
-su Windows quello funziona solo con il ProactorEventLoop, e uvicorn con
-``--reload`` usa il Selector. Un thread per stdout e' portabile ovunque.
+The processes run in normal threads and not with
+``asyncio.create_subprocess_*``: on Windows that only works with the
+ProactorEventLoop, and uvicorn with ``--reload`` uses the Selector. A thread
+per stdout is portable everywhere.
 """
 
 from __future__ import annotations
@@ -45,16 +46,18 @@ import threading
 import time
 from collections import deque
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from .activity import describe_antigravity_tool, describe_claude_tool, describe_codex_item
+from .tasks import TASK_TOOLS, TaskList
 from .base import Activity, LLMClient, Message, describe_error, last_user_message, last_user_text, speech_directive
 
 logger = logging.getLogger(__name__)
 
-#: Come deve rispondere un agente la cui risposta verra' letta ad alta voce.
-#: Va aggiunto ai vincoli di lingua, non li sostituisce.
+#: How an agent whose reply will be read aloud must answer.
+#: It's added to the language constraints, it doesn't replace them.
 SPOKEN_STYLE = (
     "Your reply is read aloud by a small 3D character that lives on the user's "
     "desktop. Answer in at most three short sentences of plain spoken text: no "
@@ -67,14 +70,14 @@ _EOF = object()
 
 
 class AgentError(RuntimeError):
-    """L'agente ha risposto con un errore o e' uscito male."""
+    """The agent answered with an error or exited badly."""
 
 
 # ---------------------------------------------------------------------------
-# Processi
+# Processes
 # ---------------------------------------------------------------------------
 def resolve_executable(command: str) -> str | None:
-    """Percorso completo di un programma, cercando anche le estensioni di Windows."""
+    """Full path of a program, looking for Windows' extensions too."""
     command = (command or "").strip().strip('"')
     if not command:
         return None
@@ -84,15 +87,15 @@ def resolve_executable(command: str) -> str | None:
     return shutil.which(command)
 
 
-#: Lo script JavaScript lanciato da un .cmd di npm (o pnpm): "%dp0%\node_modules\...\cli.js".
+#: The JavaScript script run by an npm (or pnpm) .cmd: "%dp0%\node_modules\...\cli.js".
 _NPM_SHIM = re.compile(r'"%~?dp0%?\\([^"]+?\.[cm]?js)"', re.IGNORECASE)
 
 
 def unwrap_npm_shim(path: str) -> list[str] | None:
-    """``gemini.cmd`` installato da npm -> ``[node, .../cli.js]``, senza cmd.exe in mezzo.
+    """``gemini.cmd`` installed by npm -> ``[node, .../cli.js]``, without cmd.exe in between.
 
-    Cosi' il messaggio puo' stare negli argomenti senza che cmd.exe ne esegua i
-    caratteri speciali. ``None`` se il file non e' un involucro di npm.
+    So the message can stay in the arguments without cmd.exe executing its
+    special characters. ``None`` if the file isn't an npm wrapper.
     """
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
@@ -111,7 +114,7 @@ def unwrap_npm_shim(path: str) -> list[str] | None:
 
 
 def _kill_tree(process: subprocess.Popen) -> None:
-    """Chiude il processo e i suoi figli (gli agenti ne lanciano parecchi)."""
+    """Closes the process and its children (agents start quite a few)."""
     if process.poll() is not None:
         return
     if os.name == "nt":
@@ -134,20 +137,20 @@ async def stream_process(
     timeout: float = 300.0,
     env: dict[str, str] | None = None,
 ) -> AsyncIterator[str]:
-    """Lancia ``argv`` e produce le righe di stdout man mano che arrivano.
+    """Runs ``argv`` and yields the stdout lines as they arrive.
 
-    Se il processo esce con un codice diverso da zero solleva ``AgentError``
-    con le ultime righe di stderr. Se il chiamante smette di leggere (turno
-    interrotto) il processo viene chiuso insieme ai suoi figli.
+    If the process exits with a non-zero code it raises ``AgentError`` with the
+    last lines of stderr. If the caller stops reading (interrupted turn) the
+    process is closed together with its children.
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[Any] = asyncio.Queue()
     stderr_tail: deque[str] = deque(maxlen=30)
 
     if argv and argv[0].lower().endswith((".cmd", ".bat")):
-        # Un .cmd passa dall'interprete di comandi: i caratteri speciali del
-        # messaggio (& | > ...) verrebbero eseguiti. Il testo quindi va solo
-        # sullo standard input, mai negli argomenti.
+        # A .cmd goes through the command interpreter: the message's special
+        # characters (& | > ...) would be executed. So the text goes only on
+        # standard input, never in the arguments.
         argv = ["cmd.exe", "/d", "/c", *argv]
 
     process = subprocess.Popen(
@@ -156,8 +159,8 @@ async def stream_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd or None,
-        # TSUKUMO_INTERNAL: gli hook di Claude Code e Codex (scripts/tsukumo_notify.py)
-        # non devono avvisare di una risposta che il companion sta gia' dicendo.
+        # TSUKUMO_INTERNAL: Claude Code's and Codex's hooks (scripts/tsukumo_notify.py)
+        # must not notify about a reply the companion is already saying.
         env={**os.environ, "TSUKUMO_INTERNAL": "1", **(env or {})},
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -183,7 +186,7 @@ async def stream_process(
                 process.stdin.write(stdin_text.encode("utf-8"))
             process.stdin.close()
         except OSError:
-            pass  # il programma non legge lo stdin: non e' un errore
+            pass  # the program doesn't read stdin: not an error
 
     for target in (pump_stdout, pump_stderr, feed_stdin):
         threading.Thread(target=target, daemon=True).start()
@@ -193,7 +196,7 @@ async def stream_process(
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                raise AgentError(f"Nessuna risposta completa in {timeout:.0f} secondi")
+                raise AgentError(f"No complete answer within {timeout:.0f} seconds")
             item = await asyncio.wait_for(queue.get(), remaining)
             if item is _EOF:
                 break
@@ -201,17 +204,17 @@ async def stream_process(
 
         code = await asyncio.to_thread(process.wait)
         if code != 0:
-            detail = " | ".join(list(stderr_tail)[-4:]) or f"codice di uscita {code}"
+            detail = " | ".join(list(stderr_tail)[-4:]) or f"exit code {code}"
             raise AgentError(detail)
     except asyncio.TimeoutError as exc:
-        raise AgentError(f"Nessuna risposta completa in {timeout:.0f} secondi") from exc
+        raise AgentError(f"No complete answer within {timeout:.0f} seconds") from exc
     finally:
         if process.poll() is None:
             await asyncio.to_thread(_kill_tree, process)
 
 
 def _run_quick(argv: list[str], timeout: float = 8.0) -> str:
-    """Esegue un comando brevissimo (``--version``) e ne restituisce l'output."""
+    """Runs a very short command (``--version``) and returns its output."""
     try:
         result = subprocess.run(
             argv,
@@ -221,20 +224,20 @@ def _run_quick(argv: list[str], timeout: float = 8.0) -> str:
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return f"errore: {describe_error(exc)}"
+        return f"error: {describe_error(exc)}"
     output = (result.stdout or result.stderr).decode("utf-8", "replace").strip()
     return output.splitlines()[0] if output else ""
 
 
 # ---------------------------------------------------------------------------
-# Sessione persistente su disco
+# Persistent session on disk
 # ---------------------------------------------------------------------------
 class _SessionFile:
-    """Ricorda l'id della conversazione dell'agente tra un riavvio e l'altro."""
+    """Remembers the agent's conversation id from one restart to the next."""
 
     def __init__(self, path: Path | None, scope: str) -> None:
         self.path = path
-        #: Cambiando cartella di lavoro o modello la conversazione ricomincia.
+        #: Changing working folder or model, the conversation starts over.
         self.scope = scope
 
     def load(self) -> str | None:
@@ -257,22 +260,22 @@ class _SessionFile:
                 json.dumps({"scope": self.scope, "sessionId": session_id}), encoding="utf-8"
             )
         except OSError as exc:
-            logger.warning("Sessione dell'agente non salvata: %s", exc)
+            logger.warning("Agent session not saved: %s", exc)
 
     def clear(self) -> None:
         if self.path and self.path.is_file():
             try:
                 self.path.unlink()
             except OSError as exc:
-                logger.warning("Sessione dell'agente non cancellata: %s", exc)
+                logger.warning("Agent session not deleted: %s", exc)
 
 
 class _CLIAgent(LLMClient):
-    """Parti comuni: eseguibile, cartella, sessione, stato."""
+    """Shared parts: executable, folder, session, state."""
 
     stateful = True
-    #: Nome leggibile, per i messaggi d'errore.
-    label = "agente"
+    #: Readable name, for the error messages.
+    label = "agent"
 
     def __init__(self, executable: str | None, cwd: str, timeout: float, session_path: Path | None, scope: str) -> None:
         self.executable = executable
@@ -281,27 +284,30 @@ class _CLIAgent(LLMClient):
         self.session = _SessionFile(session_path, scope)
         self.session_id: str | None = self.session.load()
         self._version: str | None = None
+        #: The agent's task list: it lives as long as the session, from one turn to the next.
+        self.tasks = TaskList()
 
     def _require_executable(self) -> str:
         if not self.executable:
-            raise AgentError(f"{self.label}: programma non trovato. Installalo o indica il percorso nel pannello.")
+            raise AgentError(f"{self.label}: program not found. Install it or set its path in the panel.")
         return self.executable
 
     async def reset(self) -> None:
         self.session_id = None
         self.session.clear()
-        logger.info("%s: conversazione azzerata", self.label)
+        self.tasks.clear()
+        logger.info("%s: conversation reset", self.label)
 
     async def health(self) -> dict[str, Any]:
         if not self.executable:
             return {
                 "backend": self.name,
                 "ok": False,
-                "error": f"{self.label} non trovato",
-                "hint": "Installalo, oppure scrivi il percorso completo nel campo Programma.",
+                "error": f"{self.label} not found",
+                "hint": "Install it, or write the full path in the Program field.",
             }
         if not Path(self.cwd).is_dir():
-            return {"backend": self.name, "ok": False, "error": f"Cartella di lavoro inesistente: {self.cwd}"}
+            return {"backend": self.name, "ok": False, "error": f"Working folder doesn't exist: {self.cwd}"}
         if self._version is None:
             self._version = await asyncio.to_thread(_run_quick, [self.executable, "--version"])
         problem = self._login_problem()
@@ -322,25 +328,26 @@ class _CLIAgent(LLMClient):
 # Claude Code
 # ---------------------------------------------------------------------------
 class ClaudeStreamParser:
-    """Trasforma gli eventi ``stream-json`` di Claude Code in frammenti di testo.
+    """Turns Claude Code's ``stream-json`` events into text chunks.
 
-    Separato dal client per poterlo provare con righe registrate dal vivo.
+    Separate from the client so it can be tested with lines recorded live.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, tasks: TaskList | None = None) -> None:
         self.session_id: str | None = None
         self.finished = False
         self.error: str | None = None
+        self.tasks = tasks if tasks is not None else TaskList()
         self._current: str | None = None
         self._last: str | None = None
         self._streamed: set[str] = set()
         self._produced = False
-        #: Tool usati dall'agente, da raccontare mentre lavora (vedi ``take_activities``).
+        #: Tools used by the agent, to tell while it works (see ``take_activities``).
         self.activities: list[Activity] = []
         self._tools: set[str] = set()
 
     def take_activities(self) -> list[Activity]:
-        """I passi di lavoro arrivati dall'ultima chiamata, e svuota la lista."""
+        """The work steps arrived since the last call, emptying the list."""
         taken, self.activities = self.activities, []
         return taken
 
@@ -356,8 +363,8 @@ class ClaudeStreamParser:
         kind = event.get("type")
         if event.get("session_id"):
             self.session_id = event["session_id"]
-        # Gli eventi dei sotto-agenti (parent_tool_use_id valorizzato) sono
-        # lavoro interno: si legge solo quello che l'agente dice a te.
+        # The sub-agents' events (parent_tool_use_id set) are internal work: only
+        # what the agent says to you is read.
         if event.get("parent_tool_use_id"):
             return []
 
@@ -378,27 +385,39 @@ class ClaudeStreamParser:
             for block in message.get("content") or []:
                 if block.get("type") == "tool_use" and block.get("id") not in self._tools:
                     self._tools.add(block.get("id"))
-                    self.activities.append(describe_claude_tool(str(block.get("name") or ""), block.get("input")))
+                    name = str(block.get("name") or "")
+                    activity = describe_claude_tool(name, block.get("input"))
+                    if name in TASK_TOOLS and self.tasks.apply_claude(name, block.get("input"), call_id=str(block.get("id") or "")):
+                        activity = replace(activity, tasks=tuple(self.tasks.public()))
+                    self.activities.append(activity)
             if message.get("id") in self._streamed:
-                return []  # gia' letto a pezzi: questo e' il riepilogo
+                return []  # already read in pieces: this is the summary
             text = "".join(
                 block.get("text", "") for block in message.get("content") or [] if block.get("type") == "text"
             )
             return self._emit(text, message.get("id"), streamed=False) if text else []
 
+        if kind == "user":
+            # A TaskCreate's response carries the task's number ("Task #3 created").
+            for block in (event.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    if self.tasks.created(str(block.get("tool_use_id") or ""), block.get("content")):
+                        self.activities.append(Activity("plan", "plans the work", "", "TaskCreate", tasks=tuple(self.tasks.public())))
+            return []
+
         if kind == "result":
             self.finished = True
             if event.get("is_error") or event.get("subtype") not in (None, "success"):
                 errors = event.get("errors") or []
-                self.error = str(event.get("result") or "; ".join(map(str, errors)) or event.get("subtype") or "errore")
+                self.error = str(event.get("result") or "; ".join(map(str, errors)) or event.get("subtype") or "error")
                 return []
             if not self._produced and event.get("result"):
                 return self._emit(str(event["result"]), None, streamed=False)
         return []
 
     def _emit(self, text: str, message_id: str | None, streamed: bool) -> list[str]:
-        # Un messaggio nuovo (per esempio dopo aver usato un tool) e' una
-        # frase nuova: l'a capo la fa pronunciare separata dalla precedente.
+        # A new message (for example after using a tool) is a new sentence: the
+        # newline makes it spoken separately from the previous one.
         pieces = ["\n"] if self._produced and message_id != self._last else []
         if streamed and message_id:
             self._streamed.add(message_id)
@@ -409,7 +428,7 @@ class ClaudeStreamParser:
 
 
 class ClaudeCodeClient(_CLIAgent):
-    """Claude Code in modalita' ``--print``, con sessione ripresa a ogni turno."""
+    """Claude Code in ``--print`` mode, with the session resumed at every turn."""
 
     name = "claude_code"
     label = "Claude Code"
@@ -455,7 +474,7 @@ class ClaudeCodeClient(_CLIAgent):
         if self.permission_mode != "default":
             argv += ["--permission-mode", self.permission_mode]
         if folders:
-            # I file che gli hai passato possono stare fuori dalla sua cartella.
+            # The files you passed it may be outside its folder.
             argv += ["--add-dir", *folders]
         return argv
 
@@ -467,7 +486,7 @@ class ClaudeCodeClient(_CLIAgent):
         last = last_user_message(messages)
         folders = last.folders if last else ()
         for attempt in (1, 2):
-            parser = ClaudeStreamParser()
+            parser = ClaudeStreamParser(self.tasks)
             produced = False
             try:
                 async for line in stream_process(
@@ -482,9 +501,9 @@ class ClaudeCodeClient(_CLIAgent):
                 if parser.error:
                     raise AgentError(f"Claude Code: {parser.error}") from None
                 if attempt == 1 and self.session_id and not produced and not parser.session_id:
-                    # La sessione salvata non esiste piu' (cancellata, o di un
-                    # altro account): si riparte con una conversazione nuova.
-                    logger.warning("Sessione di Claude Code non ripresa (%s): ne apro una nuova", exc)
+                    # The saved session no longer exists (deleted, or of another account): we
+                    # start again with a new conversation.
+                    logger.warning("Claude Code session not resumed (%s): opening a new one", exc)
                     await self.reset()
                     continue
                 raise
@@ -500,7 +519,7 @@ class ClaudeCodeClient(_CLIAgent):
 # Codex
 # ---------------------------------------------------------------------------
 def find_codex(explicit: str = "") -> str | None:
-    """``codex`` nel PATH, oppure quello incluso nell'estensione per VS Code/Cursor."""
+    """``codex`` in the PATH, or the one bundled with the VS Code/Cursor extension."""
     found = resolve_executable(explicit) if explicit else shutil.which("codex")
     if found:
         return found
@@ -516,24 +535,30 @@ def find_codex(explicit: str = "") -> str | None:
 
 
 class CodexStreamParser:
-    """Trasforma gli eventi JSONL di ``codex exec --json`` in frammenti di testo."""
+    """Turns the JSONL events of ``codex exec --json`` into text chunks."""
 
-    def __init__(self) -> None:
+    def __init__(self, tasks: TaskList | None = None) -> None:
         self.thread_id: str | None = None
         self.finished = False
         self.error: str | None = None
+        self.tasks = tasks if tasks is not None else TaskList()
         self._produced = False
-        #: Comandi, modifiche e ricerche dell'agente (vedi ``take_activities``).
+        #: The agent's commands, changes and searches (see ``take_activities``).
         self.activities: list[Activity] = []
         self._items: set[str] = set()
 
     def take_activities(self) -> list[Activity]:
-        """I passi di lavoro arrivati dall'ultima chiamata, e svuota la lista."""
+        """The work steps arrived since the last call, emptying the list."""
         taken, self.activities = self.activities, []
         return taken
 
     def _track(self, item: dict[str, Any]) -> None:
-        # Un comando arriva due volte (iniziato, finito): si racconta una volta.
+        # The task list changes several times (started, updated, finished): every time counts.
+        if item.get("type") == "todo_list":
+            if self.tasks.apply_codex(item):
+                self.activities.append(Activity("plan", "plans the work", "", "todo_list", tasks=tuple(self.tasks.public())))
+            return
+        # A command arrives twice (started, finished): it's told once.
         item_id = str(item.get("id") or "")
         if item_id and item_id in self._items:
             return
@@ -555,12 +580,12 @@ class CodexStreamParser:
         kind = event.get("type")
         if kind == "thread.started":
             self.thread_id = event.get("thread_id") or self.thread_id
-        elif kind == "item.started":
+        elif kind in ("item.started", "item.updated"):
             self._track(event.get("item") or {})
         elif kind == "item.completed":
             item = event.get("item") or {}
             self._track(item)
-            # "reasoning" e' il ragionamento interno: mai letto ad alta voce.
+            # "reasoning" is the internal reasoning: never read aloud.
             if item.get("type") == "agent_message" and item.get("text"):
                 pieces = ["\n"] if self._produced else []
                 pieces.append(item["text"])
@@ -572,12 +597,12 @@ class CodexStreamParser:
             self.finished = kind == "turn.failed"
             error = event.get("error") or {}
             message = error.get("message") if isinstance(error, dict) else str(error)
-            self.error = message or event.get("message") or "turno fallito"
+            self.error = message or event.get("message") or "turn failed"
         return []
 
 
 class CodexClient(_CLIAgent):
-    """Codex in modalita' ``exec``, con il thread ripreso a ogni turno."""
+    """Codex in ``exec`` mode, with the thread resumed at every turn."""
 
     name = "codex"
     label = "Codex"
@@ -598,20 +623,20 @@ class CodexClient(_CLIAgent):
     def build_argv(self, images: tuple[str, ...] = ()) -> list[str]:
         argv = [self._require_executable(), "exec", "--json", "--skip-git-repo-check", "-s", self.sandbox]
         for image in images:
-            # -i accetta piu' valori: dopo deve sempre venire un'altra opzione (-C).
+            # -i accepts several values: another option (-C) must always come after it.
             argv += ["-i", image]
         if self.model:
             argv += ["-m", self.model]
         argv += ["-C", self.cwd]
         if self.session_id:
             argv += ["resume", self.session_id]
-        argv.append("-")  # il messaggio arriva dallo standard input
+        argv.append("-")  # the message arrives on standard input
         return argv
 
     def _login_problem(self) -> str | None:
         home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
         if not (home / "auth.json").is_file():
-            return "Login non fatto: esegui `codex login` (o accedi dall'estensione)"
+            return "Not signed in: run `codex login` (or sign in from the extension)"
         return None
 
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
@@ -621,7 +646,7 @@ class CodexClient(_CLIAgent):
         directive = speech_directive(messages)
         prompt = f"[{SPOKEN_STYLE} {directive}]\n\n{text}"
         last = last_user_message(messages)
-        parser = CodexStreamParser()
+        parser = CodexStreamParser(self.tasks)
         try:
             argv = self.build_argv(last.images if last else ())
             async for line in stream_process(argv, stdin_text=prompt, cwd=self.cwd, timeout=self.timeout):
@@ -643,16 +668,16 @@ class CodexClient(_CLIAgent):
 # ---------------------------------------------------------------------------
 # Antigravity
 # ---------------------------------------------------------------------------
-#: Ogni 15 minuti ``agy`` lancia un aggiornatore staccato da ogni console
-#: (``agy --bg-updater``) che esegue ``agy --version``: senza una console da
-#: ereditare, Windows gliene apre una nuova e un terminale lampeggia a ogni
-#: messaggio. Spento solo per i turni del companion: da VS Code o dal
-#: terminale Antigravity continua ad aggiornarsi. Vale "true", non "1".
+#: Every 15 minutes ``agy`` starts an updater detached from any console
+#: (``agy --bg-updater``) that runs ``agy --version``: with no console to
+#: inherit, Windows opens a new one and a terminal flashes at every message.
+#: Turned off only for the companion's turns: from VS Code or the terminal
+#: Antigravity keeps updating. The value is "true", not "1".
 ANTIGRAVITY_ENV = {"AGY_CLI_DISABLE_AUTO_UPDATE": "true"}
 
 
 def find_antigravity(explicit: str = "") -> str | None:
-    """``agy`` nel PATH, oppure quello che l'app e l'estensione mettono in ``~/.gemini/bin``."""
+    """``agy`` in the PATH, or the one the app and the extension put in ``~/.gemini/bin``."""
     found = resolve_executable(explicit) if explicit else shutil.which("agy")
     if found:
         return found
@@ -661,15 +686,15 @@ def find_antigravity(explicit: str = "") -> str | None:
 
 
 class AntigravityStreamParser:
-    """Trasforma gli eventi ``stream-json`` di ``agy`` in frammenti di testo."""
+    """Turns ``agy``'s ``stream-json`` events into text chunks."""
 
     def __init__(self) -> None:
         self.conversation_id: str | None = None
         self.finished = False
         self.error: str | None = None
-        #: Errore che il riepilogo si porta dietro da un turno precedente, a risposta gia' completa.
+        #: An error the summary carries over from a previous turn, with the reply already complete.
         self.stale_error: str | None = None
-        #: Tool rifiutati perche' chiedevano un permesso (senza finestra non si puo' dare).
+        #: Tools refused because they asked for a permission (it can't be given without a window).
         self.denied: list[str] = []
         self.activities: list[Activity] = []
         self._produced = False
@@ -678,7 +703,7 @@ class AntigravityStreamParser:
         self._tools: set[Any] = set()
 
     def take_activities(self) -> list[Activity]:
-        """I passi di lavoro arrivati dall'ultima chiamata, e svuota la lista."""
+        """The work steps arrived since the last call, emptying the list."""
         taken, self.activities = self.activities, []
         return taken
 
@@ -704,7 +729,7 @@ class AntigravityStreamParser:
                 if step.get("text_delta"):
                     return self._emit(str(step["text_delta"]), index)
             if step.get("step_type") == "tool" and index not in self._tools:
-                # Un tool arriva due volte (iniziato, finito): si racconta una volta.
+                # A tool arrives twice (started, finished): it's told once.
                 self._tools.add(index)
                 info = step.get("tool_info") or {}
                 activity = describe_antigravity_tool(str(step.get("tool_name") or info.get("name") or ""), info.get("parameters"))
@@ -722,9 +747,9 @@ class AntigravityStreamParser:
             status = str(result.get("status") or "SUCCESS")
             if status != "SUCCESS":
                 error = str(result.get("error") or result.get("response") or status)
-                # Il risultato riassume tutta la conversazione: un turno interrotto
-                # una volta la lascia in ERROR per sempre, anche quando la risposta
-                # di adesso e' arrivata fino in fondo. Quella vale, l'errore no.
+                # The result sums up the whole conversation: a turn interrupted once
+                # leaves it in ERROR forever, even when the current reply arrived in full.
+                # That reply counts, the error doesn't.
                 if self._answered:
                     self.stale_error = error
                     return []
@@ -734,11 +759,11 @@ class AntigravityStreamParser:
                 return self._emit(str(result["response"]), None)
         elif kind == "error":
             error = event.get("error")
-            self.error = str((error.get("message") if isinstance(error, dict) else error) or event.get("message") or "errore")
+            self.error = str((error.get("message") if isinstance(error, dict) else error) or event.get("message") or "error")
         return []
 
     def _emit(self, text: str, step: Any) -> list[str]:
-        # Un passo nuovo (per esempio dopo un tool) e' una frase nuova.
+        # A new step (for example after a tool) is a new sentence.
         pieces = ["\n"] if self._produced and step != self._last_step else []
         self._last_step = step
         pieces.append(text)
@@ -747,7 +772,7 @@ class AntigravityStreamParser:
 
 
 class AntigravityClient(_CLIAgent):
-    """Antigravity in modalita' ``--print``, con la conversazione ripresa a ogni turno."""
+    """Antigravity in ``--print`` mode, with the conversation resumed at every turn."""
 
     name = "antigravity"
     label = "Antigravity"
@@ -768,7 +793,7 @@ class AntigravityClient(_CLIAgent):
     def build_argv(self, prompt: str, folders: tuple[str, ...] = ()) -> list[str]:
         executable = self._require_executable()
         if executable.lower().endswith((".cmd", ".bat")):
-            raise AgentError("Antigravity: indica agy.exe, non uno script .cmd (il messaggio passa negli argomenti).")
+            raise AgentError("Antigravity: point it to agy.exe, not a .cmd script (the message goes in the arguments).")
         argv = [executable, "--output-format", "stream-json"]
         if self.model:
             argv += ["--model", self.model]
@@ -805,8 +830,8 @@ class AntigravityClient(_CLIAgent):
                 if parser.error:
                     raise AgentError(f"Antigravity: {parser.error}") from None
                 if attempt == 1 and self.session_id and not produced and not parser.conversation_id:
-                    # La conversazione salvata non esiste piu': se ne apre una nuova.
-                    logger.warning("Conversazione di Antigravity non ripresa (%s): ne apro una nuova", exc)
+                    # The saved conversation no longer exists: a new one is opened.
+                    logger.warning("Antigravity conversation not resumed (%s): opening a new one", exc)
                     await self.reset()
                     continue
                 raise
@@ -817,71 +842,71 @@ class AntigravityClient(_CLIAgent):
         if parser.error:
             raise AgentError(f"Antigravity: {parser.error}")
         if parser.stale_error:
-            logger.info("Antigravity ha risposto, ma la conversazione riporta ancora: %s", parser.stale_error)
+            logger.info("Antigravity answered, but the conversation still reports: %s", parser.stale_error)
         if parser.denied and not produced:
             raise AgentError(
-                f"Antigravity voleva usare {', '.join(parser.denied)}, ma senza la sua finestra non può "
-                "chiederti il permesso. Consentilo nelle sue impostazioni (permissions.allow) oppure "
-                "cambia i Permessi nella scheda Motori."
+                f"Antigravity wanted to use {', '.join(parser.denied)}, but without its window it can't "
+                "ask you for permission. Allow it in its settings (permissions.allow) or "
+                "change the Permissions in the Engines tab."
             )
 
 
 # ---------------------------------------------------------------------------
-# Un comando qualsiasi
+# Any command
 # ---------------------------------------------------------------------------
 def split_command(command: str) -> list[str]:
-    """Divide una riga di comando come farebbe il terminale, virgolette comprese."""
+    """Splits a command line as the terminal would, quotes included."""
     if os.name == "nt":
         parts = shlex.split(command, posix=False)
         return [part[1:-1] if len(part) >= 2 and part[0] == part[-1] == '"' else part for part in parts]
     return shlex.split(command)
 
 
-#: Quanti scambi recenti si ricordano a un comando, che a ogni lancio riparte da zero.
+#: How many recent exchanges a command remembers, since it starts from scratch at every run.
 COMMAND_MEMORY = 3
 
 
 class CommandAgentClient(_CLIAgent):
-    """Lancia un comando a scelta e legge quello che stampa come risposta.
+    """Runs a command of your choice and reads what it prints as the reply.
 
-    Serve sia per "Altro agente" sia per gli agenti con un comando gia' pronto
-    (Gemini CLI, Cline, Cursor...): ``name`` e ``label`` dicono quale.
+    It serves both "Another agent" and the agents with a ready-made command
+    (Gemini CLI, Cline, Cursor...): ``name`` and ``label`` say which.
     """
 
     name = "command"
-    label = "Il comando"
+    label = "The command"
 
     def __init__(
-        self, command: str, cwd: str = "", timeout: float = 300.0, name: str = "command", label: str = "Il comando"
+        self, command: str, cwd: str = "", timeout: float = 300.0, name: str = "command", label: str = "The command"
     ) -> None:
         self.name = name
         self.label = label
         self.template = split_command(command) if command.strip() else []
         executable = resolve_executable(self.template[0]) if self.template else None
         super().__init__(executable, cwd, timeout, None, scope="")
-        #: Gli ultimi scambi (domanda, risposta), rimandati a ogni lancio.
+        #: The last exchanges (question, answer), sent again at every run.
         self._recent: deque[tuple[str, str]] = deque(maxlen=COMMAND_MEMORY)
 
     def build(self, text: str) -> tuple[list[str], str | None]:
-        """argv e testo per lo stdin: ``{prompt}`` negli argomenti, altrimenti stdin."""
+        """argv and the text for stdin: ``{prompt}`` in the arguments, otherwise stdin."""
         executable = self._require_executable()
         rest = self.template[1:]
         if any("{prompt}" in part for part in rest):
             head = [executable]
             if executable.lower().endswith((".cmd", ".bat")):
-                # Un .cmd di npm si puo' saltare lanciando direttamente node.
+                # An npm .cmd can be skipped by running node directly.
                 head = unwrap_npm_shim(executable) or []
                 if not head:
                     raise AgentError(
-                        "Questo programma è uno script .cmd: per sicurezza il messaggio "
-                        "non può stare negli argomenti. Togli {prompt} e verrà passato "
+                        "This program is a .cmd script: for safety the message "
+                        "can't go in the arguments. Remove {prompt} and it will be passed "
                         "sullo standard input."
                     )
             return [*head, *(part.replace("{prompt}", text) for part in rest)], None
         return [executable, *rest], text
 
     def compose(self, text: str, directive: str) -> str:
-        """Il messaggio da mandare: vincoli del parlato, scambi recenti e domanda."""
+        """The message to send: speech constraints, recent exchanges and question."""
         parts = [f"[{SPOKEN_STYLE} {directive}]"]
         if self._recent:
             said = "\n".join(f"User: {asked}\nYou: {answered}" for asked, answered in self._recent)
@@ -891,11 +916,11 @@ class CommandAgentClient(_CLIAgent):
 
     async def health(self) -> dict[str, Any]:
         if not self.template:
-            return {"backend": self.name, "ok": False, "error": "Nessun comando impostato"}
+            return {"backend": self.name, "ok": False, "error": "No command set"}
         return await super().health()
 
     async def reset(self) -> None:
-        """Il comando non tiene una sessione: si dimenticano solo gli scambi recenti."""
+        """The command doesn't keep a session: only the recent exchanges are forgotten."""
         self._recent.clear()
 
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
@@ -912,4 +937,4 @@ class CommandAgentClient(_CLIAgent):
                 yield clean + "\n"
         if reply:
             self._recent.append((text, " ".join(reply)[:600]))
-        logger.info("%s: risposta in %.1fs", self.label, time.monotonic() - started)
+        logger.info("%s: answered in %.1fs", self.label, time.monotonic() - started)

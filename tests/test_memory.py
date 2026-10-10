@@ -1,4 +1,4 @@
-"""Personalita' e ricordi uguali per ogni cervello."""
+"""The same personality and memories for every brain."""
 
 import asyncio
 
@@ -25,7 +25,7 @@ def test_store_survives_a_restart_and_skips_duplicates(tmp_path):
     store.set_persona(name="Miku", traits="allegra e curiosa")
     assert store.add("Ha un gatto che si chiama Miso")
     assert store.add("ha un gatto che si chiama miso.") is None
-    # Lo stesso ricordo con un dettaglio in piu' sostituisce il vecchio.
+    # The same memory with one more detail replaces the old one.
     assert store.add("Ha un gatto che si chiama Miso, ed e' arancione") is None
     again = MemoryStore(tmp_path / "memory.json")
     assert again.name == "Miku" and [f.text for f in again.facts()] == ["Ha un gatto che si chiama Miso, ed e' arancione"]
@@ -61,7 +61,7 @@ def test_brain_can_save_a_fact_with_a_hidden_tag(tmp_path):
     assert "remember" not in reply and "[[" not in "".join(m["text"] for m in emit.of("token"))
     assert [f.text for f in companion.memory.facts()] == ["ha un gatto di nome Miso"]
     assert companion.memory.facts()[0].source == "brain"
-    # E al turno dopo il cervello lo sa.
+    # And on the next turn the brain knows it.
     companion.llm = Scripted(["Ok."])
     asyncio.run(companion.chat("come si chiama il mio gatto?", emit))
     system = " ".join(m.content for m in companion.llm.messages if m.role == "system")

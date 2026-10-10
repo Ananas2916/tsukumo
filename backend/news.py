@@ -1,8 +1,8 @@
-"""Titoli di giornata, perche' il companion possa commentarli.
+"""Today's headlines, so the companion can comment on them.
 
-Legge il feed RSS di Google News nella lingua del sistema (niente chiave).
-Si tiene solo titolo e testata; il commento lo scrive il cervello. I titoli
-gia' commentati non tornano.
+It reads Google News' RSS feed in the system's language (no key). Only the
+title and the outlet are kept; the comment is written by the brain. Headlines
+already commented on don't come back.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 FEED_URL = "https://news.google.com/rss"
 CACHE_SECONDS = 60 * 60
-#: Paese per lingua, per l'edizione giusta del feed.
+#: Country per language, for the right edition of the feed.
 _COUNTRY = {"it": "IT", "en": "US", "es": "ES", "fr": "FR", "de": "DE", "pt": "BR", "ja": "JP", "zh": "CN", "hi": "IN"}
 
 
@@ -30,7 +30,7 @@ class Headline:
 
 
 def parse_feed(xml_text: str) -> list[Headline]:
-    """RSS -> titoli. "Titolo - Testata" diventa titolo e testata separati."""
+    """RSS -> headlines. "Title - Outlet" becomes title and outlet, separately."""
     headlines = []
     root = ElementTree.fromstring(xml_text)
     for item in root.iter("item"):
@@ -67,13 +67,13 @@ class NewsService:
                 response.raise_for_status()
             self._cache = parse_feed(response.text)
         except (httpx.HTTPError, ElementTree.ParseError) as exc:
-            logger.info("Notizie non disponibili: %s", exc)
+            logger.info("News unavailable: %s", exc)
             return self._cache
         self._cached_at, self._cached_for = time.time(), language
         return self._cache
 
     async def pick(self, language: str = "it") -> Headline | None:
-        """Un titolo fra i primi, mai uno gia' usato."""
+        """A headline among the first ones, never one already used."""
         fresh = [item for item in (await self.headlines(language))[:15] if item.title not in self.used]
         if not fresh:
             return None

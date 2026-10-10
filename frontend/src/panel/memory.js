@@ -1,20 +1,22 @@
 /**
- * "Chi è e cosa sa di te": nome, carattere e ricordi, uguali per ogni cervello.
+ * "Who she is and what she knows about you": name, character and memories,
+ * the same for every brain.
  *
- * Il backend (backend/memory.py) aggiunge personalita' e ricordi a ogni turno,
- * che il cervello sia Claude Code, Codex, OpenClaw o un modello locale. I
- * ricordi entrano dicendole "ricordati che...", quando il cervello ne annota
- * uno da solo, oppure da qui; da qui si vedono tutti e si cancellano.
+ * The backend (backend/memory.py) adds personality and memories at every
+ * turn, whether the brain is Claude Code, Codex, OpenClaw or a local model.
+ * Memories come in when you tell her "remember that...", when the brain
+ * notes one by itself, or from here; here you see them all and delete them.
  */
 
 import { apiUrl } from '../config.js';
 import { el, iconButton } from '../dom.js';
+import { t, tx } from '../i18n.js';
 import { icon } from '../icons.js';
 
 export class MemoryCard {
   /**
    * @param {{socket: object, toast: Function}} app
-   * @param {(iconName: string, title: string, ...children: Node[]) => HTMLElement} card costruttore dei riquadri
+   * @param {(iconName: string, title: string, ...children: Node[]) => HTMLElement} card builds the cards
    */
   constructor(app, card) {
     this.app = app;
@@ -25,7 +27,7 @@ export class MemoryCard {
       class: 'field-input memory-traits',
       rows: 2,
       maxlength: 400,
-      placeholder: 'Es. calorosa, concisa e un po’ giocosa',
+      placeholder: t('E.g. warm, concise and a little playful'),
     });
     let timer = null;
     const save = () => {
@@ -39,24 +41,24 @@ export class MemoryCard {
       class: 'field-input',
       type: 'text',
       maxlength: 200,
-      placeholder: 'Es. «lavoro in Python e odio le riunioni»',
-      'aria-label': 'Nuovo ricordo',
+      placeholder: t('E.g. "I work in Python and hate meetings"'),
+      'aria-label': t('New memory'),
       onKeydown: (event) => {
         if (event.key === 'Enter') this._add();
       },
     });
-    const add = el('button', { class: 'btn', type: 'button', onClick: () => this._add() }, icon('check', 15), el('span', {}, 'Aggiungi'));
+    const add = el('button', { class: 'btn', type: 'button', onClick: () => this._add() }, icon('check', 15), el('span', {}, t('Add')));
     this.list = el('div', { class: 'agenda-list memory-list' });
-    this.clear = el('button', { class: 'link-btn hidden', type: 'button', onClick: () => this._clearAll() }, 'Dimentica tutto');
+    this.clear = el('button', { class: 'link-btn hidden', type: 'button', onClick: () => this._clearAll() }, t('Forget everything'));
 
     this.node = card(
       'book',
-      'Chi è e cosa sa di te',
-      el('p', { class: 'card-sub' }, 'Vale per ogni cervello: cambiando agente o modello resta la stessa, e si ricorda di te.'),
+      t('Who she is and what she knows about you'),
+      el('p', { class: 'card-sub' }, t('The same for every brain: switching agent or model she stays herself, and remembers you.')),
       el('label', { class: 'row' }, el('span', { class: 'row-label' }, 'Nome'), this.name),
       el('label', { class: 'row' }, el('span', { class: 'row-label' }, 'Carattere'), this.traits),
       el('div', { class: 'agenda-add' }, this.input, add),
-      el('p', { class: 'hint' }, 'Oppure dille «ricordati che…»; «cosa ricordi di me?» e «dimentica che…» funzionano a voce.'),
+      el('p', { class: 'hint' }, t('Or tell her "remember that…"; "what do you remember about me?" and "forget that…" work by voice too.')),
       this.list,
       this.clear,
     );
@@ -71,14 +73,14 @@ export class MemoryCard {
       const response = await fetch(apiUrl('/api/memory'));
       if (response.ok) this._set(await response.json());
     } catch {
-      /* arriva comunque col messaggio `memory` */
+      /* it arrives anyway with the `memory` message */
     }
   }
 
   _set(memory) {
     this.facts = memory.facts ?? [];
     const persona = memory.persona ?? {};
-    // Non riscrivere i campi mentre li stai modificando.
+    // Don't rewrite the fields while you're editing them.
     if (document.activeElement !== this.name) this.name.value = persona.name ?? '';
     if (document.activeElement !== this.traits) this.traits.value = persona.traits ?? '';
     if (memory.defaults) {
@@ -99,7 +101,7 @@ export class MemoryCard {
   }
 
   async _clearAll() {
-    if (!window.confirm('Dimentico tutti i ricordi? Nome e carattere restano.')) return;
+    if (!window.confirm(t('Forget all the memories? Name and character stay.'))) return;
     await this._request('/api/memory/facts', 'DELETE');
   }
 
@@ -111,7 +113,7 @@ export class MemoryCard {
         body: body ? JSON.stringify(body) : undefined,
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail ?? `HTTP ${response.status}`);
+      if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
       return true;
     } catch (error) {
       this.app.toast(error.message, 'error');
@@ -122,7 +124,7 @@ export class MemoryCard {
   _render() {
     this.clear.classList.toggle('hidden', this.facts.length < 2);
     if (!this.facts.length) {
-      this.list.replaceChildren(el('p', { class: 'hint' }, 'Ancora nessun ricordo.'));
+      this.list.replaceChildren(el('p', { class: 'hint' }, t('No memories yet.')));
       return;
     }
     this.list.replaceChildren(
@@ -130,7 +132,7 @@ export class MemoryCard {
         el(
           'div',
           { class: 'agenda-item' },
-          el('span', { class: 'agenda-icon', title: fact.source === 'brain' ? 'Annotato da lei' : 'Detto da te' }, icon(fact.source === 'brain' ? 'agent' : 'character', 15)),
+          el('span', { class: 'agenda-icon', title: fact.source === 'brain' ? t('Noted by her') : t('Told by you') }, icon(fact.source === 'brain' ? 'agent' : 'character', 15)),
           el('span', { class: 'agenda-text' }, el('strong', {}, fact.text)),
           iconButton('trash', { title: 'Dimentica', onClick: () => this._request(`/api/memory/facts/${encodeURIComponent(fact.id)}`, 'DELETE') }),
         ),

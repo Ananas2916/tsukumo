@@ -1,4 +1,4 @@
-"""Lingua della voce e lingua delle risposte."""
+"""The voice's language and the replies' language."""
 
 from backend.languages import kokoro_voice_info, language_name, reply_language, speech_directive
 from backend.tts.base import locale_language
@@ -23,8 +23,8 @@ def test_reply_language_follows_a_single_language_voice():
 
 
 def test_multilingual_voice_answers_in_the_users_language():
-    # Prima una voce Edge italiana finiva col rispondere in inglese, perche'
-    # solo i nomi Kokoro venivano riconosciuti.
+    # An Italian Edge voice used to end up answering in English, because
+    # only Kokoro names were recognized.
     assert reply_language("auto", None) is None
     assert "same language" in speech_directive(None)
 
@@ -43,7 +43,7 @@ def test_engine_language_of_handles_multilingual_names():
 
 
 # ---------------------------------------------------------------------------
-# Lingua del sistema -> voce predefinita
+# System language -> default voice
 # ---------------------------------------------------------------------------
 from backend.languages import short_language, system_language  # noqa: E402
 from backend.tts.base import VoiceInfo  # noqa: E402
@@ -86,7 +86,7 @@ def test_voice_for_language_prefers_the_recommended_kokoro_voice():
         VoiceInfo(id="if_sara", language="it", gender="female"),
     ])
     assert tts.voice_for_language("it") == "if_sara"
-    assert tts.voice_for_language("en") == "af_heart"  # la predefinita parla gia' inglese
+    assert tts.voice_for_language("en") == "af_heart"  # the default one already speaks English
     assert tts.voice_for_language("ko") is None
     assert tts.voice_for_language("") is None
 

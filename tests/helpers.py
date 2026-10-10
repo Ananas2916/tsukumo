@@ -1,10 +1,10 @@
-"""Aiuti condivisi dai test."""
+"""Helpers shared by the tests."""
 
 from backend.llm.base import LLMClient
 
 
 class Scripted(LLMClient):
-    """Un cervello finto che risponde sempre con gli stessi pezzi (e ricorda cosa ha ricevuto)."""
+    """A fake brain that always answers with the same pieces (and remembers what it got)."""
 
     name = "scripted"
 

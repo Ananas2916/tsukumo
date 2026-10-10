@@ -1,4 +1,4 @@
-"""Factory dei motori TTS."""
+"""Factory of the TTS engines."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ __all__ = [
 def _key(options: dict, env: str, service: str) -> str:
     key = str(options.get(env) or "").strip()
     if not key:
-        raise RuntimeError(f"Manca la chiave API di {service}. Impostala nel pannello oppure con DC_{env}.")
+        raise RuntimeError(f"The {service} API key is missing. Set it in the panel or with DC_{env}.")
     return key
 
 
@@ -40,10 +40,10 @@ def _number(value: object, default: float) -> float:
 
 
 def build_tts_engine(engine: str, settings: Settings) -> TTSEngine:
-    """Istanzia il motore richiesto, senza rete di protezione.
+    """Instantiates the requested engine, with no safety net.
 
-    Gli import dei motori opzionali sono qui dentro e non in testa al modulo:
-    chi usa Kokoro non deve avere installato edge-tts, piper o pyttsx3.
+    The optional engines' imports are in here and not at the top of the
+    module: whoever uses Kokoro needn't have edge-tts, piper or pyttsx3 installed.
     """
     engine = TTS_REGISTRY.resolve(engine) or engine
     options = settings.provider_config("tts", engine)
@@ -94,7 +94,7 @@ def build_tts_engine(engine: str, settings: Settings) -> TTSEngine:
         base_url = str(options.get("OPENAI_TTS_BASE_URL") or "https://api.openai.com/v1")
         official = "api.openai.com" in base_url
         return OpenAITTS(
-            # Un server locale compatibile di solito non vuole chiavi.
+            # A compatible local server usually doesn't want keys.
             api_key=_key(options, "OPENAI_TTS_API_KEY", "OpenAI") if official else str(options.get("OPENAI_TTS_API_KEY") or ""),
             voice=str(options.get("OPENAI_TTS_VOICE") or "coral"),
             model=str(options.get("OPENAI_TTS_MODEL") or "gpt-4o-mini-tts"),
@@ -149,7 +149,7 @@ def build_tts_engine(engine: str, settings: Settings) -> TTSEngine:
         model_path = str(options.get("PIPER_MODEL") or "")
         if not model_path:
             raise RuntimeError(
-                "Indica la voce Piper da usare (un file .onnx scaricato da "
+                "Set the Piper voice to use (an .onnx file downloaded from "
                 "huggingface.co/rhasspy/piper-voices)."
             )
         return PiperTTS(model_path=model_path, default_speed=speed)
@@ -159,28 +159,28 @@ def build_tts_engine(engine: str, settings: Settings) -> TTSEngine:
 
         return SystemTTS(default_voice="", default_speed=speed)
 
-    raise ValueError(f"Motore TTS sconosciuto: {engine!r}")
+    raise ValueError(f"Unknown TTS engine: {engine!r}")
 
 
 def create_tts_engine(settings: Settings) -> TTSEngine:
-    """Istanzia il motore richiesto da ``DC_TTS_ENGINE``.
+    """Instantiates the engine requested by ``DC_TTS_ENGINE``.
 
-    Se il motore non e' utilizzabile (pesi mancanti, chiave assente, server
-    spento) e ``DC_TTS_FALLBACK`` e' attivo, ripieghiamo sul sintetizzatore a
-    formanti in modo che l'applicazione resti comunque usabile. Il motivo
-    finisce in ``fallback_reason``: il pannello lo mostra invece di tacerlo.
+    If the engine isn't usable (missing weights, absent key, server off) and
+    ``DC_TTS_FALLBACK`` is on, we fall back to the formant synthesizer so the
+    application stays usable anyway. The reason ends up in ``fallback_reason``:
+    the panel shows it instead of hiding it.
     """
     engine = TTS_REGISTRY.resolve(settings.tts_engine) or (settings.tts_engine or "kokoro").lower()
 
     try:
         built = build_tts_engine(engine, settings)
-        logger.info("Motore TTS: %s", engine)
+        logger.info("TTS engine: %s", engine)
         return built
     except Exception as exc:
         if not settings.tts_fallback_to_formant:
             raise
-        logger.error("Motore TTS '%s' non disponibile: %s", engine, exc)
-        logger.warning("Passo al sintetizzatore a formanti (DC_TTS_FALLBACK=0 per disattivarlo)")
+        logger.error("TTS engine '%s' unavailable: %s", engine, exc)
+        logger.warning("Switching to the formant synthesizer (DC_TTS_FALLBACK=0 to turn it off)")
         fallback = FormantTTS(default_speed=settings.speech_speed)
         fallback.fallback_reason = f"{engine}: {exc}"  # type: ignore[attr-defined]
         return fallback

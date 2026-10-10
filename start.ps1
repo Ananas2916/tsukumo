@@ -1,34 +1,34 @@
 <#
 .SYNOPSIS
-    Avvio e installazione di Tsukumo su Windows.
+    Starts and installs Tsukumo on Windows.
 
 .DESCRIPTION
-    Uno script unico per non dover ricordare la sequenza dei comandi.
+    One script, so you don't have to remember the sequence of commands.
 
 .EXAMPLE
     .\start.ps1 -Setup
-    Crea il virtualenv, installa le dipendenze Python e Node, scarica i pesi
-    di Kokoro e compila il frontend. Da eseguire una volta sola.
+    Creates the virtualenv, installs the Python and Node dependencies,
+    downloads the Kokoro weights and builds the frontend. Run it once.
 
 .EXAMPLE
     .\start.ps1
-    Avvia il backend (che serve anche il frontend) su http://127.0.0.1:8770
+    Starts the backend (which also serves the frontend) on http://127.0.0.1:8770
 
 .EXAMPLE
     .\start.ps1 -Dev
-    Backend + dev server Vite con hot reload, in due finestre separate.
+    Backend + Vite dev server with hot reload, in two separate windows.
 
 .EXAMPLE
     .\start.ps1 -Electron
-    Apre la finestra desktop senza cornice (avvia da sola il backend).
+    Opens the frameless desktop window (it starts the backend by itself).
 
 .EXAMPLE
     .\start.ps1 -Shortcut
-    Crea sul desktop il collegamento "Tsukumo" (niente terminale).
+    Creates the "Tsukumo" shortcut on the desktop (no terminal).
 
 .EXAMPLE
     .\start.ps1 -Test
-    Esegue i test del backend (pytest).
+    Runs the backend tests (pytest).
 #>
 
 [CmdletBinding()]
@@ -57,49 +57,48 @@ function Get-Python {
     if (Test-Path $venvPython) { return $venvPython }
     $command = Get-Command python -ErrorAction SilentlyContinue
     if ($null -eq $command) {
-        throw 'Python non trovato nel PATH. Installa Python 3.10 o superiore.'
+        throw 'Python not found in the PATH. Install Python 3.10 or later.'
     }
     return $command.Source
 }
 
 function Assert-Node {
     if ($null -eq (Get-Command npm -ErrorAction SilentlyContinue)) {
-        throw 'npm non trovato nel PATH. Installa Node.js 22.12 o superiore (lo chiede Electron).'
+        throw 'npm not found in the PATH. Install Node.js 22.12 or later (Electron needs it).'
     }
 }
 
 # ---------------------------------------------------------------- setup ----
 if ($Setup) {
-    Write-Step 'Creo il virtualenv (.venv)'
+    Write-Step 'Creating the virtualenv (.venv)'
     if (-not (Test-Path $venvPython)) {
         python -m venv .venv
     } else {
-        Write-Host '    gia presente, lo riuso'
+        Write-Host '    already there, reusing it'
     }
 
-    Write-Step 'Installo le dipendenze Python'
+    Write-Step 'Installing the Python dependencies'
     & $venvPython -m pip install --upgrade pip
     & $venvPython -m pip install -r requirements.txt
 
-    Write-Step "Scarico i pesi di Kokoro ($KokoroVariant)"
+    Write-Step "Downloading the Kokoro weights ($KokoroVariant)"
     & $venvPython scripts\download_models.py --variant $KokoroVariant
 
     Assert-Node
-    Write-Step 'Installo e compilo il frontend'
+    Write-Step 'Installing and building the frontend'
     Push-Location frontend
     npm install
     npm run build
     Pop-Location
 
-    Write-Step 'Installo Electron (finestra desktop, opzionale)'
+    Write-Step 'Installing Electron (desktop window, optional)'
     Push-Location electron
     npm install
     Pop-Location
 
     Write-Host ''
-    Write-Host 'Setup completato.' -ForegroundColor Green
-    Write-Host 'Ricordati di copiare un avatar in frontend\public\models\avatar.vrm'
-    Write-Host 'Poi avvia con:  .\start.ps1'
+    Write-Host 'Setup complete.' -ForegroundColor Green
+    Write-Host 'Start with:  .\start.ps1 -Electron   (or .\start.ps1 -Shortcut for a desktop icon)'
     return
 }
 
@@ -108,13 +107,13 @@ if ($Shortcut) {
     $desktop = [Environment]::GetFolderPath('Desktop')
     $shell = New-Object -ComObject WScript.Shell
 
-    # Il collegamento del vecchio nome punta a uno script che non c'e' piu'.
+    # The shortcut with the old name points to a script that no longer exists.
     $legacy = Join-Path $desktop 'Desk Companion.lnk'
     if (Test-Path $legacy) {
         $old = $shell.CreateShortcut($legacy)
         if ($old.Arguments -like '*Desk Companion.vbs*') {
             Remove-Item $legacy
-            Write-Host "Rimosso il vecchio collegamento: $legacy"
+            Write-Host "Removed the old shortcut: $legacy"
         }
     }
 
@@ -125,9 +124,9 @@ if ($Shortcut) {
     $link.WorkingDirectory = $root
     $icon = Join-Path $root 'electron\icon.ico'
     if (Test-Path $icon) { $link.IconLocation = "$icon,0" }
-    $link.Description = 'Avvia Tsukumo'
+    $link.Description = 'Start Tsukumo'
     $link.Save()
-    Write-Host "Collegamento creato: $target" -ForegroundColor Green
+    Write-Host "Shortcut created: $target" -ForegroundColor Green
     return
 }
 
@@ -142,29 +141,23 @@ if ($Test) {
 
 $python = Get-Python
 
-# Avvisi utili prima di partire ------------------------------------------------
+# Useful warnings before starting ---------------------------------------------
 if (-not (Test-Path (Join-Path $root 'models\kokoro-v1.0.onnx'))) {
-    Write-Host 'ATTENZIONE: pesi Kokoro mancanti.' -ForegroundColor Yellow
-    Write-Host "  Scaricali con:  $python scripts\download_models.py"
-    Write-Host '  Senza pesi il backend usa la voce di servizio "formant".'
-}
-
-$avatars = @(Get-ChildItem -Path (Join-Path $root 'frontend\public\models') -Filter *.vrm -ErrorAction SilentlyContinue)
-if ($avatars.Count -eq 0) {
-    Write-Host 'ATTENZIONE: nessun file .vrm in frontend\public\models\.' -ForegroundColor Yellow
-    Write-Host '  Copiane uno (chiamalo avatar.vrm) o trascinalo sulla finestra.'
+    Write-Host 'WARNING: Kokoro weights missing.' -ForegroundColor Yellow
+    Write-Host "  Download them with:  $python scripts\download_models.py"
+    Write-Host '  Without the weights the backend uses the fallback "formant" voice.'
 }
 
 # ------------------------------------------------------------- electron ----
 if ($Electron) {
     Assert-Node
     if (-not (Test-Path (Join-Path $root 'electron\node_modules'))) {
-        Write-Step 'Installo le dipendenze di Electron'
+        Write-Step 'Installing the Electron dependencies'
         Push-Location electron
         npm install
         Pop-Location
     }
-    Write-Step 'Apro la finestra desktop'
+    Write-Step 'Opening the desktop window'
     Push-Location electron
     $env:DC_PYTHON = $python
     npm start
@@ -175,13 +168,13 @@ if ($Electron) {
 # ------------------------------------------------------------------ dev ----
 if ($Dev) {
     Assert-Node
-    Write-Step 'Avvio il backend in una nuova finestra'
+    Write-Step 'Starting the backend in a new window'
     Start-Process powershell -ArgumentList @(
         '-NoExit', '-Command',
         "Set-Location '$root'; & '$python' -m backend --reload"
     )
 
-    Write-Step 'Avvio il dev server Vite (hot reload su http://localhost:5173)'
+    Write-Step 'Starting the Vite dev server (hot reload on http://localhost:5173)'
     Push-Location frontend
     if (-not (Test-Path 'node_modules')) { npm install }
     npm run dev
@@ -189,9 +182,9 @@ if ($Dev) {
     return
 }
 
-# --------------------------------------------------------------- normale ---
+# --------------------------------------------------------------- normal ----
 if (-not (Test-Path (Join-Path $root 'frontend\dist\index.html'))) {
-    Write-Host 'Frontend non compilato: lo compilo adesso.' -ForegroundColor Yellow
+    Write-Host 'Frontend not built: building it now.' -ForegroundColor Yellow
     Assert-Node
     Push-Location frontend
     if (-not (Test-Path 'node_modules')) { npm install }
@@ -199,5 +192,5 @@ if (-not (Test-Path (Join-Path $root 'frontend\dist\index.html'))) {
     Pop-Location
 }
 
-Write-Step 'Avvio Tsukumo su http://127.0.0.1:8770'
+Write-Step 'Starting Tsukumo on http://127.0.0.1:8770'
 & $python -m backend

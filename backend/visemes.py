@@ -1,26 +1,26 @@
-"""Costruzione della timeline dei visemi per il lip-sync.
+"""Building the viseme timeline for the lip-sync.
 
-Ci sono due percorsi, in ordine di preferenza.
+There are two paths, in order of preference.
 
-**A. Timing esatti.** Se il modello Kokoro espone l'output delle durate,
-``create_timed`` ci dice esattamente quando inizia e finisce ogni fonema:
-basta tradurre i simboli IPA in visemi (vedi ``_from_timings``).
+**A. Exact timings.** If the Kokoro model exposes the durations output,
+``create_timed`` tells us exactly when each phoneme starts and ends: it's
+enough to translate the IPA symbols into visemes (see ``_from_timings``).
 
-**B. Allineamento sull'energia.** Se quei tempi non ci sono, li ricostruiamo
-agganciando la sequenza di fonemi all'energia *reale* della forma d'onda:
+**B. Alignment on the energy.** If those timings aren't there, we rebuild
+them by hooking the phoneme sequence to the *real* energy of the waveform:
 
-1. calcoliamo l'inviluppo RMS dell'audio (finestre da 25 ms, hop da 10 ms);
-2. individuiamo i segmenti di parlato (energia sopra soglia), unendo i micro
-   silenzi e scartando i frammenti troppo brevi;
-3. distribuiamo i fonemi sul "tempo di parlato" totale proporzionalmente ai
-   loro pesi di durata, e li rimappiamo sul tempo reale: cosi' le pause
-   finiscono automaticamente nei silenzi veri dell'audio;
-4. l'ampiezza di apertura di ogni viseme viene modulata dall'energia media
-   del tratto di audio corrispondente.
+1. we compute the audio's RMS envelope (25 ms windows, 10 ms hop);
+2. we find the speech segments (energy above a threshold), merging the
+   micro-silences and discarding the fragments that are too short;
+3. we spread the phonemes over the total "speech time" in proportion to
+   their duration weights, and map them back onto the real time: so the
+   pauses automatically end up in the audio's real silences;
+4. each viseme's opening amplitude is modulated by the average energy of the
+   matching stretch of audio.
 
-Il frontend fa poi un ulteriore lavoro: moltiplica il peso per il livello RMS
-istantaneo letto da WebAudio, cosi' anche se la timeline sbanda di qualche
-decina di millisecondi la bocca resta sincronizzata con il volume percepito.
+The frontend then does one more job: it multiplies the weight by the
+instantaneous RMS level read from WebAudio, so even if the timeline drifts by
+a few tens of milliseconds the mouth stays in sync with the perceived volume.
 """
 
 from __future__ import annotations
@@ -33,15 +33,15 @@ import numpy as np
 from .audio import normalize_envelope, rms_envelope
 from .phonemes import Phone, phone_from_symbol
 
-# Parametri di segmentazione (secondi).
-_MERGE_GAP = 0.09  # silenzi piu' corti di cosi' vengono assorbiti
-_MIN_SEGMENT = 0.05  # segmenti piu' corti di cosi' vengono scartati
-_MIN_FRAME = 0.02  # frame piu' corti vengono fusi con il precedente
+# Segmentation parameters (seconds).
+_MERGE_GAP = 0.09  # silences shorter than this are absorbed
+_MIN_SEGMENT = 0.05  # segments shorter than this are discarded
+_MIN_FRAME = 0.02  # shorter frames are merged with the previous one
 
 
 @dataclass
 class VisemeFrame:
-    """Un intervallo di tempo in cui la bocca assume una certa forma."""
+    """A time interval in which the mouth takes a certain shape."""
 
     time: float
     duration: float
@@ -49,7 +49,7 @@ class VisemeFrame:
     weight: float
 
     def as_dict(self) -> dict[str, float | str]:
-        # Chiavi corte: la timeline viaggia nel JSON del WebSocket.
+        # Short keys: the timeline travels in the WebSocket's JSON.
         return {
             "t": round(self.time, 4),
             "d": round(self.duration, 4),
@@ -68,12 +68,12 @@ def build_timeline(
     silence_threshold: float = 0.07,
     hop_s: float = 0.01,
 ) -> list[dict[str, float | str]]:
-    """Restituisce la timeline dei visemi pronta per il frontend.
+    """Returns the viseme timeline ready for the frontend.
 
-    Se ``timings`` contiene i tempi esatti per fonema (Kokoro li espone con
-    ``create_timed``) li usiamo direttamente: e' la sorgente piu' precisa.
-    Altrimenti ricostruiamo il tempismo allineando i fonemi all'energia
-    dell'audio, come descritto in testa al modulo.
+    If ``timings`` has the exact per-phoneme times (Kokoro exposes them with
+    ``create_timed``) we use them directly: it's the most precise source.
+    Otherwise we rebuild the timing by aligning the phonemes to the audio's
+    energy, as described at the top of the module.
     """
     data = np.asarray(samples, dtype=np.float32).reshape(-1)
     total_duration = data.size / float(sample_rate) if sample_rate else 0.0
@@ -96,7 +96,7 @@ def build_timeline(
 
 
 # --------------------------------------------------------------------------
-# Percorso preferito: tempi esatti forniti dal modello
+# Preferred path: exact times provided by the model
 # --------------------------------------------------------------------------
 def _from_timings(
     timings: list[tuple[Any, float, float]],
@@ -105,7 +105,7 @@ def _from_timings(
     gain: float,
     total_duration: float,
 ) -> list[VisemeFrame]:
-    """Un frame per fonema, con inizio e fine gia' noti."""
+    """One frame per phoneme, with start and end already known."""
     frames: list[VisemeFrame] = []
     for symbol, raw_start, raw_end in sorted(timings, key=lambda item: item[1]):
         start = max(0.0, min(float(raw_start), total_duration))
@@ -113,17 +113,17 @@ def _from_timings(
         if end - start <= 1e-4:
             continue
 
-        # Kokoro da' simboli IPA; ElevenLabs lettere gia' tradotte in Phone.
+        # Kokoro gives IPA symbols; ElevenLabs letters already translated into Phone.
         phone = symbol if isinstance(symbol, Phone) else phone_from_symbol(symbol)
         weight = 0.0
         if phone.viseme != "sil":
-            # L'energia reale del tratto decide quanto aprire la bocca.
+            # The stretch's real energy decides how wide to open the mouth.
             level = _mean_level(envelope, hop_s, start, end)
             weight = float(np.clip(phone.openness * level * gain, 0.0, 1.0))
         frames.append(VisemeFrame(start, end - start, phone.viseme, weight))
 
-    # I timing possono sovrapporsi di qualche millisecondo: tagliamo l'eccesso
-    # perche' il frontend assume intervalli disgiunti e ordinati.
+    # The timings can overlap by a few milliseconds: we cut the excess because
+    # the frontend assumes disjoint, ordered intervals.
     for index in range(len(frames) - 1):
         overlap = (frames[index].time + frames[index].duration) - frames[index + 1].time
         if overlap > 0:
@@ -132,7 +132,7 @@ def _from_timings(
 
 
 # --------------------------------------------------------------------------
-# Passo 2: segmentazione parlato / silenzio
+# Step 2: speech / silence segmentation
 # --------------------------------------------------------------------------
 def _speech_segments(
     envelope: np.ndarray,
@@ -145,7 +145,7 @@ def _speech_segments(
 
     voiced = envelope >= threshold
     if not voiced.any():
-        # Audio molto basso ma non vuoto: consideriamo tutto come parlato.
+        # Very quiet but not empty audio: we consider it all speech.
         return [(0.0, total_duration)]
 
     segments: list[tuple[float, float]] = []
@@ -170,12 +170,12 @@ def _speech_segments(
     if not kept:
         kept = [max(merged, key=lambda seg: seg[1] - seg[0])]
 
-    # Clamp finale sulla durata reale dell'audio.
+    # Final clamp on the audio's real length.
     return [(max(0.0, s), min(total_duration, e)) for s, e in kept if e > s]
 
 
 # --------------------------------------------------------------------------
-# Passo 3: distribuzione dei fonemi sui segmenti di parlato
+# Step 3: spreading the phonemes over the speech segments
 # --------------------------------------------------------------------------
 def _distribute(
     phones: list[Phone],
@@ -190,7 +190,7 @@ def _distribute(
         return []
 
     frames: list[VisemeFrame] = []
-    cursor = 0.0  # posizione nel "tempo di parlato" compresso
+    cursor = 0.0  # position in the compressed "speech time"
     for phone in phones:
         span = max(phone.duration, 0.01) / weight_total * speech_time
         for start, end in _map_span(cursor, cursor + span, segments):
@@ -211,10 +211,10 @@ def _map_span(
     speech_end: float,
     segments: list[tuple[float, float]],
 ) -> list[tuple[float, float]]:
-    """Converte un intervallo in tempo-di-parlato in 1..n intervalli reali.
+    """Converts an interval in speech time into 1..n real intervals.
 
-    I segmenti sono concatenati in una linea temporale virtuale senza silenzi;
-    un fonema che attraversa un silenzio viene spezzato in piu' tratti.
+    The segments are concatenated in a virtual timeline without silences; a
+    phoneme crossing a silence is split into several stretches.
     """
     pieces: list[tuple[float, float]] = []
     offset = 0.0
@@ -238,15 +238,15 @@ def _mean_level(envelope: np.ndarray, hop_s: float, start: float, end: float) ->
     window = envelope[min(first, envelope.size - 1) : min(last, envelope.size)]
     if window.size == 0:
         return float(envelope[min(first, envelope.size - 1)])
-    # Media pesata verso il picco: le vocali brevi restano ben aperte.
+    # Average weighted towards the peak: short vowels stay well open.
     return float(0.55 * window.mean() + 0.45 * window.max())
 
 
 # --------------------------------------------------------------------------
-# Passo 4: pulizia della timeline
+# Step 4: cleaning the timeline
 # --------------------------------------------------------------------------
 def _fill_gaps(frames: list[VisemeFrame], total_duration: float) -> list[VisemeFrame]:
-    """Inserisce frame ``sil`` nei buchi, all'inizio e alla fine."""
+    """Inserts ``sil`` frames in the gaps, at the start and at the end."""
     if not frames:
         return [VisemeFrame(0.0, total_duration, "sil", 0.0)]
 
@@ -269,7 +269,7 @@ def _fill_gaps(frames: list[VisemeFrame], total_duration: float) -> list[VisemeF
 
 
 def _merge_short(frames: list[VisemeFrame]) -> list[VisemeFrame]:
-    """Fonde i frame troppo corti e quelli consecutivi con lo stesso viseme."""
+    """Merges the frames that are too short and consecutive ones with the same viseme."""
     merged: list[VisemeFrame] = []
     for frame in frames:
         if merged:
@@ -279,7 +279,7 @@ def _merge_short(frames: list[VisemeFrame]) -> list[VisemeFrame]:
             if same_viseme or too_short:
                 total = previous.duration + frame.duration
                 if total > 0:
-                    # Peso medio pesato sulla durata dei due frame.
+                    # Average weight weighted on the two frames' durations.
                     previous.weight = (
                         previous.weight * previous.duration + frame.weight * frame.duration
                     ) / total

@@ -1,37 +1,37 @@
 /**
- * Gesti "da Photo Booth": ciao sbucando dal basso, la V, la pistola con le
- * dita, farsi vedere, la giravolta, le pose da modella, gli squat.
+ * "Photo Booth" gestures: peek-a-boo hello from below, the V, the finger
+ * gun, showing off, the twirl, model poses, squats.
  *
- * Rifatti a mano guardando il Photo Booth di VRoid Hub fotogramma per
- * fotogramma (di fronte e di lato): nessun dato preso dalle loro animazioni,
- * solo il movimento osservato e riscritto con gli strumenti del corpo
- * procedurale (vedi body.js per le convenzioni sugli assi). Per questo si
- * adattano a qualunque avatar e restano mescolati al respiro e allo sguardo.
+ * Remade by hand watching VRoid Hub's Photo Booth frame by frame (front and
+ * side): no data taken from their animations, only the observed movement
+ * rewritten with the procedural body's tools (see body.js for the axis
+ * conventions). That's why they adapt to any avatar and stay blended with
+ * breathing and gaze.
  *
- * Le coordinate delle mani sono scritte per il lato sinistro e specchiate
- * per il destro; `action.sign` sceglie la mano (-1 destra, +1 sinistra).
+ * Hand coordinates are written for the left side and mirrored for the right;
+ * `action.sign` picks the hand (-1 right, +1 left).
  */
 
 import { curve, TAU } from './motion.js';
 
-/** La mano del gesto e quella libera. */
+/** The gesture's hand and the free one. */
 function hands(action) {
   return action.sign > 0 ? ['left', 'right', 1] : ['right', 'left', -1];
 }
 
-/** Un piegamento sulle gambe: il bacino scende e arretra, le ginocchia vanno avanti (IK). */
+/** A knee bend: the pelvis goes down and back, the knees forward (IK). */
 function bend(pose, body, depth) {
   const height = body.hipsRest?.y ?? 0.9;
   pose.hips.y -= depth * height;
   pose.hips.z -= 0.35 * depth * height;
-  // Il busto compensa in avanti per restare in equilibrio sui piedi.
+  // The torso compensates forward to stay balanced on the feet.
   pose.add('spine', 0.5 * depth, 0, 0);
   pose.add('chest', 0.3 * depth, 0, 0);
   pose.add('head', -0.35 * depth, 0, 0);
 }
 
 export const BOOTH_ACTIONS = {
-  /** Ciao sbucando dal basso: accovacciata, su di scatto salutando con due mani, poi con una. */
+  /** Peek-a-boo hello from below: crouched, up in a flash waving with both hands, then with one. */
   greetPop: {
     duration: 6,
     modes: ['stand'],
@@ -46,11 +46,11 @@ export const BOOTH_ACTIONS = {
       bend(pose, body, 0.5 * Math.max(0, crouch));
       pose.heel.left += 0.25 * Math.max(0, -crouch * 8) + 0.15 * both;
       pose.heel.right += 0.25 * Math.max(0, -crouch * 8) + 0.15 * both;
-      // Accovacciata: mani sulle ginocchia.
+      // Crouched: hands on the knees.
       pose.reach('left', 'hips', [0.1, -0.36, 0.3], [1, -0.4, 0.4], Math.max(0, crouch), 0.4);
       pose.reach('right', 'hips', [0.1, -0.36, 0.3], [1, -0.4, 0.4], Math.max(0, crouch), 0.4);
 
-      // Due mani aperte accanto al viso, palmi verso di te, che salutano.
+      // Two open hands beside the face, palms towards you, waving.
       for (const hand of ['left', 'right']) {
         const k = hand === 'left' ? 1 : -1;
         pose.reach(hand, 'head', [0.19 + 0.025 * wiggle * k, -0.03, 0.1], [1, -0.8, -0.4], both, 1.2);
@@ -58,12 +58,12 @@ export const BOOTH_ACTIONS = {
       }
       pose.add('head', 0, 0, 0.05 * Math.sin(t * 5.5) * both);
 
-      // Poi una mano sola, alta, piegandosi verso di te.
+      // Then one hand only, high, leaning towards you.
       pose.reach(side, 'head', [0.14 + 0.035 * wiggle, 0.06, 0.08], [1, -0.6, -0.4], one, 1.2);
       pose.fingers[side] -= 0.8 * one;
       pose.side(other, 'UpperArm', 0, 0, 0.35, one);
       pose.side(other, 'LowerArm', 0, -0.2, 0, one);
-      // Tutto il corpo si sporge verso di te, dalle caviglie e dai fianchi.
+      // The whole body leans towards you, from the ankles and the hips.
       pose.hips.z += 0.035 * lean;
       pose.add('hips', 0.12 * lean, 0, 0);
       pose.add('spine', 0.14 * lean, 0, 0.06 * s * lean);
@@ -78,7 +78,7 @@ export const BOOTH_ACTIONS = {
     },
   },
 
-  /** La V accanto all'occhio, testa inclinata, un piede sollevato all'indietro. */
+  /** The V beside the eye, head tilted, one foot raised backwards. */
   peace: {
     duration: 4.6,
     modes: ['stand'],
@@ -87,7 +87,7 @@ export const BOOTH_ACTIONS = {
       const k = curve(u, [[0, 0], [0.16, 1], [0.84, 1], [1, 0]]) * w;
       const bounce = Math.sin(t * 3.2) * k;
 
-      // Polso all'altezza della guancia, di lato: le dita tese arrivano all'occhio.
+      // Wrist at cheek height, to the side: the extended fingers reach the eye.
       pose.reach(side, 'head', [0.145, -0.02 + 0.006 * bounce, 0.075], [0.5, -1, 0], k, 2.8);
       pose.fingers[side] += 1.1 * k;
       pose.point(side, ['Index', 'Middle'], k);
@@ -96,12 +96,12 @@ export const BOOTH_ACTIONS = {
       pose.add('neck', 0, 0, -0.05 * s * k);
       pose.add('spine', 0, 0.05 * s * k, 0.04 * s * k);
 
-      // Braccio libero morbido in fuori, mano aperta.
+      // Free arm softly out, hand open.
       pose.side(other, 'UpperArm', 0, 0, 0.3, k);
       pose.side(other, 'LowerArm', 0, -0.35, 0, k);
       pose.fingers[other] -= 0.4 * k;
 
-      // Peso sulla gamba del lato della V, l'altra piegata col piede dietro.
+      // Weight on the leg on the V's side, the other bent with the foot behind.
       pose.hips.x += 0.018 * s * k;
       pose.feet[other].y += 0.1 * k;
       pose.feet[other].z -= 0.1 * k;
@@ -114,7 +114,7 @@ export const BOOTH_ACTIONS = {
     },
   },
 
-  /** La pistola con le dita: mira a te, "bang", poi soffia via il fumo. */
+  /** The finger gun: aims at you, "bang", then blows the smoke away. */
   shoot: {
     duration: 5,
     modes: ['stand', 'sit'],
@@ -125,12 +125,12 @@ export const BOOTH_ACTIONS = {
       const blow = curve(u, [[0.38, 0], [0.5, 1], [0.8, 1], [0.95, 0]]) * w;
       const puff = curve(u, [[0.52, 0], [0.58, 1], [0.68, 1], [0.74, 0]]) * w;
 
-      // Braccio teso verso di te all'altezza della spalla.
+      // Arm stretched towards you at shoulder height.
       pose.reach(side, 'upperChest', [0.1, 0.1 + 0.08 * recoil, 0.46 - 0.05 * recoil], [1, -1, -0.2], aim, 0.1);
       pose.add('spine', 0, 0.12 * s * aim, 0);
       pose.add('chest', -0.03 * recoil, 0.06 * s * aim, 0);
       pose.add('head', -0.06 * recoil, 0, 0.05 * s * aim);
-      // Il dito davanti alle labbra, per soffiare.
+      // The finger in front of the lips, to blow.
       pose.reach(side, 'head', [0.03, -0.075, 0.12], [1, -1, -0.2], blow, 0.2);
       pose.add('head', 0.04 * blow, 0, -0.08 * s * blow);
 
@@ -147,7 +147,7 @@ export const BOOTH_ACTIONS = {
     },
   },
 
-  /** Si mette in mostra: braccia aperte ad A, gira piano il corpo da una parte e dall'altra. */
+  /** Showing off: arms open in an A, she slowly turns her body one way and the other. */
   showOff: {
     duration: 8,
     modes: ['stand'],
@@ -163,7 +163,7 @@ export const BOOTH_ACTIONS = {
       pose.fingers.left -= 0.35 * k;
       pose.fingers.right -= 0.35 * k;
       pose.rootYaw += turn * k;
-      // Girandosi un piede incrocia davanti all'altro, sulla punta.
+      // Turning, one foot crosses in front of the other, on tiptoe.
       const front = turn * s > 0 ? 'right' : 'left';
       pose.feet[front].z += 0.05 * step * k;
       pose.feet[front].x += 0.05 * (front === 'left' ? -1 : 1) * step * k;
@@ -173,7 +173,7 @@ export const BOOTH_ACTIONS = {
     },
   },
 
-  /** Giravolta: caricamento a braccia incrociate, un giro intero, "ta-da" con una mano alzata. */
+  /** Twirl: wind-up with crossed arms, a full turn, "ta-da" with one hand up. */
   spin: {
     duration: 4.8,
     modes: ['stand'],
@@ -184,20 +184,20 @@ export const BOOTH_ACTIONS = {
       const toes = curve(u, [[0.22, 0], [0.3, 1], [0.5, 1], [0.58, 0]]) * w;
       const tada = curve(u, [[0.5, 0], [0.6, 1], [0.84, 1], [0.97, 0]]) * w;
 
-      // Caricamento: busto girato indietro, braccia strette al petto.
-      // Un giro intero e' di nuovo di fronte: finito il giro l'angolo torna a
-      // zero invece di scalare col peso (svolgerebbe il giro all'indietro).
+      // Wind-up: torso turned back, arms tight to the chest.
+      // A full turn is facing front again: when the turn ends the angle goes back
+      // to zero instead of scaling with the weight (it would unwind backwards).
       const around = turn >= 1 ? 0 : TAU * turn;
       pose.rootYaw += (-0.55 * wind + around) * -s;
       pose.reach('left', 'upperChest', [-0.06, -0.04, 0.14], [1, -1, -0.2], wind, 0.8);
       pose.reach('right', 'upperChest', [-0.06, -0.04, 0.14], [1, -1, -0.2], wind, 0.8);
       bend(pose, body, 0.05 * wind);
-      // Durante il giro sulle punte, braccia un po' aperte.
+      // During the turn on tiptoe, arms a little open.
       pose.heel.left += 0.45 * toes;
       pose.heel.right += 0.45 * toes;
       pose.both('UpperArm', 0, 0, 0.45, toes * (1 - wind));
 
-      // Ta-da: una mano alta accanto alla testa, l'altra aperta in basso, un piede in punta.
+      // Ta-da: one hand high beside the head, the other open below, one foot on tiptoe.
       pose.reach(side, 'head', [0.15, 0.1, 0.03], [1, -0.4, -0.5], tada, 1.3);
       pose.fingers[side] -= 0.6 * tada;
       pose.side(other, 'UpperArm', 0, 0.2, 0.55, tada);
@@ -215,7 +215,7 @@ export const BOOTH_ACTIONS = {
     },
   },
 
-  /** Pose da modella: tre quarti, mano che presenta, mano sul fianco, mano tra i capelli. */
+  /** Model poses: three-quarters, presenting hand, hand on the hip, hand in the hair. */
   model: {
     duration: 9,
     modes: ['stand'],
@@ -226,7 +226,7 @@ export const BOOTH_ACTIONS = {
       const p3 = curve(u, [[0.5, 0], [0.57, 1], [0.94, 1], [1, 0]]) * w;
       const p4 = curve(u, [[0.72, 0], [0.79, 1], [0.93, 1], [0.99, 0]]) * w;
 
-      // 1. Di tre quarti, peso su una gamba, ginocchio dell'altra verso l'interno.
+      // 1. Three-quarters, weight on one leg, the other knee turned inwards.
       pose.rootYaw += 0.4 * s * p1;
       pose.hips.x += 0.02 * s * p1;
       pose.feet[other].z += 0.04 * p1;
@@ -234,12 +234,12 @@ export const BOOTH_ACTIONS = {
       pose.heel[other] += 0.35 * p1;
       pose.add('head', 0.03 * p1, -0.25 * s * p1, -0.1 * s * p1);
 
-      // 2. Di fronte, una mano che presenta, palmo in su.
+      // 2. Facing front, one hand presenting, palm up.
       pose.reach(side, 'hips', [0.19, 0.14, 0.24], [1, -1, -0.4], p2, 1.6);
       pose.fingers[side] -= 0.5 * p2;
       pose.add('head', 0, 0, 0.08 * s * p2);
 
-      // 3. Mano sul fianco, gomito in fuori, anca in fuori.
+      // 3. Hand on the hip, elbow out, hip out.
       pose.reach(side, 'hips', [0.17, 0.05, -0.01], [1, 0.1, -0.8], p3, -0.3);
       pose.fingers[side] += 0.2 * p3;
       pose.hips.x += 0.022 * s * p3;
@@ -247,7 +247,7 @@ export const BOOTH_ACTIONS = {
       pose.feet[other].z += 0.03 * p3;
       pose.heel[other] += 0.2 * p3;
 
-      // 4. L'altra mano tra i capelli, testa inclinata.
+      // 4. The other hand in the hair, head tilted.
       pose.reach(other, 'head', [0.1, -0.03, 0.0], [1, -1, 0.1], p4, -0.2);
       pose.fingers[other] -= 0.4 * p4;
       pose.add('head', 0.04 * p4, 0.05 * -s * p4, 0.12 * s * p4);
@@ -258,7 +258,7 @@ export const BOOTH_ACTIONS = {
     },
   },
 
-  /** Squat: braccia incrociate, poi aperte a T, due piegamenti, e ci si scioglie. */
+  /** Squat: arms crossed, then open in a T, two bends, and she loosens up. */
   squat: {
     duration: 8,
     modes: ['stand'],
@@ -267,10 +267,10 @@ export const BOOTH_ACTIONS = {
       const arms = curve(u, [[0.22, 0], [0.3, 1], [0.84, 1], [0.93, 0]]) * w;
       const down = curve(u, [[0.32, 0], [0.42, 1], [0.48, 1], [0.56, 0], [0.64, 1], [0.7, 1], [0.8, 0]]) * w;
 
-      // Braccia incrociate sul petto.
+      // Arms crossed on the chest.
       pose.reach('left', 'upperChest', [-0.08, -0.08, 0.15], [1, -0.8, 0], cross, 0.6);
       pose.reach('right', 'upperChest', [-0.08, -0.1, 0.12], [1, -0.8, 0], cross, 0.6);
-      // Braccia aperte, dritte, palmi in giu'.
+      // Arms open, straight, palms down.
       pose.both('UpperArm', 0, 0, 1.2, arms);
       pose.both('LowerArm', 0, 0.05, 0, arms);
       pose.fingers.left -= 0.5 * arms;

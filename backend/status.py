@@ -1,15 +1,16 @@
-"""Stato dei motori attivi: cervello, voce, ascolto.
+"""State of the active engines: brain, voice, listening.
 
-Prima c'era una spia sola, dedicata al Gateway OpenClaw, anche quando il
-cervello era un altro. Qui il monitor chiede a *qualunque* motore attivo se sta
-bene (``LLMClient.probe``) e avvisa i client solo quando qualcosa cambia.
+There used to be a single light, dedicated to the OpenClaw Gateway, even when
+the brain was another one. Here the monitor asks *any* active engine whether
+it's fine (``LLMClient.probe``) and notifies the clients only when something
+changes.
 
-Il risultato e' sempre in cache: ``/api/health`` e il messaggio ``hello`` lo
-leggono senza mai toccare la rete, quindi non possono restare appesi.
+The result is always cached: ``/api/health`` and the ``hello`` message read it
+without ever touching the network, so they can't hang.
 
-Stati possibili: ``online`` (verde), ``degraded`` (giallo: risponde ma con un
-problema), ``offline`` (rosso), ``unknown`` (grigio: non ancora controllato),
-``off`` (spento di proposito, come l'ascolto disattivato).
+Possible states: ``online`` (green), ``degraded`` (yellow: it answers but with
+a problem), ``offline`` (red), ``unknown`` (grey: not checked yet), ``off``
+(turned off on purpose, like listening disabled).
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ def _spec_fields(kind: str, provider: str) -> dict[str, Any]:
 
 
 def llm_entry(provider: str, probe: dict[str, Any] | None) -> dict[str, Any]:
-    """Traduce la risposta di ``probe()`` nel formato della spia."""
+    """Turns ``probe()``'s answer into the light's format."""
     entry = {**_spec_fields("llm", provider), "state": "unknown", "detail": None, "hint": None}
     if probe is None:
         return entry
@@ -55,7 +56,7 @@ def llm_entry(provider: str, probe: dict[str, Any] | None) -> dict[str, Any]:
 
 
 class EngineMonitor:
-    """Controlla periodicamente i motori del companion attivo."""
+    """Periodically checks the active companion's engines."""
 
     def __init__(
         self,
@@ -74,10 +75,10 @@ class EngineMonitor:
     # ------------------------------------------------------------------
     @property
     def status(self) -> dict[str, Any]:
-        """L'ultimo stato noto, senza fare rete. Sempre immediato."""
+        """The last known state, without network. Always immediate."""
         current = self._companion()
         if current is not None and self._status["llm"] is None:
-            # Prima del primo controllo: almeno chi e' attivo, in grigio.
+            # Before the first check: at least who's active, in grey.
             return {**self._status, **self._local(current, None)}
         return dict(self._status)
 
@@ -95,19 +96,19 @@ class EngineMonitor:
             self._task = None
 
     def poke(self) -> None:
-        """Controlla subito (per esempio dopo un cambio di motore)."""
+        """Checks right away (for example after an engine change)."""
         self._wake.set()
 
     # ------------------------------------------------------------------
     async def _loop(self) -> None:
-        logger.info("Controllo dei motori ogni %.0fs", self.interval)
+        logger.info("Checking the engines every %.0fs", self.interval)
         while True:
             try:
                 await self.check()
             except asyncio.CancelledError:
                 raise
-            except Exception:  # pragma: no cover - il monitor non deve mai morire
-                logger.exception("Controllo dei motori fallito in modo imprevisto")
+            except Exception:  # pragma: no cover - the monitor must never die
+                logger.exception("The engine check failed unexpectedly")
             self._wake.clear()
             try:
                 await asyncio.wait_for(self._wake.wait(), self.interval)
@@ -115,7 +116,7 @@ class EngineMonitor:
                 pass
 
     async def check(self) -> dict[str, Any]:
-        """Un giro di controllo; notifica i client se qualcosa e' cambiato."""
+        """One round of checks; notifies the clients if something changed."""
         async with self._lock:
             companion = self._companion()
             if companion is None:
@@ -127,7 +128,7 @@ class EngineMonitor:
         if changed:
             llm = fresh["llm"]
             logger.info(
-                "Cervello %s: %s%s", llm["id"], llm["state"], f" ({llm['detail']})" if llm.get("detail") else ""
+                "Brain %s: %s%s", llm["id"], llm["state"], f" ({llm['detail']})" if llm.get("detail") else ""
             )
             if self.on_change is not None:
                 await self.on_change(self.status)
@@ -139,7 +140,7 @@ class EngineMonitor:
         settings = companion.settings
         llm = llm_entry(settings.selected("llm"), probe)
         if llm["state"] == "online" and companion.last_errors.get("llm"):
-            # Il servizio risponde, ma l'ultimo turno e' fallito: lo si dice.
+            # The service answers, but the last turn failed: we say so.
             llm["state"] = "degraded"
             llm["detail"] = companion.last_errors["llm"]
 
@@ -147,7 +148,7 @@ class EngineMonitor:
         tts = {**_spec_fields("tts", tts_id), "state": "online", "detail": None, "voice": companion.voice}
         reason = getattr(companion.tts, "fallback_reason", None)
         if reason:
-            tts.update(state="degraded", detail=f"Uso la voce di servizio: {reason}")
+            tts.update(state="degraded", detail=f"Using the service voice: {reason}")
         elif companion.last_errors.get("tts"):
             tts.update(state="degraded", detail=companion.last_errors["tts"])
         if companion.muted:
@@ -159,12 +160,12 @@ class EngineMonitor:
         elif stt_id == "browser" or companion.stt is not None:
             stt = {**_spec_fields("stt", stt_id), "state": "online", "detail": None}
         else:
-            stt = {**_spec_fields("stt", stt_id), "state": "offline", "detail": "Motore non avviato: guarda il log"}
+            stt = {**_spec_fields("stt", stt_id), "state": "offline", "detail": "Engine not started: see the log"}
         return {"llm": llm, "tts": tts, "stt": stt}
 
 
 def _signature(status: dict[str, Any]) -> tuple:
-    """Quello che conta per decidere se avvisare (non l'ora del controllo)."""
+    """What counts to decide whether to notify (not the time of the check)."""
     parts = []
     for kind in ("llm", "tts", "stt"):
         entry = status.get(kind) or {}

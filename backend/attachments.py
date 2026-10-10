@@ -1,10 +1,10 @@
-"""File passati al companion: trascinati su di lei, allegati in chat, screenshot.
+"""Files passed to the companion: dropped on her, attached in chat, screenshots.
 
-Un agente (Claude Code, Codex, OpenClaw...) lavora sul tuo PC: gli basta il
-percorso del file, piu' il permesso di leggerlo (``--add-dir`` per Claude Code,
-``-i`` per le immagini di Codex). Un modello invece non vede il disco: gli si
-manda il testo dei file e le immagini dentro il messaggio (vedi
-``openai_content``, ``anthropic_content``, ``gemini_parts``, ``ollama_images``).
+An agent (Claude Code, Codex, OpenClaw...) works on your PC: the file's path
+is enough, plus the permission to read it (``--add-dir`` for Claude Code,
+``-i`` for Codex's images). A model instead doesn't see the disk: it's sent
+the files' text and the images inside the message (see ``openai_content``,
+``anthropic_content``, ``gemini_parts``, ``ollama_images``).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-#: Quanti file per messaggio, e quanto testo di ciascuno finisce nel prompt di un modello.
+#: How many files per message, and how much text of each ends up in a model's prompt.
 MAX_FILES = 6
 MAX_TEXT_CHARS = 30_000
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -58,7 +58,7 @@ def classify(path: Path) -> str:
 
 
 def prepare(paths: list[str] | None) -> list[Attachment]:
-    """Solo file veri e leggibili, al massimo ``MAX_FILES``."""
+    """Only real, readable files, at most ``MAX_FILES``."""
     found: list[Attachment] = []
     for raw in paths or []:
         if not isinstance(raw, str) or not raw.strip():
@@ -79,7 +79,7 @@ def prepare(paths: list[str] | None) -> list[Attachment]:
 
 
 def default_prompt(files: list[Attachment], language: str, screen: bool = False) -> str:
-    """Cosa chiedere se hai passato un file senza scrivere niente."""
+    """What to ask if you passed a file without writing anything."""
     if screen:
         return "Guarda il mio schermo: cosa vedi? Dimmelo in breve." if language == "it" else "Look at my screen: what do you see? Keep it short."
     if language == "it":
@@ -88,7 +88,7 @@ def default_prompt(files: list[Attachment], language: str, screen: bool = False)
 
 
 def with_paths(text: str, files: list[Attachment]) -> str:
-    """Per un agente: il messaggio piu' l'elenco dei percorsi (li apre lui)."""
+    """For an agent: the message plus the list of paths (it opens them itself)."""
     if not files:
         return text
     lines = "\n".join(f"- {item.path}" for item in files)
@@ -96,7 +96,7 @@ def with_paths(text: str, files: list[Attachment]) -> str:
 
 
 def read_text(item: Attachment, limit: int = MAX_TEXT_CHARS) -> str | None:
-    """Il testo di un file (o di un PDF, se c'e' pypdf), tagliato a ``limit`` caratteri."""
+    """The text of a file (or of a PDF, if pypdf is there), cut at ``limit`` characters."""
     try:
         if item.kind == "pdf":
             try:
@@ -117,7 +117,7 @@ def read_text(item: Attachment, limit: int = MAX_TEXT_CHARS) -> str | None:
 
 
 def with_contents(text: str, files: list[Attachment]) -> str:
-    """Per un modello: il messaggio piu' il testo dei file (le immagini vanno a parte)."""
+    """For a model: the message plus the files' text (the images go separately)."""
     if not files:
         return text
     blocks = [text]
@@ -133,7 +133,7 @@ def with_contents(text: str, files: list[Attachment]) -> str:
 
 
 def image_data(path: str | Path) -> tuple[str, str] | None:
-    """``(mime, base64)`` di un'immagine, o ``None`` se e' troppo grande o illeggibile."""
+    """``(mime, base64)`` of an image, or ``None`` if it's too big or unreadable."""
     path = Path(path)
     try:
         if path.stat().st_size > MAX_IMAGE_BYTES:
@@ -146,10 +146,10 @@ def image_data(path: str | Path) -> tuple[str, str] | None:
 
 
 # ---------------------------------------------------------------------------
-# Formati dei vari servizi
+# The services' formats
 # ---------------------------------------------------------------------------
 def openai_content(text: str, images: tuple[str, ...]) -> str | list[dict[str, Any]]:
-    """Chat Completions (LM Studio, OpenRouter, Groq...): testo, o parti testo+immagini."""
+    """Chat Completions (LM Studio, OpenRouter, Groq...): text, or text+image parts."""
     if not images:
         return text
     parts: list[dict[str, Any]] = [{"type": "text", "text": text}]
@@ -187,13 +187,13 @@ def ollama_images(images: tuple[str, ...]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# File caricati dal browser (niente percorso vero)
+# Files uploaded from the browser (no real path)
 # ---------------------------------------------------------------------------
 _SAFE_NAME = re.compile(r"[^\w.\- ()]+", re.UNICODE)
 
 
 def store_upload(folder: Path, name: str, data: bytes) -> Path:
-    """Salva un file caricato in ``state/uploads/<id>/<nome>`` e ne restituisce il percorso."""
+    """Saves an uploaded file in ``state/uploads/<id>/<name>`` and returns its path."""
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValueError(f"File troppo grande (massimo {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
     clean = _SAFE_NAME.sub("_", Path(name or "file").name).strip(" .") or "file"

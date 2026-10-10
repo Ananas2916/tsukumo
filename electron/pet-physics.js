@@ -1,45 +1,53 @@
 /**
- * Dove sta la mascotte e su cosa si appoggia, come in Desktop Mate.
+ * Where the mascot is and what she rests on, as in Desktop Mate.
  *
- * Stati:
- *  - `ground`  sulla barra delle applicazioni (in piedi, seduta sul bordo o sdraiata);
- *  - `window`  seduta sul bordo superiore di una finestra, con cui viaggia;
- *  - `edge`    aggrappata al bordo sinistro/destro dello schermo, che sbircia;
- *  - `falling` in caduta libera;
- *  - `held`    presa col mouse (la finestra la muove il trascinamento);
- *  - `sprint`  la fiammella corre lungo la barra a tutta velocita'.
+ * States:
+ *  - `ground`  on the taskbar (standing, sitting on the edge or lying down);
+ *  - `window`  sitting on a window's top edge, travelling with it;
+ *  - `edge`    clinging to the left/right screen edge, peeking;
+ *  - `falling` in free fall, or flying if you threw her (bouncing off the edges);
+ *  - `held`    picked up with the mouse (the drag moves the window);
+ *  - `sprint`  the flame runs along the taskbar at full speed.
  *
- * La finestra del personaggio e' piu' grande del personaggio: le "ancore"
- * dicono, in frazioni della finestra, dove stanno i piedi, la seduta (il
- * fondo del bacino) e l'asse del corpo. Le misura il renderer, che sa come e'
- * inquadrato il modello, e restano valide a qualunque scala.
+ * The character's window is bigger than the character: the "anchors" say,
+ * as fractions of the window, where the feet, the seat (the bottom of the
+ * pelvis) and the body axis are. The renderer measures them, since it knows
+ * how the model is framed, and they hold at any scale.
  *
- * Il modulo non dipende da Electron: tutto quello che serve arriva da `env`,
- * cosi' si puo' provare con finestre finte.
+ * The module doesn't depend on Electron: everything it needs comes from
+ * `env`, so it can be tested with fake windows.
  */
 
 const GRAVITY = 2600; // px/s^2
 const MAX_FALL = 1500; // px/s
-const POSTURE_TIME = 0.45; // s: sedersi/alzarsi sulla barra
+const POSTURE_TIME = 0.45; // s: sitting down/standing up on the taskbar
 
 /**
- * Lo sprint della fiammella (frontend/src/flame.js): si carica, parte a tutta
- * velocita' lungo la barra, frena di colpo con un rimbalzo e si gode il
- * momento. Due giri: scatto in un altro punto dello schermo e ritorno, oppure
- * giro di pista (esce da un bordo, rientra dall'altro e torna a casa).
- * Velocita' in larghezze dello schermo, cosi' vale uguale su ogni monitor.
+ * The flame's sprint (frontend/src/flame.js): she winds up, sets off at full
+ * speed along the taskbar, brakes hard with a bounce and enjoys the moment.
+ * Two runs: a dash to another point of the screen and back, or a lap (she
+ * leaves from one edge, comes back in from the other and returns home).
+ * Speeds in screen widths, so it's the same on every monitor.
  */
 const SPRINT = {
-  ready: 0.38, // s: si carica prima di partire
-  speed: 1.4, // schermi al secondo a tutta velocita'
-  accel: 7, // schermi al secondo^2
-  brake: 0.35, // frena quando al traguardo manca questa frazione della finestra
-  stiffness: 160, // molla della frenata (1/s^2)
+  ready: 0.38, // s: winding up before setting off
+  speed: 1.4, // screens per second at full speed
+  accel: 7, // screens per second^2
+  brake: 0.35, // she brakes when this fraction of the window is left to the finish
+  stiffness: 160, // braking spring (1/s^2)
   damping: 15, // (1/s)
-  settle: 0.5, // s di frenata
-  look: 0.9, // s a guardarsi intorno prima di tornare
-  proud: 0.7, // s di soddisfazione alla fine
+  settle: 0.5, // s of braking
+  look: 0.9, // s looking around before going back
+  proud: 0.7, // s of satisfaction at the end
 };
+
+/**
+ * Throwing the flame (like Blobby): let go with a flick she flies in the
+ * gesture's direction, the air slows her down, she bumps and bounces off the
+ * screen edges, then gravity brings her down. Speeds in px/s; `edge` and
+ * `ceiling` as fractions of the window (where the edge touches her).
+ */
+const THROW = { min: 650, max: 3200, drag: 1.1, bounce: 0.55, bonk: 350, edge: 0.14, ceiling: 0.3 };
 
 const smoothstep = (t) => t * t * (3 - 2 * t);
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -47,13 +55,13 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 class PetPhysics {
   /**
    * @param {object} env
-   * @param {() => {x:number,y:number,width:number,height:number}} env.bounds finestra del personaggio
+   * @param {() => {x:number,y:number,width:number,height:number}} env.bounds the character's window
    * @param {(x:number, y:number) => void} env.move
-   * @param {(bounds:object) => {x:number,y:number,width:number,height:number}} env.workArea area utile del monitor
-   * @param {() => Array} env.windows finestre degli altri programmi, dalla piu' in alto
+   * @param {(bounds:object) => {x:number,y:number,width:number,height:number}} env.workArea the monitor's work area
+   * @param {() => Array} env.windows other programs' windows, topmost first
    * @param {(hwnd:number) => object|null} env.windowRect
-   * @param {(message:object) => void} env.emit messaggi per il renderer
-   * @param {() => number} [env.random] per le prove: sceglie giro e traguardo dello sprint
+   * @param {(message:object) => void} env.emit messages for the renderer
+   * @param {() => number} [env.random] for tests: picks the sprint's run and finish
    */
   constructor(env) {
     this.env = env;
@@ -61,18 +69,21 @@ class PetPhysics {
     this.state = 'ground';
     this.posture = 'stand';
     this.vy = 0;
+    this.vx = 0;
+    /** Thrown: she also flies horizontally until she lands. */
+    this.thrown = false;
     this.surface = null;
     this.transition = null;
-    /** Lo sprint in corso: fase, traguardo, posizione e velocita' dell'asse del corpo. */
+    /** The sprint in progress: phase, finish, position and speed of the body axis. */
     this.run = null;
-    /** Ancore in frazioni della finestra: piedi e seduta sulla verticale, asse del corpo sull'orizzontale. */
+    /** Anchors as fractions of the window: feet and seat on the vertical, body axis on the horizontal. */
     this.anchors = { feet: 0.985, seat: 0.56, center: 0.5 };
     this.windowsEnabled = true;
   }
 
   setAnchors(anchors) {
-    // Arrivano dal renderer: con la finestra ridotta a icona innerHeight vale 0
-    // e una frazione diventa Infinity o NaN, che poi finirebbe in setPosition.
+    // They come from the renderer: with the window minimized innerHeight is 0
+    // and a fraction becomes Infinity or NaN, which would end up in setPosition.
     const next = { ...this.anchors };
     for (const key of ['feet', 'seat', 'center']) {
       const value = Number(anchors?.[key]);
@@ -82,17 +93,22 @@ class PetPhysics {
     this.snap();
   }
 
-  // ------------------------------------------------------------- comandi
+  // ------------------------------------------------------------- commands
   grab() {
     if (this.run) this._endSprint();
     this.state = 'held';
     this.surface = null;
     this.transition = null;
     this.vy = 0;
+    this.vx = 0;
+    this.thrown = false;
   }
 
-  /** Lasciata andare: si aggrappa al bordo dello schermo se e' fuori, altrimenti cade. */
-  release() {
+  /**
+   * Let go: she clings to the screen edge if she's outside it, otherwise she
+   * falls. With `velocity` (`{vx, vy}` in px/s, from the renderer) it's a throw.
+   */
+  release(velocity = null) {
     const bounds = this.env.bounds();
     const area = this.env.workArea(bounds);
     const { center, feet } = this.anchors;
@@ -100,18 +116,21 @@ class PetPhysics {
     const ground = area.y + area.height;
     const high = bounds.y + bounds.height * feet < ground - bounds.height * 0.2;
     const margin = bounds.width * 0.08;
+    const thrown = throwVelocity(velocity);
 
-    if (high && (cx > area.x + area.width - margin || cx < area.x + margin)) {
+    if (!thrown && high && (cx > area.x + area.width - margin || cx < area.x + margin)) {
       const side = cx > area.x + area.width / 2 ? 'right' : 'left';
       this._cling(side, bounds, area);
       return;
     }
     this.state = 'falling';
-    this.vy = 0;
-    this.env.emit({ state: 'falling' });
+    this.vx = thrown?.vx ?? 0;
+    this.vy = thrown?.vy ?? 0;
+    this.thrown = Boolean(thrown);
+    this.env.emit(thrown ? { state: 'falling', thrown: true, vx: this.vx } : { state: 'falling' });
   }
 
-  /** Sedersi, alzarsi, sdraiarsi (a pancia in giu' o sul fianco): solo sulla barra; sulle finestre sta sempre seduta. */
+  /** Sit, stand up, lie down (face down or on her side): only on the taskbar; on windows she always sits. */
   requestPosture(posture) {
     if (this.state !== 'ground' || !['stand', 'sit', 'lie', 'side'].includes(posture) || posture === this.posture) return false;
     const bounds = this.env.bounds();
@@ -122,15 +141,15 @@ class PetPhysics {
   }
 
   /**
-   * Parte uno sprint, solo in piedi sulla barra. `kind`: 'dash' (scatto e
-   * ritorno), 'lap' (giro di pista) o niente per sceglierne uno a caso.
+   * Starts a sprint, only standing on the taskbar. `kind`: 'dash' (dash and
+   * back), 'lap' (a lap) or nothing to pick one at random.
    */
   sprint(kind) {
     if (this.state !== 'ground' || this.posture !== 'stand' || this.transition) return false;
     const bounds = this.env.bounds();
     const area = this.env.workArea(bounds);
     const cx = bounds.x + bounds.width * this.anchors.center;
-    // Le fermate restano dentro lo schermo anche col rimbalzo della frenata.
+    // The stops stay inside the screen even with the braking bounce.
     const margin = bounds.width * 0.6;
     const lo = area.x + margin;
     const hi = area.x + area.width - margin;
@@ -138,7 +157,7 @@ class PetPhysics {
     const far = area.width / 3;
     const leftRoom = Math.max(0, home - far - lo);
     const rightRoom = Math.max(0, hi - (home + far));
-    // Su uno schermo troppo stretto per uno scatto lungo fa il giro di pista.
+    // On a screen too narrow for a long dash she does a lap.
     const lap = kind === 'lap' || leftRoom + rightRoom <= 0 || (kind !== 'dash' && this.random() < 0.45);
     let target = home;
     let dir = this.random() < 0.5 ? -1 : 1;
@@ -153,7 +172,7 @@ class PetPhysics {
     return true;
   }
 
-  // ------------------------------------------------------------- tempo
+  // ------------------------------------------------------------- time
   step(dt) {
     switch (this.state) {
       case 'falling':
@@ -173,7 +192,7 @@ class PetPhysics {
     }
   }
 
-  /** Riposiziona dopo un cambio di scala o di ancore, senza animazioni. */
+  /** Repositions after a change of scale or anchors, without animations. */
   snap() {
     this.transition = null;
     if (this.state === 'ground') this._ground(0);
@@ -181,8 +200,8 @@ class PetPhysics {
   }
 
   /**
-   * Nuovi limiti per una nuova dimensione della finestra, tenendo fermo il
-   * punto su cui poggia (piedi o seduta) e l'asse del corpo.
+   * New bounds for a new window size, keeping still the point she rests on
+   * (feet or seat) and the body axis.
    */
   resized(bounds, width, height) {
     const { feet, seat, center } = this.anchors;
@@ -197,27 +216,30 @@ class PetPhysics {
     return { x: Math.round(cx - width * center), y: Math.round(y), width, height };
   }
 
-  // ------------------------------------------------------------- stati
+  // ------------------------------------------------------------- states
   _fall(dt) {
     const bounds = this.env.bounds();
     const area = this.env.workArea(bounds);
     const { feet, seat, center } = this.anchors;
     this.vy = Math.min(MAX_FALL, this.vy + GRAVITY * dt);
+    const x = this.thrown ? this._fly(bounds, area, dt) : bounds.x;
     const dy = this.vy * dt;
-    const cx = bounds.x + bounds.width * center;
+    const cx = x + bounds.width * center;
 
-    // Prima le finestre: atterra seduta sul primo bordo che incontra.
+    // Windows first: she lands sitting on the first edge she meets.
     if (this.windowsEnabled) {
       const seatBefore = bounds.y + bounds.height * seat;
       const target = this._landingWindow(seatBefore, seatBefore + dy, cx, bounds, area);
       if (target) {
         const y = Math.round(target.y - bounds.height * seat);
-        this.env.move(bounds.x, y);
+        this.env.move(x, y);
         this.state = 'window';
         this.posture = 'sit';
-        this.surface = { hwnd: target.hwnd, dx: bounds.x - target.x, x: target.x, y: target.y };
+        // Where her body axis sits on the window, not the window's left edge:
+        // a wider window (the menu island, a new scale) keeps her in place.
+        this.surface = { hwnd: target.hwnd, axis: cx - target.x, x: target.x, y: target.y };
         this.env.emit({ state: 'landed', surface: 'window', posture: 'sit', impact: this.vy / MAX_FALL });
-        this.vy = 0;
+        this._stopFlying();
         return;
       }
     }
@@ -225,24 +247,55 @@ class PetPhysics {
     const ground = area.y + area.height;
     const feetAfter = bounds.y + dy + bounds.height * feet;
     if (feetAfter >= ground) {
-      // A terra resta tutta dentro lo schermo.
-      const half = bounds.width * 0.22;
-      const x = clamp(cx, area.x + half, area.x + area.width - half) - bounds.width * center;
-      this.env.move(Math.round(x), Math.round(ground - bounds.height * feet));
+      // On the ground she stays fully inside the screen (thrown, as far as the flight took her).
+      const half = bounds.width * (this.thrown ? THROW.edge : 0.22);
+      const landX = clamp(cx, area.x + half, area.x + area.width - half) - bounds.width * center;
+      this.env.move(Math.round(landX), Math.round(ground - bounds.height * feet));
       this.state = 'ground';
       this.posture = 'stand';
       this.env.emit({ state: 'landed', surface: 'ground', posture: 'stand', impact: this.vy / MAX_FALL });
-      this.vy = 0;
+      this._stopFlying();
       return;
     }
-    this.env.move(bounds.x, Math.round(bounds.y + dy));
+    const y = Math.round(bounds.y + dy);
+    this.env.move(x, y);
+    // The renderer pulls the trail back by how much the window moved.
+    if (this.thrown) this.env.emit({ state: 'fly', x, y });
   }
 
   /**
-   * La finestra su cui atterrare: il suo bordo superiore viene attraversato
-   * dalla linea della seduta in questo passo, il personaggio ci sta sopra in
-   * orizzontale, sopra c'e' spazio per il corpo e quel pezzo di bordo non e'
-   * coperto da un'altra finestra.
+   * One step of the horizontal flight: the air slows her down, the screen's
+   * edges (and the sky) make her bounce. Returns the window's new x.
+   */
+  _fly(bounds, area, dt) {
+    const { center, feet } = this.anchors;
+    this.vx *= Math.exp(-THROW.drag * dt);
+    const lo = area.x + bounds.width * THROW.edge;
+    const hi = area.x + area.width - bounds.width * THROW.edge;
+    let cx = bounds.x + bounds.width * center + this.vx * dt;
+    if (cx < lo || cx > hi) {
+      const side = cx < lo ? 'left' : 'right';
+      cx = clamp(cx, lo, hi);
+      if (Math.abs(this.vx) > THROW.bonk) this.env.emit({ state: 'bonk', side, impact: Math.min(1, Math.abs(this.vx) / THROW.max) });
+      this.vx = -this.vx * THROW.bounce;
+    }
+    if (this.vy < 0 && bounds.y + bounds.height * feet < area.y + bounds.height * THROW.ceiling) {
+      if (-this.vy > THROW.bonk) this.env.emit({ state: 'bonk', side: 'top', impact: Math.min(1, -this.vy / THROW.max) });
+      this.vy = -this.vy * THROW.bounce;
+    }
+    return Math.round(cx - bounds.width * center);
+  }
+
+  _stopFlying() {
+    this.vy = 0;
+    this.vx = 0;
+    this.thrown = false;
+  }
+
+  /**
+   * The window to land on: its top edge is crossed by the seat line in this
+   * step, the character fits on it horizontally, there's room for the body
+   * above it and that piece of edge isn't covered by another window.
    */
   _landingWindow(before, after, cx, bounds, area) {
     const windows = this.env.windows();
@@ -281,14 +334,14 @@ class PetPhysics {
     if (Math.round(y) !== bounds.y) this.env.move(bounds.x, Math.round(y));
   }
 
-  /** Seduta su una finestra: la segue se si sposta, cade se sparisce. */
+  /** Sitting on a window: she follows it if it moves, falls if it disappears. */
   _ride() {
     const surface = this.surface;
     const rect = surface ? this.env.windowRect(surface.hwnd) : null;
     const bounds = this.env.bounds();
     const area = this.env.workArea(bounds);
     const { seat, center } = this.anchors;
-    const cx = (rect ? rect.x + surface.dx : bounds.x) + bounds.width * center;
+    const cx = rect ? rect.x + surface.axis : bounds.x + bounds.width * center;
     const margin = bounds.width * 0.08;
     const lost =
       !rect ||
@@ -304,11 +357,11 @@ class PetPhysics {
       return;
     }
 
-    const x = Math.round(rect.x + surface.dx);
+    const x = Math.round(cx - bounds.width * center);
     const y = Math.round(rect.y - bounds.height * seat);
     if (x !== bounds.x || y !== bounds.y) {
       this.env.move(x, y);
-      // Il renderer usa queste posizioni per farla sballottare.
+      // The renderer uses these positions to jostle her.
       this.env.emit({ state: 'carried', x, y });
     }
     surface.x = rect.x;
@@ -316,9 +369,9 @@ class PetPhysics {
   }
 
   /**
-   * Un passo dello sprint. Il traguardo e le velocita' riguardano l'asse del
-   * corpo; la finestra si ricava da li', perche' durante la corsa si allarga
-   * (vedi updatePetShape in main.js) per lasciare posto alla scia.
+   * One step of the sprint. The finish and the speeds concern the body axis;
+   * the window is derived from it, because during the run it widens (see
+   * updatePetShape in main.js) to make room for the trail.
    */
   _sprint(dt) {
     const run = this.run;
@@ -331,7 +384,7 @@ class PetPhysics {
       const top = SPRINT.speed * area.width;
       run.v = Math.min(top, Math.abs(run.v) + SPRINT.accel * area.width * dt) * run.dir;
       run.x += run.v * dt;
-      // Giro di pista: sparita del tutto da un lato, rientra dall'altro.
+      // Lap: gone completely on one side, she comes back in from the other.
       const off = bounds.width * 0.8;
       if (run.lap && !run.wrapped && (run.dir > 0 ? run.x > area.x + area.width + off : run.x < area.x - off)) {
         run.x = run.dir > 0 ? area.x - off : area.x + area.width + off;
@@ -360,7 +413,7 @@ class PetPhysics {
     const x = Math.round(run.x - bounds.width * this.anchors.center);
     const y = Math.round(area.y + area.height - bounds.height * this.anchors.feet);
     this.env.move(x, y);
-    // Il renderer sposta la scia all'indietro di quanto e' avanzata la finestra.
+    // The renderer moves the trail back by how much the window advanced.
     if (run.phase === 'go' || run.phase === 'brake') {
       this.env.emit({ state: 'sprint-move', x, speed: Math.min(1, Math.abs(run.v) / (SPRINT.speed * area.width)) });
     }
@@ -380,8 +433,8 @@ class PetPhysics {
 
   _cling(side, bounds, area) {
     const { center, feet } = this.anchors;
-    // Il bordo dello schermo passa un po' dentro al corpo: si vede la testa
-    // che sbircia, il resto sta fuori.
+    // The screen edge goes a little into the body: you see the head peeking,
+    // the rest is outside.
     const edge = side === 'right' ? center - 0.14 : center + 0.14;
     const x = side === 'right' ? area.x + area.width - bounds.width * edge : area.x - bounds.width * edge;
     const ground = area.y + area.height;
@@ -393,4 +446,18 @@ class PetPhysics {
   }
 }
 
-module.exports = { PetPhysics, GRAVITY, MAX_FALL, SPRINT };
+/**
+ * The throw's speed comes from the renderer: only finite numbers are
+ * accepted, above the threshold (below it's just letting her go) and capped.
+ */
+function throwVelocity(velocity) {
+  const vx = Number(velocity?.vx);
+  const vy = Number(velocity?.vy);
+  if (!Number.isFinite(vx) || !Number.isFinite(vy)) return null;
+  const speed = Math.hypot(vx, vy);
+  if (speed < THROW.min) return null;
+  const k = Math.min(1, THROW.max / speed);
+  return { vx: vx * k, vy: Math.min(vy * k, MAX_FALL) };
+}
+
+module.exports = { PetPhysics, GRAVITY, MAX_FALL, SPRINT, THROW };

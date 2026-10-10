@@ -1,23 +1,25 @@
 /**
- * Il pannello di Tsukumo: chat, personaggio, agenda, lavoro (i consumi degli
- * agenti) e motori, staccato dal personaggio.
+ * Tsukumo's panel: chat, character, agenda, work (the agents' usage) and
+ * engines, detached from the character.
  *
- * E' una finestra a parte con una sua connessione WebSocket al backend: il
- * backend manda tutto a tutti, quindi qui arrivano gli stessi messaggi del
- * personaggio. Il pannello li usa per la chat e per lo stato dei motori e
- * ignora l'audio, che suona solo nella finestra del personaggio.
+ * It's a separate window with its own WebSocket connection to the backend:
+ * the backend sends everything to everyone, so the same messages as the
+ * character's arrive here. The panel uses them for the chat and the
+ * engines' state and ignores the audio, which plays only in the character's
+ * window.
  *
- * Le impostazioni vanno in tre posti diversi:
- *  - voce, lingua delle risposte, muto -> al backend (messaggio `settings`);
- *  - dimensione, primo piano, fantasma, finestre -> al processo Electron;
- *  - bocca, gesti spontanei, balli, debug -> al personaggio, tramite Electron.
- * Le preferenze si salvano in localStorage, che il personaggio condivide
- * (stessa origine) e rilegge all'avvio.
+ * Settings go to three different places:
+ *  - voice, reply language, mute -> to the backend (`settings` message);
+ *  - size, always on top, ghost mode, windows -> to the Electron process;
+ *  - mouth, spontaneous gestures, dances, debug -> to the character, via Electron.
+ * Preferences are saved in localStorage, which the character shares (same
+ * origin) and reads again at startup.
  */
 
 import { wsUrl } from './config.js';
 import { el, iconButton, readSetting, writeSetting } from './dom.js';
 import { EnginesView } from './engines.js';
+import { t, translateDom, tx, watchLanguage } from './i18n.js';
 import { icon } from './icons.js';
 import { AgendaView } from './panel/agenda.js';
 import { CharacterView } from './panel/character.js';
@@ -27,26 +29,28 @@ import { WorkView } from './panel/work.js';
 import { CompanionSocket } from './ws.js';
 
 const companion = window.companion ?? null;
+translateDom();
+watchLanguage();
 const $ = (id) => document.getElementById(id);
 
 const TABS = [
-  { id: 'chat', label: 'Chat', icon: 'chat' },
-  { id: 'character', label: 'Personaggio', icon: 'character' },
-  { id: 'agenda', label: 'Agenda', icon: 'clock' },
-  { id: 'work', label: 'Lavoro', icon: 'briefcase' },
-  { id: 'engines', label: 'Motori', icon: 'engines' },
+  { id: 'chat', label: t('Chat'), icon: 'chat' },
+  { id: 'character', label: t('Character'), icon: 'character' },
+  { id: 'agenda', label: t('Agenda'), icon: 'clock' },
+  { id: 'work', label: t('Work'), icon: 'briefcase' },
+  { id: 'engines', label: t('Engines'), icon: 'engines' },
 ];
 
 const STATE_TEXT = {
-  online: 'pronta',
-  degraded: 'con qualche problema',
-  offline: 'non raggiungibile',
-  unknown: 'in verifica…',
-  thinking: 'sta pensando…',
-  speaking: 'sta parlando',
+  online: t('ready'),
+  degraded: t('having some trouble'),
+  offline: t('unreachable'),
+  unknown: t('checking…'),
+  thinking: t('thinking…'),
+  speaking: t('speaking'),
 };
 
-/** Stato condiviso fra le schede, piu' un piccolo bus di eventi. */
+/** State shared by the tabs, plus a small event bus. */
 const app = {
   socket: new CompanionSocket(wsUrl),
   companion,
@@ -71,7 +75,7 @@ const app = {
   },
 };
 
-// ------------------------------------------------------------------ schede
+// -------------------------------------------------------------------- tabs
 const tabButtons = new Map();
 for (const tab of TABS) {
   const button = el(
@@ -105,7 +109,7 @@ function showTab(name, options = {}) {
   views[name].shown?.(options);
 }
 
-// ---------------------------------------------------------------- testata
+// ------------------------------------------------------------------ header
 function renderHeader() {
   const llm = app.engines?.llm;
   const connected = app.socket.connected;
@@ -114,12 +118,12 @@ function renderHeader() {
   $('badge').dataset.state = state;
   const line = $('agent-line');
   if (!connected) {
-    line.textContent = 'Backend non raggiungibile, riprovo…';
+    line.textContent = t('Backend unreachable, retrying…');
   } else if (llm) {
-    const detail = !busy && llm.state !== 'online' && llm.detail ? ` — ${llm.detail}` : '';
+    const detail = !busy && llm.state !== 'online' && llm.detail ? ` — ${tx(llm.detail)}` : '';
     line.textContent = `${llm.label} · ${STATE_TEXT[state] ?? state}${detail}`;
   } else {
-    line.textContent = 'Connessa';
+    line.textContent = t('Connected');
   }
   line.title = line.textContent;
 }
@@ -127,12 +131,12 @@ function renderHeader() {
 app.on('engines', renderHeader);
 app.on('busy', renderHeader);
 
-// --------------------------------------------------------------- finestra
+// ------------------------------------------------------------------ window
 if (companion) {
   const actions = $('window-actions');
-  const dock = iconButton('dock', { title: 'Aggancia al personaggio', className: 'icon-btn' });
-  const pin = iconButton('pin', { title: 'Tieni il pannello in primo piano', className: 'icon-btn' });
-  const close = iconButton('close', { title: 'Chiudi il pannello (Esc)', className: 'icon-btn' });
+  const dock = iconButton('dock', { title: t('Attach to the character'), className: 'icon-btn' });
+  const pin = iconButton('pin', { title: t('Keep the panel on top'), className: 'icon-btn' });
+  const close = iconButton('close', { title: t('Close the panel (Esc)'), className: 'icon-btn' });
   actions.append(dock, pin, close);
 
   let docked = true;
@@ -146,7 +150,7 @@ if (companion) {
     docked = state.docked;
     panelPinned = state.panelPinned;
     dock.classList.toggle('active', docked);
-    dock.title = docked ? 'Agganciato al personaggio: trascina il pannello per staccarlo' : 'Aggancia al personaggio';
+    dock.title = docked ? t('Attached to the character: drag the panel to detach it') : t('Attach to the character');
     pin.classList.toggle('active', panelPinned);
     app.emit('window-state', state);
     if (state.voice) app.emit('mic', state.voice);
@@ -158,11 +162,11 @@ if (companion) {
   companion.onVoiceCommand?.((command) => {
     if (command?.type === 'state') app.emit('mic', command);
   });
-  // Il personaggio chiede di mostrare una scheda (doppio click o iniziare a
-  // scrivere = chat, col primo tasto gia' dentro; i dock = le altre).
+  // The character asks to show a tab (double click or starting to type =
+  // chat, with the first key already inside; the menu = the others).
   companion.onFocus((focus = {}) => {
     showTab(focus.tab ?? 'chat', focus);
-    // Electron sa se e' il primo avvio (nessuna impostazione salvata): allora la presentazione.
+    // Electron knows whether it's the first start (no saved settings): then the introduction.
     if (focus.welcome) welcome.maybeStart();
   });
 }
@@ -177,7 +181,7 @@ function setMusic(music) {
   if (playing) $('now-playing-text').textContent = `${music.title} — ${music.artist}`;
 }
 
-// ----------------------------------------------------------------- avvisi
+// ----------------------------------------------------------------- notices
 let toastTimer = null;
 const toast = el('div', { class: 'panel-toast hidden', role: 'status' });
 document.body.append(toast);
@@ -189,7 +193,7 @@ function showToast(text, kind = 'info') {
   toastTimer = setTimeout(() => toast.classList.add('hidden'), 3200);
 }
 
-// ---------------------------------------------------------------- backend
+// ----------------------------------------------------------------- backend
 const { socket } = app;
 
 socket.on('open', renderHeader);
@@ -201,7 +205,7 @@ socket.on('close', () => {
 
 socket.on('hello', (message) => {
   showIdentity(message.memory?.persona);
-  // Nel browser (senza Electron) il primo avvio si riconosce da localStorage.
+  // In the browser (without Electron) the first start is detected from localStorage.
   if (!companion) welcome.maybeStart();
   app.settings = { ...(message.config ?? {}) };
   app.voices = message.voices ?? [];
@@ -240,7 +244,7 @@ socket.on('state', (message) => {
   app.emit('busy', app.busy);
 });
 
-// Il nome scelto per lei (Personaggio -> Chi e' e cosa sa di te) anche nella barra del titolo.
+// The name chosen for her (Character -> Who she is and what she knows about you) in the title bar too.
 socket.on('memory', (message) => showIdentity(message.persona));
 
 function showIdentity(persona) {
@@ -248,7 +252,7 @@ function showIdentity(persona) {
   if (!name) return;
   document.querySelector('.titles strong').textContent = name;
   document.querySelector('.badge-letter').textContent = name.charAt(0).toUpperCase();
-  document.title = `${name} - pannello`;
+  document.title = t('{name} - panel', { name });
 }
 
 function pickSettings(message) {
@@ -256,7 +260,7 @@ function pickSettings(message) {
   return Object.fromEntries(keys.filter((key) => key in message).map((key) => [key, message[key]]));
 }
 
-// ---------------------------------------------------------------- avvio
+// ----------------------------------------------------------------- startup
 const welcome = new Welcome(app, document.querySelector('.app'));
 app.welcome = welcome;
 const initialTab = (location.hash || '').replace('#', '') || readSetting('dc:panel-tab', 'chat');

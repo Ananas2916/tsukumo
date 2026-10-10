@@ -1,27 +1,27 @@
-# Metti qui il tuo avatar
+# An optional body for Tsukumo
 
-Copia in questa cartella un file `.vrm` e chiamalo **`avatar.vrm`**:
+Tsukumo is a flame and needs nothing here. If you want to give her a VRM body
+she can enter and leave, copy a `.vrm` file into this folder and call it
+**`avatar.vrm`**:
 
 ```
 frontend/public/models/avatar.vrm
 ```
 
-L'applicazione lo carica automaticamente all'avvio. Se il nome e' diverso, il
-backend prende comunque il primo `.vrm` che trova qui dentro (vedi
-`GET /api/config` -> `avatar.default`). Puoi anche trascinare un `.vrm`
-direttamente sulla finestra per caricarlo al volo.
+If the name is different, the backend still takes the first `.vrm` it finds in
+here (see `GET /api/config` -> `avatar.default`). You can also drag a `.vrm`
+straight onto the window to load it on the fly.
 
-## Dove prendere un modello
+## Where to get a model
 
-- **VRoid Studio** (gratuito, Windows/macOS): crea il tuo personaggio ed
-  esporta in VRM.
-- **VRoid Hub** / **Booth**: modelli di altri autori. Controlla sempre la
-  licenza: molti vietano l'uso commerciale o le modifiche.
+- **VRoid Studio** (free, Windows/macOS): create your own character and
+  export it as VRM.
+- **VRoid Hub** / **Booth**: models by other authors. Always check the
+  licence: many forbid commercial use or modifications.
 
-## Requisiti del modello
+## Model requirements
 
-Per il lip-sync servono le blendshape della bocca. I modelli VRoid le hanno
-gia':
+Lip-sync needs the mouth blendshapes. VRoid models already have them:
 
 | Viseme | VRM 0.x (morph target) | VRM 1.0 (expression preset) |
 |--------|------------------------|-----------------------------|
@@ -31,7 +31,6 @@ gia':
 | E      | `fcl_mth_e`            | `ee`                        |
 | O      | `fcl_mth_o`            | `oh`                        |
 
-Il renderer usa le espressioni preset quando ci sono, altrimenti pilota
-direttamente i morph target `fcl_mth_*`. Se mancano entrambi, l'avatar viene
-comunque mostrato: semplicemente non muove la bocca (lo dice anche il badge
-in alto a sinistra).
+The renderer uses the preset expressions when they exist, otherwise it drives
+the `fcl_mth_*` morph targets directly. If both are missing, the avatar is
+still shown: it just doesn't move its mouth.

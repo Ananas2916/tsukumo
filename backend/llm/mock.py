@@ -1,9 +1,9 @@
-"""Risponditore offline: nessun modello, nessuna rete.
+"""Offline answerer: no model, no network.
 
-Serve a due scopi: sviluppare il frontend senza tenere acceso Ollama e fare da
-rete di sicurezza quando l'LLM configurato non risponde. Le risposte sono
-brevi e adatte alla lettura ad alta voce, in italiano o inglese a seconda di
-come scrive l'utente.
+It serves two purposes: developing the frontend without keeping Ollama on,
+and being a safety net when the configured LLM doesn't answer. The replies
+are short and suited to being read aloud, in Italian or English depending
+on how the user writes.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 
 from .base import LLMClient, Message
 
-# Parole spia per riconoscere l'italiano senza librerie esterne.
+# Telltale words to recognize Italian without external libraries.
 _ITALIAN_HINTS = {
     "ciao", "come", "stai", "grazie", "per", "favore", "che", "cosa", "sei",
     "sono", "puoi", "vorrei", "quando", "perche", "dove", "buongiorno",
@@ -57,7 +57,7 @@ _SMALLTALK_EN = [
 
 
 class MockLLM(LLMClient):
-    """Genera risposte deterministiche ma variate, in streaming simulato."""
+    """Generates deterministic but varied replies, in simulated streaming."""
 
     name = "mock"
 
@@ -72,8 +72,8 @@ class MockLLM(LLMClient):
             "",
         )
         reply = self._compose(prompt)
-        # Emettiamo parola per parola per esercitare davvero il percorso di
-        # streaming del frontend (token -> frase -> sintesi -> lip-sync).
+        # We emit word by word to really exercise the frontend's streaming path
+        # (token -> sentence -> synthesis -> lip-sync).
         for index, word in enumerate(reply.split(" ")):
             await asyncio.sleep(self.chunk_delay)
             yield word if index == 0 else f" {word}"
@@ -82,7 +82,7 @@ class MockLLM(LLMClient):
     def _compose(self, prompt: str) -> str:
         text = prompt.strip()
         italian = self._is_italian(text)
-        # Seed derivato dal testo: stessa domanda, stessa risposta.
+        # Seed derived from the text: same question, same answer.
         self._random.seed(hash(text.lower()) & 0xFFFFFFFF)
         now = datetime.now()
 
@@ -101,9 +101,9 @@ class MockLLM(LLMClient):
 
         if _WHOAREYOU.search(text):
             return (
-                "Sono il tuo Desk Companion: un piccolo avatar tridimensionale che parla con Kokoro."
+                "Sono Tsukumo, una fiammella che vive sulla tua scrivania."
                 if italian
-                else "I am your Desk Companion, a small 3D avatar that speaks through Kokoro."
+                else "I am Tsukumo, a little flame living on your desk."
             )
 
         if _TIME.search(text):
@@ -145,7 +145,7 @@ class MockLLM(LLMClient):
 
     @staticmethod
     def _topic(text: str) -> str:
-        """Estrae la parola piu' lunga come 'argomento' della frase."""
+        """Takes the longest word as the sentence's 'topic'."""
         words = [w for w in re.findall(r"[\w'-]{4,}", text) if not w.isdigit()]
         if not words:
             return "questo" if MockLLM._is_italian(text) else "that"

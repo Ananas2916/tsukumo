@@ -1,12 +1,12 @@
-"""Le voci gia' installate nel sistema operativo, tramite ``pyttsx3``.
+"""The voices already installed in the operating system, through ``pyttsx3``.
 
-E' il motore di riserva piu' robusto: su Windows usa SAPI5, su macOS
-NSSpeechSynthesizer, su Linux espeak. Nessun peso da scaricare, nessuna rete,
-funziona ovunque — la qualita' pero' e' quella delle voci di sistema.
+It's the sturdiest fallback engine: on Windows it uses SAPI5, on macOS
+NSSpeechSynthesizer, on Linux espeak. No weights to download, no network,
+it works everywhere — the quality though is that of the system voices.
 
-``pyttsx3`` sa solo scrivere su file, quindi sintetizziamo su un WAV
-temporaneo e lo rileggiamo. E' un motore sincrono e non rientrante: il lock
-evita che due frasi in coda si calpestino.
+``pyttsx3`` can only write to a file, so we synthesize to a temporary WAV and
+read it back. It's a synchronous, non-reentrant engine: the lock keeps two
+queued sentences from stepping on each other.
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ from .base import Speech, TTSEngine
 
 logger = logging.getLogger(__name__)
 
-#: Parole al minuto considerate "velocita' 1.0" dalle voci di sistema.
+#: Words per minute the system voices consider "speed 1.0".
 _BASE_RATE = 180
 
 
 class SystemTTS(TTSEngine):
-    """Sintesi con le voci native del sistema operativo."""
+    """Synthesis with the operating system's native voices."""
 
     name = "system"
 
@@ -37,8 +37,8 @@ class SystemTTS(TTSEngine):
             import pyttsx3
         except ImportError as exc:
             raise RuntimeError(
-                "Il motore di sistema richiede il pacchetto 'pyttsx3'. "
-                "Installalo con: pip install pyttsx3"
+                "The system engine needs the 'pyttsx3' package. "
+                "Install it with: pip install pyttsx3"
             ) from exc
 
         self.default_voice = default_voice
@@ -48,7 +48,7 @@ class SystemTTS(TTSEngine):
         self._voices = {
             str(v.name): str(v.id) for v in self._engine.getProperty("voices")
         }
-        logger.info("Voci di sistema disponibili: %d", len(self._voices))
+        logger.info("System voices available: %d", len(self._voices))
 
     # ------------------------------------------------------------------
     def voices(self) -> list[str]:
@@ -73,9 +73,9 @@ class SystemTTS(TTSEngine):
                 meta={"engine": self.name},
             )
 
-        # Le voci sono specifiche del motore: un nome Kokoro come "af_heart" qui
-        # non esiste. Se non lo riconosciamo usiamo la prima voce di sistema, e
-        # in meta riportiamo quella vera — cosi' il pannello non mente.
+        # Voices are engine-specific: a Kokoro name like "af_heart" doesn't exist
+        # here. If we don't recognize it we use the first system voice, and in meta
+        # we report the real one — so the panel doesn't lie.
         if chosen not in self._voices:
             chosen = next(iter(sorted(self._voices)), "default")
 
@@ -84,7 +84,7 @@ class SystemTTS(TTSEngine):
                 self._engine.setProperty("voice", self._voices[chosen])
             self._engine.setProperty("rate", int(_BASE_RATE * chosen_speed))
 
-            # delete=False: su Windows il file non e' riapribile finche' e' aperto.
+            # delete=False: on Windows the file can't be reopened while it's open.
             handle = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             handle.close()
             target = Path(handle.name)
