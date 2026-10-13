@@ -17,7 +17,7 @@ import * as THREE from 'three';
 
 import { canvasTexture, glowSprite, INK, ink, SPHERE, toon } from './look.js';
 import { EASE } from './motion.js';
-import { OUTFITS } from './wardrobe.js';
+import { EXTRAS, OUTFITS } from './wardrobe.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const R = 0.42;
@@ -35,22 +35,41 @@ export function radiusAt(y) {
 /**
  * A piece's material: `soft` bends it like the flame's tip (it needs the
  * flame's uniforms), `skin` > 0 inflates it along the normals (the outline,
- * seen from behind).
+ * seen from behind). `rigid` = [bottom, top]: a stiff hat doesn't bend with
+ * the tip like cloth, it tilts as one piece along the line joining where the
+ * tip is at its brim and at its top (so the tip stays inside it).
  */
-function shaded(material, { uniforms = null, skin = 0 } = {}) {
+function shaded(material, { uniforms = null, skin = 0, rigid = null } = {}) {
   const soft = Boolean(uniforms);
   material.onBeforeCompile = (shader) => {
     if (soft) Object.assign(shader.uniforms, uniforms);
-    const head = soft ? 'uniform float uTime;\nuniform float uSway;\nuniform float uLean;\n' : '';
-    const bend = soft
-      ? `float h = smoothstep(0.0, ${TIP.toFixed(3)}, position.y);
-         transformed.x += sin(uTime * 3.2 + position.y * 3.0) * 0.1 * uSway * h - uLean * h * h * 0.55;
-         transformed.z += cos(uTime * 2.6 + position.y * 2.0) * 0.04 * uSway * h;`
+    const tip = TIP.toFixed(3);
+    const head = soft
+      ? `uniform float uTime;\nuniform float uSway;\nuniform float uLean;
+         float tsukumoSway(float y) {
+           float h = smoothstep(0.0, ${tip}, y);
+           return sin(uTime * 3.2 + y * 3.0) * 0.1 * uSway * h - uLean * h * h * 0.55;
+         }\n`
       : '';
+    let bend = '';
+    if (soft && rigid) {
+      const [low, high] = rigid.map((y) => y.toFixed(3));
+      bend = `float d0 = tsukumoSway(${low});
+         float tilt = atan(tsukumoSway(${high}) - d0, ${high} - ${low});
+         vec2 p = vec2(transformed.x, transformed.y - ${low});
+         transformed.x = d0 + p.x * cos(tilt) + p.y * sin(tilt);
+         transformed.y = ${low} - p.x * sin(tilt) + p.y * cos(tilt);
+         transformed.z += cos(uTime * 2.6 + ${low} * 2.0) * 0.04 * uSway * smoothstep(0.0, ${tip}, ${low});`;
+    } else if (soft) {
+      bend = `float h = smoothstep(0.0, ${tip}, position.y);
+         transformed.x += tsukumoSway(position.y);
+         transformed.z += cos(uTime * 2.6 + position.y * 2.0) * 0.04 * uSway * h;`;
+    }
     const grow = skin ? `transformed += normalize(normal) * ${skin.toFixed(4)};` : '';
     shader.vertexShader = `${head}${shader.vertexShader}`.replace('#include <begin_vertex>', `#include <begin_vertex>\n${grow}\n${bend}`);
   };
-  material.customProgramCacheKey = () => `tsukumo-outfit-${soft ? 's' : 'r'}-${skin ? 'i' : 'b'}`;
+  const stiff = rigid ? `-${rigid.join('-')}` : '';
+  material.customProgramCacheKey = () => `tsukumo-outfit-${soft ? 's' : 'r'}${stiff}-${skin ? 'i' : 'b'}`;
   return material;
 }
 
@@ -58,11 +77,11 @@ function shaded(material, { uniforms = null, skin = 0 } = {}) {
  * A piece with its outline. `geometry` is already in the right position
  * (baking it makes the soft shader work, since it looks at the real y).
  */
-function piece(parent, geometry, color, { uniforms = null, line = 0.012, map = null, side = THREE.FrontSide, emissive = 0x000000 } = {}) {
-  const material = shaded(toon(color, { map, side, emissive }), { uniforms });
+function piece(parent, geometry, color, { uniforms = null, rigid = null, line = 0.012, map = null, side = THREE.FrontSide, emissive = 0x000000 } = {}) {
+  const material = shaded(toon(color, { map, side, emissive }), { uniforms, rigid });
   const mesh = new THREE.Mesh(geometry, material);
   if (line) {
-    const outline = new THREE.Mesh(geometry, shaded(new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide, toneMapped: false }), { uniforms, skin: line }));
+    const outline = new THREE.Mesh(geometry, shaded(new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide, toneMapped: false }), { uniforms, rigid, skin: line }));
     mesh.add(outline);
   }
   parent.add(mesh);
@@ -484,8 +503,9 @@ const BUILD = {
       [0.4, 0.38],
       [0.17, 0.5],
     ]);
-    piece(head, cone, 0xffffff, { uniforms: u, map: texture('straw'), side: THREE.DoubleSide });
-    piece(head, lathe([[0.25, 0.462], [0.212, 0.482]]), 0xd9434e, { uniforms: u, line: 0.006 });
+    const stiff = { uniforms: u, rigid: [0.29, 0.5] };
+    piece(head, cone, 0xffffff, { ...stiff, map: texture('straw'), side: THREE.DoubleSide });
+    piece(head, lathe([[0.25, 0.462], [0.212, 0.482]]), 0xd9434e, { ...stiff, line: 0.006 });
     return { head, hat: true, top: 0, left: 0.64, right: 0.64 };
   },
 
@@ -543,8 +563,9 @@ const BUILD = {
 
   party(u) {
     const head = new THREE.Group();
-    piece(head, baked(new THREE.CylinderGeometry(0.0, 0.258, 0.56, 32, 1, true), { pos: new THREE.Vector3(0, 0.68, 0) }), 0xffffff, { uniforms: u, map: texture('party') });
-    piece(head, baked(new THREE.SphereGeometry(0.055, 14, 10), { pos: new THREE.Vector3(0, 0.975, 0) }), 0xffd166, { uniforms: u });
+    const stiff = { uniforms: u, rigid: [0.4, 0.96] };
+    piece(head, baked(new THREE.CylinderGeometry(0.0, 0.258, 0.56, 32, 1, true), { pos: new THREE.Vector3(0, 0.68, 0) }), 0xffffff, { ...stiff, map: texture('party') });
+    piece(head, baked(new THREE.SphereGeometry(0.055, 14, 10), { pos: new THREE.Vector3(0, 0.975, 0) }), 0xffd166, stiff);
     return { head, hat: true, top: 0.24 };
   },
 
@@ -580,22 +601,23 @@ const BUILD = {
     // A little golden crown on the upper bulb: the tip comes out of the top.
     const head = new THREE.Group();
     const gold = 0xf2c14e;
-    piece(head, lathe([[0.336, 0.3], [0.35, 0.4]]), gold, { uniforms: u, side: THREE.DoubleSide });
+    const stiff = { uniforms: u, rigid: [0.3, 0.55] };
+    piece(head, lathe([[0.336, 0.3], [0.35, 0.4]]), gold, { ...stiff, side: THREE.DoubleSide });
     for (const [y, r] of [[0.3, 0.338], [0.4, 0.352]]) {
-      piece(head, baked(new THREE.TorusGeometry(r, 0.013, 8, 48), { pos: new THREE.Vector3(0, y, 0), rot: [Math.PI / 2, 0, 0] }), 0xd9a43a, { uniforms: u, line: 0.006 });
+      piece(head, baked(new THREE.TorusGeometry(r, 0.013, 8, 48), { pos: new THREE.Vector3(0, y, 0), rot: [Math.PI / 2, 0, 0] }), 0xd9a43a, { ...stiff, line: 0.006 });
     }
     for (let i = 0; i < 5; i += 1) {
       const a = (i * Math.PI * 2) / 5;
       const x = Math.sin(a) * 0.35;
       const z = Math.cos(a) * 0.35;
-      piece(head, baked(new THREE.ConeGeometry(0.05, 0.13, 12), { pos: new THREE.Vector3(x, 0.465, z) }), gold, { uniforms: u, line: 0.007 });
-      piece(head, baked(new THREE.SphereGeometry(0.023, 12, 10), { pos: new THREE.Vector3(x, 0.537, z) }), gold, { uniforms: u, line: 0.006 });
+      piece(head, baked(new THREE.ConeGeometry(0.05, 0.13, 12), { pos: new THREE.Vector3(x, 0.465, z) }), gold, { ...stiff, line: 0.007 });
+      piece(head, baked(new THREE.SphereGeometry(0.023, 12, 10), { pos: new THREE.Vector3(x, 0.537, z) }), gold, { ...stiff, line: 0.006 });
     }
     // A ruby in front, two sapphires on the sides.
     for (const [deg, size, color] of [[0, 0.036, 0xe0404a], [-62, 0.025, 0x5ec8ff], [62, 0.025, 0x5ec8ff]]) {
       const a = (deg * Math.PI) / 180;
       const gem = new THREE.SphereGeometry(1, 14, 10).scale(size, size, size * 0.5);
-      piece(head, baked(gem, { pos: new THREE.Vector3(Math.sin(a) * 0.352, 0.35, Math.cos(a) * 0.352), rot: [0, a, 0] }), color, { uniforms: u, line: 0.005, emissive: 0x220808 });
+      piece(head, baked(gem, { pos: new THREE.Vector3(Math.sin(a) * 0.352, 0.35, Math.cos(a) * 0.352), rot: [0, a, 0] }), color, { ...stiff, line: 0.005, emissive: 0x220808 });
     }
     return { head, hat: true, top: 0 };
   },
@@ -702,28 +724,43 @@ const BUILD = {
   },
 
   catears() {
-    // Cat ears on the upper bulb, which twitch now and then.
+    // Cat ears high on the bulb, which twitch now and then. Each one is a
+    // rounded cone flattened front to back, its base sunk into her (so it
+    // grows out of her, no gap), with a pink pad in front. Flat triangles
+    // looked like paper cut-outs and vanished from the side.
     const head = new THREE.Group();
+    const H = 0.27;
+    const profile = [[0.118, -0.03], [0.116, 0.03], [0.1, 0.1], [0.072, 0.17], [0.036, 0.23], [0.01, 0.262], [0.0005, H]];
+    const back = (y) => 0.035 * (Math.max(0, y) / H) ** 2; // the tip bent back a little
+    const outer = lathe(profile, (v) => {
+      v.z = v.z * 0.5 - back(v.y);
+    }, 24);
+    // The pad hugs the ear's front face: a thin lens just proud of it in the
+    // middle, sunk under it at the rim (no wall, no z-fighting edge).
+    const radius = (y) => {
+      const i = profile.findIndex(([, py]) => py >= y);
+      if (i <= 0) return profile[Math.max(0, i)][0];
+      const [[r0, y0], [r1, y1]] = [profile[i - 1], profile[i]];
+      return r0 + ((r1 - r0) * (y - y0)) / (y1 - y0);
+    };
+    const inner = lathe([[0.074, 0.0], [0.064, 0.08], [0.042, 0.15], [0.016, 0.205], [0.0005, 0.222]], (v) => {
+      const facing = v.z / Math.max(1e-4, Math.hypot(v.x, v.z));
+      v.z = 0.5 * Math.sqrt(Math.max(0, radius(v.y) ** 2 - v.x * v.x)) - back(v.y) + 0.008 * facing - 0.002;
+    }, 20);
     const ears = [1, -1].map((side) => {
+      const deg = side * 34;
+      const base = new THREE.Group();
+      base.position.copy(onSurface(0.32, deg, -0.035));
+      // Up and a little outwards along her surface, the flat face to the front.
+      const up = new THREE.Vector3(0, 1, 0).lerp(outward(0.32, deg, 0), 0.42).normalize();
+      const front = new THREE.Vector3(Math.sin((deg * Math.PI) / 180) * 0.45, 0, 1);
+      front.addScaledVector(up, -front.dot(up)).normalize();
+      base.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(up, front), up, front));
+      head.add(base);
       const ear = new THREE.Group();
-      ear.position.copy(onSurface(0.3, side * 40, -0.03));
-      ear.rotation.set(-0.15, side * 0.25, -side * 0.45);
-      head.add(ear);
-      // A three-sided cone with one flat face to the front, and the pink inside on it.
-      const outer = new THREE.ConeGeometry(0.125, 0.24, 3, 1, false, Math.PI / 3).scale(1, 1, 0.5);
-      outer.translate(0, 0.12, 0);
+      base.add(ear);
       piece(ear, outer, 0x2b2533, { line: 0.009 });
-      const inside = new THREE.Shape();
-      inside.moveTo(-0.057, 0.03);
-      inside.lineTo(0.057, 0.03);
-      inside.lineTo(0, 0.185);
-      inside.closePath();
-      const inner = new THREE.ShapeGeometry(inside);
-      // The front face: from z = r/4 at the base to 0 at the top (the cone is flattened by half).
-      const face = 0.125 * 0.25;
-      inner.rotateX(-Math.atan(face / 0.24));
-      inner.translate(0, 0, face * (1 - 0.03 / 0.24) + 0.004);
-      piece(ear, inner, 0xff9ec7, { line: 0, side: THREE.DoubleSide });
+      piece(ear, inner, 0xff9ec7, { line: 0 });
       return ear;
     });
     return {
@@ -733,42 +770,150 @@ const BUILD = {
         ears.forEach((ear, i) => {
           const side = i ? -1 : 1;
           const twitch = Math.max(0, Math.sin(t * 1.3 + i * 2.1)) ** 30;
-          ear.rotation.z = -side * (0.45 + twitch * 0.35) + dx * 0.2;
-          ear.rotation.x = -0.15 - dy * 0.3;
+          ear.rotation.z = -side * twitch * 0.3 + dx * 0.18;
+          ear.rotation.x = -dy * 0.25 - twitch * 0.12;
         });
       },
     };
   },
 
   tophat(u) {
-    // A gentleman's top hat with a red ribbon: it covers the tip.
+    // A gentleman's top hat with a red ribbon: it covers the tip. Stiff: it
+    // tilts with her sway as one piece (bending like cloth it looked broken).
     const head = new THREE.Group();
     const black = 0x262130;
-    piece(head, lathe([[0.33, 0.27], [0.318, 0.6], [0.336, 0.9], [0.0005, 0.9]]), black, { uniforms: u });
+    const stiff = { uniforms: u, rigid: [0.27, 0.9] };
+    // Straight sides flaring a little, a small bevel at the lid: a waist and a
+    // sharp corner both read as a crease in the toon shading.
+    piece(head, lathe([[0.322, 0.27], [0.326, 0.5], [0.338, 0.875], [0.33, 0.897], [0.29, 0.904], [0.0005, 0.905]]), black, stiff);
     piece(
       head,
       lathe([
-        [0.32, 0.255],
+        [0.31, 0.255],
         [0.52, 0.25],
         [0.555, 0.272],
         [0.52, 0.286],
-        [0.32, 0.29],
-        [0.32, 0.255],
+        [0.31, 0.29],
+        [0.31, 0.255],
       ]),
       black,
-      { uniforms: u },
+      stiff,
     );
-    piece(head, lathe([[0.336, 0.29], [0.33, 0.38]]), 0xc8324a, { uniforms: u, line: 0.006 });
+    // The ribbon stands clear of the crown's ink outline (0.012), or the
+    // outline shows through it in steps at an angle.
+    piece(head, lathe([[0.344, 0.288], [0.345, 0.374]]), 0xc8324a, { ...stiff, line: 0.006 });
     return { head, hat: true, top: 0.14, left: 0.57, right: 0.57 };
   },
 };
 
 /** A flat shape made thick (centred on its plane), with soft edges. */
-function extruded(shape, depth) {
-  const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 14 });
+function extruded(shape, depth, bevel = 0.006) {
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 14 });
   geometry.translate(0, 0, -depth / 2);
   return geometry;
 }
+
+/** A point on the lower bulb (a sphere): the direction (x, y, z) from its centre, lifted by `lift`. */
+function onBulb(x, y, z, lift = 0) {
+  return new THREE.Vector3(x, y, z).normalize().multiplyScalar(R + lift);
+}
+
+// ------------------------------------------------------------------ the decorations
+/**
+ * Worn on top of any outfit (flame/wardrobe.js, EXTRAS), each on or off.
+ * Placed where the outfits leave room: the bow under the hats' brims, the
+ * muzzle between the eyes and the mouth (which must still open to speak).
+ */
+const EXTRA_BUILD = {
+  bow() {
+    // A big hair bow on the upper bulb, on her left (the viewer's right): two
+    // puffy loops, the knot, two short tails that swing.
+    const head = new THREE.Group();
+    const at = onSurface(0.15, 50, 0.014);
+    const bow = new THREE.Group();
+    bow.position.copy(at);
+    bow.lookAt(at.clone().add(outward(0.15, 50, 0.35)));
+    bow.rotateZ(-0.35);
+    head.add(bow);
+    const knotted = new THREE.Group();
+    bow.add(knotted);
+    const pink = 0xff5c8f;
+    const loop = new THREE.Shape();
+    loop.moveTo(0.02, 0);
+    loop.bezierCurveTo(0.05, 0.05, 0.095, 0.1, 0.14, 0.084);
+    loop.quadraticCurveTo(0.182, 0, 0.14, -0.084);
+    loop.bezierCurveTo(0.095, -0.1, 0.05, -0.05, 0.02, 0);
+    const right = extruded(loop, 0.03, 0.012);
+    // The left one is the right one turned round: same winding, same outline.
+    for (const geometry of [right, right.clone().rotateY(Math.PI)]) piece(knotted, geometry, pink, { line: 0.008 });
+    piece(knotted, new THREE.SphereGeometry(1, 16, 12).scale(0.04, 0.048, 0.036), 0xe0447a, { line: 0.008 });
+    const strip = new THREE.Shape();
+    strip.moveTo(-0.02, 0);
+    strip.lineTo(0.02, 0);
+    strip.lineTo(0.032, -0.12);
+    strip.lineTo(0.01, -0.102);
+    strip.lineTo(-0.01, -0.126);
+    strip.closePath();
+    const tail = extruded(strip, 0.012, 0.005);
+    const tails = [1, -1].map((side) => {
+      const hang = new THREE.Group();
+      hang.position.set(side * 0.012, -0.02, -0.006);
+      knotted.add(hang);
+      piece(hang, side > 0 ? tail : tail.clone().rotateY(Math.PI), pink, { line: 0.006 });
+      return hang;
+    });
+    return {
+      head,
+      swing(dx, dy, t) {
+        knotted.rotation.z = dx * 0.2 + Math.sin(t * 2.1) * 0.03;
+        tails.forEach((hang, i) => {
+          const side = i ? -1 : 1;
+          hang.rotation.z = side * 0.32 + dx * 0.6 + Math.sin(t * 2.6 + i * 1.3) * 0.06;
+          hang.rotation.x = dy * 0.5;
+        });
+      },
+    };
+  },
+
+  whiskers() {
+    // A cat's muzzle: two soft pads under a pink nose, between the eyes and
+    // the mouth, and three whiskers a side poking out of her outline.
+    const head = new THREE.Group();
+    const muzzle = (geometry, at, color, line) => {
+      const mesh = piece(head, geometry, color, { line });
+      mesh.position.copy(at);
+      mesh.lookAt(at.clone().multiplyScalar(2));
+    };
+    for (const side of [1, -1]) muzzle(new THREE.SphereGeometry(1, 18, 12).scale(0.052, 0.04, 0.018), onBulb(side * 0.1, -0.18, 1, 0.003), 0xfff2f7, 0.006);
+    muzzle(new THREE.SphereGeometry(1, 16, 10).scale(0.03, 0.02, 0.013), onBulb(0, -0.1, 1, 0.017), 0xff7fa6, 0.005);
+    const sides = [1, -1].map((side) => {
+      const cheek = new THREE.Group();
+      cheek.position.copy(onBulb(side * 0.42, -0.2, 0.88, -0.004));
+      head.add(cheek);
+      for (const k of [-1, 0, 1]) {
+        const length = 0.2 - Math.abs(k) * 0.02;
+        const whisker = baked(new THREE.CylinderGeometry(0.0032, 0.0052, length, 6), { pos: new THREE.Vector3(0, length / 2, 0) });
+        const direction = new THREE.Vector3(side, 0.03 + k * 0.17, -0.3).normalize();
+        whisker.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction));
+        whisker.translate(0, k * 0.022, 0);
+        piece(cheek, whisker, 0x1d1529, { line: 0 });
+      }
+      return cheek;
+    });
+    return {
+      head,
+      swing(dx, dy, t) {
+        // Now and then a twitch, like a cat sniffing.
+        const twitch = Math.max(0, Math.sin(t * 0.9)) ** 40;
+        sides.forEach((cheek, i) => {
+          const side = i ? -1 : 1;
+          cheek.rotation.z = side * (twitch * 0.12 + Math.sin(t * 1.6) * 0.015) - dy * 0.15;
+          cheek.rotation.y = dx * 0.1;
+        });
+      },
+    };
+  },
+};
 
 /**
  * What she wears and the change: `set(name)` (one of OUTFITS or 'none'),
@@ -797,6 +942,8 @@ export class Wardrobe {
     this.vx = 0;
     this.vy = 0;
     this._prev = null;
+    /** The decorations: for each one `{item, presence, wanted}`, built the first time. */
+    this.extras = {};
   }
 
   /** How far above the tip what she wears reaches (for speech bubbles and "!"). */
@@ -817,11 +964,21 @@ export class Wardrobe {
   }
 
   get busy() {
-    return this.wearing !== this.wanted || (this.wearing !== 'none' && this.presence < 1) || Math.abs(this.vx) + Math.abs(this.vy) > 0.02;
+    const extras = Object.values(this.extras).some((state) => (state.wanted ? state.presence < 1 : state.presence > 0));
+    return extras || this.wearing !== this.wanted || (this.wearing !== 'none' && this.presence < 1) || Math.abs(this.vx) + Math.abs(this.vy) > 0.02;
   }
 
   set(name) {
     this.wanted = OUTFITS.includes(name) ? name : 'none';
+  }
+
+  /** The decorations to wear (a list of EXTRAS): the others leave, the new ones pop out. */
+  setExtras(list) {
+    const wanted = new Set(Array.isArray(list) ? list : []);
+    for (const name of EXTRAS) {
+      if (wanted.has(name)) this.extras[name] ??= { item: null, presence: 0, wanted: true };
+      if (this.extras[name]) this.extras[name].wanted = wanted.has(name);
+    }
   }
 
   _item(name) {
@@ -876,9 +1033,13 @@ export class Wardrobe {
         this.onArrive?.(this.items[this.wearing]);
       }
     }
-    if (this.wearing === 'none') return;
-    const item = this._item(this.wearing);
-    this._show(item, this.presence, this.wearing === this.wanted);
+    const item = this.wearing === 'none' ? null : this._item(this.wearing);
+    if (item) this._show(item, this.presence, this.wearing === this.wanted);
+    const extras = this._updateExtras(dt);
+    if (!item && !extras.length) {
+      this._prev = null;
+      return;
+    }
 
     // The soft parts lag behind when she turns her head, bends or jumps.
     const prev = this._prev ?? motion;
@@ -893,9 +1054,27 @@ export class Wardrobe {
     this.vy += (60 * (ty - this.dy) - 9 * this.vy) * dt;
     this.dx += this.vx * dt;
     this.dy += this.vy * dt;
-    item.swing?.(this.dx, this.dy, this.t);
+    for (const worn of item ? [item, ...extras] : extras) worn.swing?.(this.dx, this.dy, this.t);
 
     // The "cool" reaction's sunglasses take the place of the round ones.
-    if (item.glasses) item.glasses.visible = (motion.glasses ?? 0) < 0.05;
+    if (item?.glasses) item.glasses.visible = (motion.glasses ?? 0) < 0.05;
+  }
+
+  /** The decorations come and go on their own, like the outfit (350 ms in, 180 out); returns the visible ones. */
+  _updateExtras(dt) {
+    const shown = [];
+    for (const [name, state] of Object.entries(this.extras)) {
+      if (!state.wanted && state.presence <= 0) continue;
+      if (!state.item) {
+        state.item = EXTRA_BUILD[name](this.uniforms);
+        this.pivot.add(state.item.head);
+      }
+      const before = state.presence;
+      state.presence = state.wanted ? Math.min(1, before + dt / 0.35) : Math.max(0, before - dt / 0.18);
+      if (state.wanted && before < 1 && state.presence >= 1) this.onArrive?.(state.item);
+      this._show(state.item, state.presence, state.wanted);
+      if (state.presence > 0) shown.push(state.item);
+    }
+    return shown;
   }
 }

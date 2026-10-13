@@ -318,6 +318,11 @@ export class Flame {
     this.wardrobe.set(name);
   }
 
+  /** The decorations worn on top of it (a list of EXTRAS: bow, whiskers). */
+  setExtras(list) {
+    this.wardrobe.setExtras(list);
+  }
+
   /** Half width of the bulb, in metres: the menu goes around her at this distance. */
   get halfWidth() {
     return R * this.size;

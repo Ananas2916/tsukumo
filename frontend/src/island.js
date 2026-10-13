@@ -21,8 +21,8 @@
  * draw. Text coming from agents always goes into textContent, never markup.
  */
 
-import { OUTFIT_LABELS, parseOutfit, seasonalOutfit, SELECTIONS } from './flame/wardrobe.js';
-import { t, tx } from './i18n.js';
+import { EXTRA_LABELS, EXTRAS, OUTFIT_LABELS, parseExtras, parseOutfit, seasonalOutfit, SELECTIONS } from './flame/wardrobe.js';
+import { LOCALE, t, tx } from './i18n.js';
 import { iconSvg } from './icons.js';
 import { outfitPreview } from './panel/wardrobe-art.js';
 
@@ -127,7 +127,12 @@ export class Island {
       this.hud.onAction('usage');
     });
     this._hover(this.usage, 'usage');
-    info.append(title, this.steps, this.usage);
+    // The song playing on Spotify, under the steps: one line, cut if long.
+    this.track = node('div', 'island-track');
+    this.trackIcon = node('span', 'island-track-icon');
+    this.trackText = node('span', 'island-track-text');
+    this.track.append(this.trackIcon, this.trackText);
+    info.append(title, this.steps, this.track, this.usage);
     this.info = info;
     // The closet: instead of brain and steps, the card shows what she can wear.
     this.closet = node('div', 'island-closet hidden');
@@ -135,7 +140,24 @@ export class Island {
     this.closetGrid = node('div', 'island-closet-grid');
     this.closet.append(this.closetHead, this.closetGrid);
     this.closet.addEventListener('click', (event) => event.stopPropagation());
-    this.card.append(this.slot, info, this.closet);
+    // A permission question (Claude Code wants to run a command): it takes the card's place.
+    this.approval = node('div', 'island-approval hidden');
+    this.approvalHead = node('div', 'island-approval-head');
+    this.approvalWhat = node('code', 'island-approval-what');
+    const choices = node('div', 'island-approval-choices');
+    this.approvalButtons = ['allow', 'always', 'deny'].map((decision) => {
+      const button = node('button', `island-approval-btn ${decision}`, { type: 'button' });
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const current = this.hud.approvals[0];
+        if (current) this.hud.onAction('approval', { id: current.id, decision });
+      });
+      choices.append(button);
+      return button;
+    });
+    this.approval.append(this.approvalHead, this.approvalWhat, choices);
+    this.approval.addEventListener('click', (event) => event.stopPropagation());
+    this.card.append(this.slot, info, this.closet, this.approval);
 
     // The pills: the wardrobe, the dance and the player (while Spotify is open), quit.
     const pills = node('div', 'island-pills');
@@ -147,7 +169,10 @@ export class Island {
     this._hover(this.player, 'player');
     this.powerPill = this._pill('power', 'power');
     this.powerPill.classList.add('power');
-    pills.append(this.wardrobePill, this.musicPill, this.player, this.powerPill);
+    // Focus time: until when, a click ends it.
+    this.focusPill = this._pill('focus', 'moon');
+    this.focusPill.classList.add('focus');
+    pills.append(this.wardrobePill, this.musicPill, this.player, this.focusPill, this.powerPill);
 
     this.caption = node('div', 'island-caption');
     this.box.append(top, this.card, pills);
@@ -215,7 +240,17 @@ export class Island {
 
   _caption(id) {
     this._hovered = id;
-    const text = !id ? '' : id === 'wardrobe' ? (this.closetOpen ? t('Back to the card') : t('Wardrobe')) : id.startsWith('outfit:') ? this._outfitWords(id.slice(7)) : this.hud._captionFor(id);
+    const text = !id
+      ? ''
+      : id === 'wardrobe'
+        ? this.closetOpen
+          ? t('Back to the card')
+          : t('Wardrobe')
+        : id.startsWith('outfit:')
+          ? this._outfitWords(id.slice(7))
+          : id.startsWith('extra:')
+            ? this._extraWords(id.slice(6))
+            : this.hud._captionFor(id);
     this.caption.textContent = text;
     this.caption.classList.toggle('shown', Boolean(text) && this.open && !this._drag?.moved);
   }
@@ -416,10 +451,23 @@ export class Island {
     };
     label(this.wardrobePill, t('Wardrobe'));
     this.wardrobePill.classList.toggle('active', Boolean(this.closetOpen));
-    this.info.classList.toggle('hidden', Boolean(this.closetOpen));
+    const asking = this.hud.approvals?.[0];
+    this.info.classList.toggle('hidden', Boolean(this.closetOpen) || Boolean(asking));
+    this.approval.classList.toggle('hidden', !asking);
+    if (asking) {
+      const where = asking.project ? ` · ${asking.project}` : '';
+      const more = this.hud.approvals.length > 1 ? ` (+${this.hud.approvals.length - 1})` : '';
+      this.approvalHead.textContent = t('{agent}{where} asks to use {tool}{more}', { agent: asking.label, where, tool: asking.tool || t('a tool'), more });
+      this.approvalWhat.textContent = asking.summary || '';
+      const words = { allow: t('Allow'), always: t('Always'), deny: t('Deny') };
+      for (const button of this.approvalButtons) button.textContent = words[[...button.classList].find((name) => words[name])];
+    }
+    const until = hud.focusUntil;
+    this.focusPill.classList.toggle('hidden', !until);
+    if (until) label(this.focusPill, new Date(until * 1000).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' }));
     // The closet grows the card: every outfit in sight, no scrolling.
     this.card.classList.toggle('closet-open', Boolean(this.closetOpen));
-    this.closet.classList.toggle('hidden', !this.closetOpen);
+    this.closet.classList.toggle('hidden', !this.closetOpen || Boolean(asking));
     if (this.closetOpen) this._renderCloset();
 
     // Dancing only while it plays; the player as long as Spotify is open (paused too).
@@ -430,6 +478,12 @@ export class Island {
       : iconSvg('music', 15);
     label(this.musicPill, hud.dancing ? t('Dance') : t('Still'));
     this.player.classList.toggle('hidden', !music.open);
+    const song = [music.title, music.artist].filter(Boolean).join(' · ');
+    this.track.classList.toggle('hidden', !music.open || !song);
+    this.track.classList.toggle('paused', !music.playing);
+    this.trackIcon.innerHTML = music.playing ? '<span class="island-eq"><b></b><b></b><b></b></span>' : iconSvg('pause', 11);
+    this.trackText.textContent = song;
+    this.track.title = song;
     this.player.classList.toggle('playing', music.playing);
     this.buttons.get('toggle').innerHTML = iconSvg(music.playing ? 'pause' : 'play', 14);
 
@@ -451,11 +505,18 @@ export class Island {
     return season === 'none' ? t('Automatic: nothing this season') : t('Automatic: {outfit}', { outfit: OUTFIT_LABELS[season].toLowerCase() });
   }
 
-  /** The previews are redrawn only when the choice or the colour changes. */
+  /** "Hair bow: on", for the caption. */
+  _extraWords(extra) {
+    const on = parseExtras(this.hud.wardrobe?.extras).includes(extra);
+    return t(on ? '{extra}: on' : '{extra}: off', { extra: EXTRA_LABELS[extra] ?? '' });
+  }
+
+  /** The previews are redrawn only when the choice, the colour or the decorations change. */
   _renderCloset() {
     const { selection = 'auto', color = 'lilac' } = this.hud.wardrobe ?? {};
+    const extras = parseExtras(this.hud.wardrobe?.extras);
     const chosen = parseOutfit(selection);
-    const key = `${chosen}|${color}`;
+    const key = `${chosen}|${color}|${extras.join(',')}`;
     this.closetHead.textContent = t('Wardrobe · {outfit}', { outfit: this._outfitWords(chosen) });
     if (key === this._closetKey) return;
     this._closetKey = key;
@@ -463,7 +524,7 @@ export class Island {
       ...SELECTIONS.map((choice) => {
         const tile = node('button', `island-outfit${choice === chosen ? ' on' : ''}`, { type: 'button', 'aria-label': OUTFIT_LABELS[choice] });
         // SVG made in wardrobe-art.js with validated colours: no text from outside.
-        tile.innerHTML = outfitPreview(choice === 'auto' ? seasonalOutfit() : choice, color, { badge: choice === 'auto' });
+        tile.innerHTML = outfitPreview(choice === 'auto' ? seasonalOutfit() : choice, color, { badge: choice === 'auto', extras });
         tile.addEventListener('click', (event) => {
           event.stopPropagation();
           this.hud.onAction('outfit', choice);
@@ -471,7 +532,21 @@ export class Island {
         this._hover(tile, `outfit:${choice}`);
         return tile;
       }),
+      // The decorations, on top of any outfit: each tile switches one on or off.
+      Object.assign(node('div', 'island-closet-sub'), { textContent: t('Decorations') }),
+      ...EXTRAS.map((extra) => {
+        const on = extras.includes(extra);
+        const tile = node('button', `island-outfit island-extra${on ? ' on' : ''}`, { type: 'button', 'aria-label': EXTRA_LABELS[extra], 'aria-pressed': String(on) });
+        tile.innerHTML = outfitPreview('none', color, { extras: [extra] });
+        tile.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.hud.onAction('extra', extra);
+        });
+        this._hover(tile, `extra:${extra}`);
+        return tile;
+      }),
     );
+    if (this._hovered?.startsWith('extra:')) this._caption(this._hovered);
   }
 
   /**

@@ -4,6 +4,7 @@
  * in sync. `store` is dashboard.js's.
  */
 
+import { apiUrl } from '../config.js';
 import { el, iconButton } from '../dom.js';
 import { LOCALE, t, tx } from '../i18n.js';
 import { icon } from '../icons.js';
@@ -120,6 +121,56 @@ export class TodayWidget {
       }
     }
     this.body.replaceChildren(el('div', { class: 'agenda-list' }, ...rows));
+  }
+}
+
+// ---------------------------------------------------------------- the list
+/** The to-do list (a tick closes an item), the mail at a glance, focus time. */
+export class TodoWidget {
+  constructor(app) {
+    this.app = app;
+    ({ node: this.node, body: this.body } = card('w-todo', 'check', t('To-do'), iconButton('chevronRight', { title: t('Open in Agenda'), onClick: () => app.showTab('agenda') })));
+  }
+
+  render(store) {
+    const secretary = store.secretary ?? {};
+    const todos = (secretary.notebook?.todos ?? []).filter((item) => !item.done);
+    const rows = todos.slice(0, 7).map((item) => {
+      const box = el('input', {
+        type: 'checkbox',
+        class: 'secretary-check',
+        'aria-label': t('Done'),
+        onChange: () =>
+          fetch(apiUrl(`/api/todos/${encodeURIComponent(item.id)}`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ done: true }),
+          }).catch((error) => this.app.toast(error.message, 'error')),
+      });
+      return el(
+        'div',
+        { class: `agenda-item${item.important ? ' important' : ''}` },
+        box,
+        el('span', { class: 'agenda-text' }, el('strong', { title: item.text }, item.text), item.dueIso ? el('small', {}, t('by {day}', { day: new Date(`${item.dueIso}T12:00:00`).toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' }) })) : null),
+      );
+    });
+    if (todos.length > rows.length) rows.push(el('p', { class: 'hint' }, t('And {n} more in Agenda.', { n: todos.length - rows.length })));
+    if (!rows.length) rows.push(empty(t('Nothing to do. Say "segnati che devo..." to add something.')));
+    const extra = [];
+    const until = secretary.focus?.until;
+    if (until) extra.push(el('div', { class: 'w-next quiet' }, el('small', {}, t('Focus time')), el('strong', {}, t('until {time}', { time: clock(until) }))));
+    const mail = secretary.mail;
+    if (mail?.configured && mail.summary) {
+      const s = mail.summary;
+      const bits = [
+        s.people ? t('{n} from people', { n: s.people }) : null,
+        s.waiting ? t('{n} waiting for an answer', { n: s.waiting }) : null,
+        s.parcels ? t('{n} parcels', { n: s.parcels }) : null,
+        s.bills ? t('{n} bills', { n: s.bills }) : null,
+      ].filter(Boolean);
+      extra.push(el('div', { class: 'agenda-day' }, t('Mail')), el('p', { class: 'hint' }, bits.length ? bits.join(' · ') : t('Nothing new.')));
+    }
+    this.body.replaceChildren(...extra, el('div', { class: 'agenda-list' }, ...rows));
   }
 }
 

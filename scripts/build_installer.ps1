@@ -108,8 +108,8 @@ if (Test-Path $appDir) { Remove-Item -Recurse -Force $appDir }
 New-Item -ItemType Directory -Force $appDir | Out-Null
 robocopy (Join-Path $root 'backend') (Join-Path $appDir 'backend') /E /XD __pycache__ /NFL /NDL /NJH /NJS | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $appDir 'scripts') | Out-Null
-# The scripts Claude Code and Codex launch: notifications and status line (the plan's limits).
-foreach ($script in 'tsukumo_notify.py', 'tsukumo_statusline.py') {
+# The scripts the agents launch: notifications and permissions, status line (the plan's limits), her MCP tools.
+foreach ($script in 'tsukumo_notify.py', 'tsukumo_statusline.py', 'tsukumo_mcp.py') {
     Copy-Item (Join-Path $root "scripts\$script") (Join-Path $appDir 'scripts')
 }
 # Only the built pages: a folder an older version left in dist stays out (package_audit checks it).

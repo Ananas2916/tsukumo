@@ -89,6 +89,21 @@ LOCAL_ONLY: tuple[tuple[str, str], ...] = (
     # The QR code with the token and the button that runs ``tailscale serve``.
     ("GET", "/api/phone"),
     ("POST", "/api/phone/serve"),
+    # The secretary's accounts (calendar links, the mail's password) and checks.
+    ("GET", "/api/secretary/settings"),
+    ("POST", "/api/secretary/"),
+    # The vault: the values are copied on the PC only, the labels aren't for afar either.
+    ("GET", "/api/vault"),
+    ("GET", "/api/vault/"),
+    ("POST", "/api/vault"),
+    ("DELETE", "/api/vault/"),
+    # What the local agents send to her body (MCP) and the permission requests:
+    # a phone never approves a command.
+    ("GET", "/api/agent/"),
+    ("POST", "/api/agent/"),
+    ("GET", "/api/approvals"),
+    ("POST", "/api/approvals"),
+    ("POST", "/api/approvals/"),
 )
 #: The shell of the phone's page: the HTML and the bundle (code already
 #: public, no data). It loads without the token because the token is after

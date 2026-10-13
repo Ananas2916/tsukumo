@@ -35,6 +35,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 KINDS = ("timer", "reminder", "alarm", "task")
+#: How a reminder can repeat: the same time on the clock, the next day, week, month or year.
+REPEATS = ("daily", "weekly", "monthly", "yearly")
 
 #: Beyond this delay a missed reminder (PC off) isn't said any more.
 MAX_LATE = 12 * 3600
@@ -50,7 +52,7 @@ class Reminder:
     due: float
     #: What to remember ("chiamare Marco"), what to do (``task``), or what the timer is for.
     text: str = ""
-    #: "" or "daily".
+    #: "" or one of REPEATS (a birthday is "yearly").
     repeat: str = ""
     #: Timer: total length in seconds ("the 5-minute timer is over").
     duration: float = 0.0
@@ -58,6 +60,8 @@ class Reminder:
     language: str = "it"
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     created: float = field(default_factory=time.time)
+    #: A follow-up: "unless <this sender> writes back first" (mailbox.py checks the inbox).
+    followup: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -128,14 +132,14 @@ class ReminderStore:
         return items[0].due if items else None
 
     def done(self, reminder: Reminder, now: float | None = None) -> None:
-        """It went off: it's removed, or moved to the next day if it repeats."""
+        """It went off: it's removed, or moved to its next time if it repeats."""
         now = time.time() if now is None else now
-        if reminder.repeat == "daily":
+        if reminder.repeat in REPEATS:
             # The same time *on your clock*, not 86400 seconds later: with the
             # daylight-saving change a 7 o'clock alarm would go off at 6 (or 8).
             moment = datetime.fromtimestamp(reminder.due)
             while moment.timestamp() <= now:
-                moment += timedelta(days=1)
+                moment = next_time(moment, reminder.repeat)
             reminder.due = moment.timestamp()
             with self._lock:
                 self._items[reminder.id] = reminder
@@ -147,6 +151,20 @@ class ReminderStore:
         """The last one created among those of these kinds ("cancel the timer")."""
         items = [item for item in self.all() if item.kind in kinds]
         return max(items, key=lambda item: item.created) if items else None
+
+
+def next_time(moment: datetime, repeat: str) -> datetime:
+    """The next time of a repeating reminder. A month or a year later keeps the
+    day when it exists, else the month's last (31 Jan -> 28 Feb, 29 Feb -> 28 Feb)."""
+    if repeat == "weekly":
+        return moment + timedelta(days=7)
+    if repeat in ("monthly", "yearly"):
+        months = 1 if repeat == "monthly" else 12
+        index = moment.month - 1 + months
+        year, month = moment.year + index // 12, index % 12 + 1
+        last = (date(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)).day
+        return moment.replace(year=year, month=month, day=min(moment.day, last))
+    return moment + timedelta(days=1)
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +429,20 @@ _DAILY = re.compile(
     r"\b(?:ogni giorno|tutti i giorni|ogni mattina|ogni sera|every day|everyday|daily|every morning|every evening)\b",
     re.IGNORECASE,
 )
+#: "ogni settimana", "ogni mese", "ogni anno" (a birthday): the date gives the day.
+_REPEAT_WORDS = (
+    (
+        "weekly",
+        re.compile(
+            r"\b(?:ogni settimana|tutte le settimane|every week|weekly)\b"
+            # "ogni lunedì", "every Monday": only the word goes, the day is the date.
+            r"|\b(?:ogni|tutti i|tutte le|every)(?=\s+(?:luned|marted|mercoled|gioved|venerd|sabat|domenic|monday|tuesday|wednesday|thursday|friday|saturday|sunday))",
+            re.IGNORECASE,
+        ),
+    ),
+    ("monthly", re.compile(r"\b(?:ogni mese|tutti i mesi|every month|monthly)\b", re.IGNORECASE)),
+    ("yearly", re.compile(r"\b(?:ogni anno|tutti gli anni|every year|yearly|annually)\b", re.IGNORECASE)),
+)
 _COMMAND_WORDS_IT = re.compile(
     r"\b(?:ricordami|ricordarmi|rammentami|avvisami|promemoria|dimmi|fammi sapere|timer|cronometro|sveglia|svegliami|"
     r"conto alla rovescia|per favore|perfavore|grazie|puoi|potresti|metti|mettimi|imposta|impostami|fai partire|avvia|"
@@ -499,6 +531,11 @@ def parse_requests(text: str, now: datetime | None = None, explicit: bool = Fals
     if daily:
         repeat = "daily"
         spans.append(daily.span())
+    for name, pattern in _REPEAT_WORDS:
+        found = pattern.search(raw)
+        if found and not repeat:
+            repeat = name
+            spans.append(found.span())
 
     if not dues:
         clock, time_match = _first(_TIME, raw, lambda match: _resolve_time(match, raw))
@@ -646,8 +683,23 @@ def from_tag(tag: str, now: datetime | None = None, language: str = "it") -> Rem
     if kind not in KINDS:
         kind = "reminder"
     duration = float(data["in"]) if kind == "timer" and data.get("in") is not None else 0.0
-    repeat = "daily" if str(data.get("repeat") or "").lower() in ("daily", "day", "every day") else ""
-    return Reminder(kind=kind, due=due.timestamp(), text=text, repeat=repeat, duration=duration, language=language)
+    repeat = _REPEAT_ALIASES.get(str(data.get("repeat") or "").strip().lower(), "")
+    followup = str(data.get("unless_reply_from") or "").strip()[:120]
+    return Reminder(kind=kind, due=due.timestamp(), text=text, repeat=repeat, duration=duration, language=language, followup=followup)
+
+
+_REPEAT_ALIASES = {
+    **{name: name for name in REPEATS},
+    "day": "daily",
+    "every day": "daily",
+    "week": "weekly",
+    "every week": "weekly",
+    "month": "monthly",
+    "every month": "monthly",
+    "year": "yearly",
+    "every year": "yearly",
+    "annually": "yearly",
+}
 
 
 def action_directive(now: datetime | None = None) -> str:
@@ -663,7 +715,9 @@ def action_directive(now: datetime | None = None) -> str:
         "something at a later time, confirm in one short sentence and append at the very end "
         '[[remind {"at": "YYYY-MM-DDTHH:MM", "text": "what to remind"}]], one tag per day when it spans several days '
         '(no time given: 09:00; use "in": seconds instead of "at" for relative times, "do": "the task" instead of "text" for '
-        'something you must do yourself then, "repeat": "daily" if it repeats). Never read or mention the tag. '
+        'something you must do yourself then, "repeat": "daily", "weekly", "monthly" or "yearly" if it repeats, a birthday '
+        'being yearly; "unless_reply_from": "name or address" for a follow-up such as "if Marco doesn\'t answer by Friday '
+        'remind me", which is skipped if that person writes back). Never read or mention the tag. '
         f'Example: "aggiungi domani cinema con Giulia" -> reply "Segnato per domani!" and append '
         f'[[remind {{"at": "{example:%Y-%m-%d}T09:00", "text": "cinema con Giulia"}}]]. Writing the tag IS adding it to '
         "their calendar: it appears on the PC and on the phone at once, so never say you can't."
@@ -790,6 +844,8 @@ def confirmation(reminder: Reminder, now: datetime | None = None) -> str:
     about = _about(second_person(reminder.text, lang), lang)
     clock = datetime.fromtimestamp(reminder.due).strftime("%H:%M")
     daily = reminder.repeat == "daily"
+    if reminder.repeat in ("weekly", "monthly", "yearly") and reminder.kind != "timer":
+        return _repeat_confirmation(reminder, lang, about, clock)
     if lang == "en":
         if reminder.kind == "timer":
             return f"Okay, {speak_duration(reminder.duration, lang)} on the clock{' for ' + reminder.text if reminder.text else ''}. Starting now!"
@@ -815,6 +871,33 @@ _WEEKDAY_NAMES = {
     "it": ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"],
     "en": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
 }
+
+
+def _ordinal(day: int) -> str:
+    suffix = "th" if 10 <= day % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def _repeat_confirmation(reminder: Reminder, lang: str, about: str, clock: str) -> str:
+    """ "Ogni lunedì alle 9", "ogni mese il 5", "ogni anno il 12 marzo"."""
+    moment = datetime.fromtimestamp(reminder.due)
+    if lang == "en":
+        when = {
+            "weekly": f"every {_WEEKDAY_NAMES['en'][moment.weekday()]} at {clock}",
+            "monthly": f"every month on the {_ordinal(moment.day)} at {clock}",
+            "yearly": f"every year on {_MONTH_NAMES['en'][moment.month - 1]} {moment.day}",
+        }[reminder.repeat]
+        if reminder.kind == "alarm":
+            return f"Alarm set {when}."
+        return f"Sure, {when} I'll remind you{about}."
+    when = {
+        "weekly": f"ogni {_WEEKDAY_NAMES['it'][moment.weekday()]} alle {clock}",
+        "monthly": f"ogni mese il {moment.day} alle {clock}",
+        "yearly": f"ogni anno il {moment.day} {_MONTH_NAMES['it'][moment.month - 1]}",
+    }[reminder.repeat]
+    if reminder.kind == "alarm":
+        return f"Sveglia impostata {when}."
+    return f"Va bene, {when} ti ricordo{about}."
 
 
 def confirmations(reminders: list[Reminder], now: datetime | None = None) -> str:

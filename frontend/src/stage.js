@@ -307,6 +307,11 @@ export class Stage {
     this.flame.setOutfit(name);
   }
 
+  /** The decorations on top of it (flame/wardrobe.js, EXTRAS). */
+  setFlameExtras(list) {
+    this.flame.setExtras(list);
+  }
+
   /**
    * How many pixels right of the window's centre she must be (0: centred).
    * The main process sends it when it widens the window for the island on one

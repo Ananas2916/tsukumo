@@ -61,15 +61,16 @@ another language is a great first contribution: see
 5. [The desktop mascot](#the-desktop-mascot)
 6. [The dashboard](#the-dashboard)
 7. [The assistant: reminders, comments, notifications](#the-assistant-reminders-comments-notifications)
-8. [On your phone](#on-your-phone)
-9. [Security](#security)
-10. [For AI agents and integrators](#for-ai-agents-and-integrators)
-11. [Configuration](#configuration)
-12. [How the lip-sync works](#how-the-lip-sync-works)
-13. [Project layout](#project-layout)
-14. [Troubleshooting](#troubleshooting)
-15. [Contributing](#contributing)
-16. [License](#license)
+8. [The secretary: your list, calendars and mail](#the-secretary-your-list-calendars-and-mail)
+9. [On your phone](#on-your-phone)
+10. [Security](#security)
+11. [For AI agents and integrators](#for-ai-agents-and-integrators)
+12. [Configuration](#configuration)
+13. [How the lip-sync works](#how-the-lip-sync-works)
+14. [Project layout](#project-layout)
+15. [Troubleshooting](#troubleshooting)
+16. [Contributing](#contributing)
+17. [License](#license)
 
 ---
 
@@ -372,7 +373,11 @@ first thing you see.
 - **Context.** Every 5 s the shell tells the backend how long you've been idle,
   whether the screen is locked and which window is in front: coding, watching
   YouTube, gaming, in a meeting. It is used to stay quiet at the right moments,
-  and it never leaves the PC.
+  and it never leaves the PC. A heartbeat (when the cursor last moved or another
+  window came to the front) catches the PCs where a controller or a driver keeps
+  Windows' idle time at zero: still for 20 minutes means away, whatever Windows
+  says. Tell her "I'm not at the PC" or "stop with the breaks" and the brain
+  answers with `[[away]]` or `[[quiet: breaks 2h]]`.
 - **Spontaneous comments**: late at night, after two hours without a break,
   weather, low battery, the YouTube video you're watching, a news headline or a
   curiosity. Never in fullscreen, games or meetings, never while she's already
@@ -392,6 +397,51 @@ first thing you see.
   come from a status-line script (Pro/Max, terminal only). Antigravity doesn't
   write its limits to disk. She warns you at 80% and 95%. Ask her "how much
   Claude usage is left?".
+- **More agents, and their permissions.** Gemini CLI (`~/.gemini/settings.json`)
+  and Cursor (`~/.cursor/hooks.json`) connect like Claude Code and Codex. Claude
+  Code's permission questions can also appear in her island (Allow / Always /
+  Deny); with no click it asks in its own window as always, and the phone can
+  never approve.
+
+## The secretary: your list, calendars and mail
+
+Tsukumo stays the face of your agent, not a second agent: she **reads** your
+calendars and your mail and acts only on her own things (lists, reminders, a
+draft in Drafts). She never sends, books or pays; that's the agent's job, with
+its own connectors.
+
+- **To-do list and notes.** "Segnati che devo chiamare il dentista", "to-do: pay
+  the gas bill", "cosa ho da fare?", "fatto il pane", "prendi nota: la chiave
+  del garage è nel secondo cassetto", "dove avevo messo la chiave del garage?".
+  Understood without a brain; the brain adds `[[todo {...}]]`, `[[note: ...]]`,
+  `[[done: ...]]` (study plans, steps before a deadline). Items without a time
+  come up in a free moment; deadlines two days and one day before.
+- **Repeating reminders.** "Ogni lunedì alle 9...", "every month on the 5th...",
+  "ogni anno il 12 marzo ricordami del compleanno di Marco". Follow-ups: "if
+  Marco doesn't answer by Friday, remind me" is skipped if he writes back.
+- **Calendars, read only.** Paste the private iCal link of Google Calendar,
+  Outlook or any calendar: events, recurrences, exceptions and time zones are
+  read without OAuth. "Cosa ho domani?", "quando sono libero domani?"; clashes
+  are pointed out once.
+- **"Leave in 15 minutes".** With your home address and how you travel (car,
+  bike, on foot via OpenStreetMap; public transport as a margin), she tells you
+  when to leave for an event that has a place.
+- **Mail, read only (IMAP).** With an app password: who wrote, mails waiting for
+  an answer for days, parcels arriving today, bills (put on your list). The
+  inbox is opened read-only; a reply the brain prepares goes to Drafts, never
+  out. Mail is framed as data for the brain and summarized without one.
+- **Morning briefing and evening recap.** The first time you're at the PC in
+  the morning: weather, today's events and reminders, deadlines, the list, the
+  mail. After 20:30: what you did, what's left, tomorrow.
+- **Focus time.** "Proteggimi le prossime 2 ore": no chatter, agents only as a
+  bubble, everything told at the end. **While you were away**: what happened is
+  told when you come back, not to an empty room.
+- **The vault.** IBAN, tax code, plate: "copiami l'IBAN" puts it in the
+  clipboard, emptied after a minute. Encrypted with Windows' DPAPI, copied by
+  the shell itself: never shown to a brain or to the phone.
+
+Each kind of notice has its switch in Agenda → Connections, and can be silenced
+by voice for a while.
 
 ---
 
@@ -468,6 +518,16 @@ rest of your files. See [SECURITY.md](SECURITY.md) to report a vulnerability.
 Tsukumo is easy to drive from scripts and agents. Working on this repository
 with a coding agent? Start from [AGENTS.md](AGENTS.md). A compact machine
 summary is in [llms.txt](llms.txt).
+
+### Her body as tools (MCP)
+
+`scripts/tsukumo_mcp.py` is an MCP server (standard library only) that Claude
+Code, Codex, Gemini CLI and Cursor can use: `say`, `show` (a card in her chat),
+`remind`, `add_todo`, `add_note`, `agenda`, `presence`, `search_notes`. Connect
+it from Work → "Tsukumo's tools for your agents": Claude Code through its own
+`claude mcp add`, the others by adding an entry to their config (backed up).
+Each brain also declares what it can do by itself (files, commands, web, MCP,
+memory), shown in Engines.
 
 ### Make her speak, chat, or announce something
 
@@ -549,7 +609,13 @@ Viseme timeline: `t` start (s), `d` duration, `v` viseme (`a i u e o sil`),
 | `GET/POST/DELETE` | `/api/reminders` | timers and reminders (`{"phrase": "..."}` or fields) |
 | `GET/POST/DELETE` | `/api/memory/facts` · `PUT /api/memory/persona` | memories and persona |
 | `POST` | `/api/notify` | an external agent finished or is waiting |
-| `GET/POST` | `/api/integrations` | install or remove the Claude Code / Codex hooks |
+| `GET/POST` | `/api/integrations` | install or remove the agents' hooks (Claude Code, Codex, Gemini CLI, Cursor), Claude Code's permissions, the MCP server |
+| `GET` | `/api/secretary` | to-dos, notes, focus, calendars' events, mail summary (never the links or the password) |
+| `POST/DELETE` | `/api/todos` · `/api/todos/{id}` · `/api/notes` · `/api/notes/{id}` · `/api/focus` | the list, the notes, focus time |
+| `GET/POST` | `/api/secretary/settings` · `/check` · `/refresh` | PC only: calendar links, mail account, home and travel mode |
+| `GET/POST/DELETE` | `/api/vault` · `/api/vault/{id}` | PC only: the vault (the value only to the PC) |
+| `POST` · `GET` | `/api/agent/say` · `/show` · `/presence` · `/agenda` · `/search` | PC only: what the MCP server calls |
+| `GET/POST` | `/api/approvals` · `/api/approvals/{id}` | PC only: Claude Code's permission questions and their answers |
 | `GET` | `/api/usage` | Claude Code / Codex / Antigravity limits and today's tokens |
 | `GET/POST` | `/api/preferences` | how chatty, about what, weather city |
 | `GET` · `POST` | `/api/music` · `/api/music/control` | Spotify status and taste; PC only: the player's `pause`, `resume`, `next`, `previous` |

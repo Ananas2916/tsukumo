@@ -205,7 +205,7 @@ function foregroundWindow(own = new Set()) {
   try {
     const hwnd = api.GetForegroundWindow();
     if (!hwnd) return null;
-    if (own.has(Number(hwnd))) return { title: '', exe: '', fullscreen: false, own: true };
+    if (own.has(Number(hwnd))) return { title: '', exe: '', fullscreen: false, own: true, handle: Number(hwnd) };
     const pid = [0];
     api.GetWindowThreadProcessId(hwnd, pid);
     const klass = className(hwnd);
@@ -220,7 +220,7 @@ function foregroundWindow(own = new Set()) {
         dip.x + dip.width >= bounds.x + bounds.width &&
         dip.y + dip.height >= bounds.y + bounds.height;
     }
-    return { title: windowTitle(hwnd), exe: processName(pid[0]), fullscreen, own: false };
+    return { title: windowTitle(hwnd), exe: processName(pid[0]), fullscreen, own: false, handle: Number(hwnd) };
   } catch {
     return null;
   }

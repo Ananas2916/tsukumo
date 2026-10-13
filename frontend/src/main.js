@@ -21,7 +21,7 @@
 import { apiUrl, wsUrl } from './config.js';
 import { SpeechPlayer } from './audio.js';
 import { readSetting, writeSetting } from './dom.js';
-import { resolveOutfit } from './flame/wardrobe.js';
+import { parseExtras, resolveOutfit, toggleExtra } from './flame/wardrobe.js';
 import { Hud } from './hud.js';
 import { LANG, t, translateDom, tx, watchLanguage } from './i18n.js';
 import { LipSync } from './lipsync.js';
@@ -51,6 +51,8 @@ const SPRINT_MAX_IDLE = 90;
 const COLOR_SETTING = 'dc:flame-color';
 /** What she wears (flame/wardrobe.js): "auto" follows the seasons. */
 const OUTFIT_SETTING = 'dc:flame-outfit';
+/** The decorations worn on top of it (a list: bow, whiskers). */
+const EXTRAS_SETTING = 'dc:flame-extras';
 
 /** The cursor resting on her this long (s) and she sends little hearts, like Mochi; then a pause (s). */
 const LOVE_AFTER = 2.2;
@@ -426,14 +428,16 @@ function toggleMenu(open = !hud.visible) {
 function setFlameColor(name) {
   stage.setFlamePalette(name);
   hud.setTint(stage.flame.colors.accent);
-  hud.setWardrobe(readSetting(OUTFIT_SETTING, 'auto'), name);
+  hud.setWardrobe(readSetting(OUTFIT_SETTING, 'auto'), name, parseExtras(readSetting(EXTRAS_SETTING, [])));
 }
 
-/** What she wears: the saved choice, with "auto" resolved for today. */
+/** What she wears: the saved choice, with "auto" resolved for today, and the decorations. */
 function setFlameOutfit() {
   const selection = readSetting(OUTFIT_SETTING, 'auto');
+  const extras = parseExtras(readSetting(EXTRAS_SETTING, []));
   stage.setFlameOutfit(resolveOutfit(selection));
-  hud.setWardrobe(selection, readSetting(COLOR_SETTING, 'lilac'));
+  stage.setFlameExtras(extras);
+  hud.setWardrobe(selection, readSetting(COLOR_SETTING, 'lilac'), extras);
 }
 
 function stopSpeaking(tellBackend) {
@@ -510,6 +514,21 @@ hud.onAction = async (id, detail) => {
       writeSetting(OUTFIT_SETTING, detail);
       setFlameOutfit();
       sfx.play('outfit');
+      break;
+    // A decoration on or off (bow, whiskers), on top of what she wears.
+    case 'extra':
+      writeSetting(EXTRAS_SETTING, toggleExtra(readSetting(EXTRAS_SETTING, []), detail));
+      setFlameOutfit();
+      sfx.play('outfit');
+      break;
+    // A permission question answered in the island (Claude Code's PermissionRequest).
+    case 'approval':
+      answerApproval(detail);
+      break;
+    case 'focus':
+      fetch(apiUrl('/api/focus'), { method: 'DELETE' }).catch(() => {});
+      hud.setFocus(null);
+      sfx.play('tick');
       break;
     // A click on her inside the island: a pat.
     case 'flame':
@@ -610,6 +629,9 @@ socket.on('hello', (message) => {
   // The mute chosen here holds after a backend restart too.
   if (Boolean(config.muted) !== state.muted) socket.send({ type: 'settings', muted: state.muted });
 
+  hud.setFocus(message.secretary?.focus?.until ?? null);
+  hud.setApprovals(message.approvals ?? []);
+
   // Nothing to load: she appears as soon as the backend answers.
   ui.hideOverlay();
   if (!state.greeted) appear();
@@ -642,6 +664,11 @@ function callUser(title, body, { done = false, waiting = false } = {}) {
 
 // An agent you use on your own (Claude Code, Codex) is done or waiting for you.
 socket.on('notify', (message) => {
+  // Her own notice in a meeting or full screen (the secretary): Windows' notification only.
+  if (message.kind === 'notice') {
+    pet?.notify?.(message.title ?? 'Tsukumo', message.message ?? '');
+    return;
+  }
   const waiting = message.kind === 'waiting';
   const title = waiting ? t('{name} is waiting for you', { name: message.title }) : t('{name} is done', { name: message.title });
   if (message.silent) {
@@ -767,6 +794,52 @@ socket.on('reply', (message) => {
 });
 
 socket.on('notice', (message) => ui.toast(message?.message ?? ''));
+
+// ------------------------------------------------------------------ the secretary
+async function answerApproval({ id, decision } = {}) {
+  hud.removeApproval(id);
+  sfx.play(decision === 'deny' ? 'close' : 'send');
+  try {
+    await fetch(apiUrl(`/api/approvals/${encodeURIComponent(id)}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+  } catch {
+    /* expired: the agent asks in its own window */
+  }
+}
+
+// "Copiami l'IBAN": only the id arrives; Electron's main process reads the value and copies it.
+socket.on('vault-copy', async (message) => {
+  const copied = await pet?.copySecret?.(String(message.id ?? ''));
+  if (!copied) return;
+  sfx.play('tick');
+  ui.showBubble(t('{label} copied', { label: message.label ?? '' }), 2500);
+});
+
+// A card from an agent (MCP "show"): a bubble, a chime, Windows' notification.
+socket.on('card', (message) => {
+  presence.touch();
+  sfx.play('chime');
+  stage.play('hop');
+  ui.showBubble(message.title ?? '', 5000);
+  pet?.notify?.(message.title ?? 'Tsukumo', message.text ?? '');
+});
+
+socket.on('secretary', (message) => hud.setFocus(message.focus?.until ?? null));
+
+// Claude Code asks permission: the island opens with the question.
+socket.on('approval', (message) => {
+  if (message.event === 'ask' && message.approval) {
+    presence.touch();
+    sfx.play('question');
+    stage.play('knock');
+    hud.addApproval(message.approval);
+  } else if (message.event === 'closed') {
+    hud.removeApproval(message.id);
+  }
+});
 
 socket.on('error', (message) => {
   ui.toast(message?.message ?? t('Unknown error'), true, 7000);
@@ -1137,6 +1210,11 @@ if (pet) {
         break;
       case 'flame-outfit':
         writeSetting(OUTFIT_SETTING, command.value);
+        setFlameOutfit();
+        sfx.play('outfit');
+        break;
+      case 'flame-extras':
+        writeSetting(EXTRAS_SETTING, parseExtras(command.value));
         setFlameOutfit();
         sfx.play('outfit');
         break;

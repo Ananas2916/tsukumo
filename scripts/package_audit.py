@@ -43,7 +43,7 @@ TOP_LEVEL = {"backend", "frontend", "scripts", "models", "LICENSE", ".env.exampl
 ONLY = {
     "frontend": {"dist"},
     "models": {"kokoro-v1.0.onnx", "voices-v1.0.bin"},
-    "scripts": {"tsukumo_notify.py", "tsukumo_statusline.py"},
+    "scripts": {"tsukumo_notify.py", "tsukumo_statusline.py", "tsukumo_mcp.py"},
 }
 #: Never, anywhere: settings with keys, the user's state.
 FORBIDDEN_NAMES = {".env", "running.json", "spotify.json", "memory.json", "reminders.json"}

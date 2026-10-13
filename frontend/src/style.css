@@ -72,9 +72,8 @@ body.island-open #stage {
   border-radius: 26px;
   background: #000;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow:
-    0 18px 46px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  /* No outer shadow: on a light desktop it showed as a grey halo around the black. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   color: #f2f2f5;
   transform-origin: var(--ox, 50%) var(--oy, 100%);
   transform: scale(0.08);
@@ -388,6 +387,18 @@ body.island-open #stage {
   background: rgba(var(--tint), 0.16);
 }
 
+/* The decorations: a row of their own, each tile on or off over any outfit. */
+.island-closet-sub {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  color: #8a8a95;
+  font-size: 11px;
+}
+
+.island-extra:not(.on) svg {
+  opacity: 0.7;
+}
+
 .island-pill.active {
   background: rgba(var(--tint), 0.18);
   border-color: rgba(var(--tint), 0.5);
@@ -402,6 +413,35 @@ body.island-open #stage {
 
 .island:not(.wide) .island-pill[data-id='wardrobe'] .island-pill-label {
   display: none;
+}
+
+/* The song playing: a small equalizer (or pause) and "title · artist". */
+.island-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #b9b9c4;
+  font-size: 11.5px;
+}
+
+.island-track.paused {
+  color: #7d7d88;
+}
+
+.island-track-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 12px;
+  color: #1ed760;
+}
+
+.island-track-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The agent's steps, like Coucou's list: done, in progress, done. */
@@ -1000,4 +1040,80 @@ body.island-open #stage {
   50% {
     box-shadow: 0 0 0 4px rgba(255, 107, 129, 0.15);
   }
+}
+
+/* The song line's equalizer in Spotify green. */
+.island-track .island-eq b {
+  background: #1ed760;
+}
+
+/* A permission question from an agent: what it wants to do and three answers, like Coucou's notch. */
+.island-approval {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  cursor: default;
+}
+
+.island-approval-head {
+  color: #f2f2f5;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.island-approval-what {
+  display: -webkit-box;
+  overflow: hidden;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #d8d8e0;
+  font: 11.5px/1.35 ui-monospace, 'Cascadia Code', Consolas, monospace;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+
+.island-approval-choices {
+  display: flex;
+  gap: 6px;
+}
+
+.island-approval-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f2f5;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.island-approval-btn.allow {
+  border-color: transparent;
+  background: #2fbf71;
+  color: #06150d;
+}
+
+.island-approval-btn.deny:hover {
+  border-color: rgba(255, 107, 129, 0.6);
+  color: #ff8a9b;
+}
+
+.island-approval-btn:hover {
+  filter: brightness(1.12);
+}
+
+/* Focus time: a quiet moon pill with the end time. */
+.island-pill.focus {
+  color: #b9b2ff;
+}
+
+.island-pill.focus.hidden {
+  display: none;
 }

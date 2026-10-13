@@ -60,6 +60,17 @@ def build_tts_engine(engine: str, settings: Settings) -> TTSEngine:
             language=settings.language,
         )
 
+    if engine == "voicestudio":
+        from .voicestudio import DEFAULT_URL, VoiceStudioTTS
+
+        return VoiceStudioTTS(
+            base_url=str(options.get("VOICESTUDIO_URL") or DEFAULT_URL),
+            voice=str(options.get("VOICESTUDIO_VOICE") or ""),
+            language=str(options.get("VOICESTUDIO_LANGUAGE") or "auto"),
+            model=str(options.get("VOICESTUDIO_MODEL") or "tts-1"),
+            default_speed=speed,
+        )
+
     if engine == "kokoro":
         return KokoroTTS(
             model_path=settings.kokoro_model_path,

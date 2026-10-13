@@ -11,7 +11,7 @@ import { el, iconButton, languageLabel, readSetting, writeSetting } from '../dom
 import { LANG, savedLanguage, setLanguage, t, tx, UI_LANGUAGES } from '../i18n.js';
 import { icon } from '../icons.js';
 import { paletteKey, PALETTE_LABELS, swatchColor } from '../flame/palettes.js';
-import { OUTFIT_LABELS, parseOutfit, seasonalOutfit, SELECTIONS } from '../flame/wardrobe.js';
+import { EXTRA_LABELS, EXTRAS, OUTFIT_LABELS, parseExtras, parseOutfit, seasonalOutfit, SELECTIONS, toggleExtra } from '../flame/wardrobe.js';
 import { MIC_SETTING, SAMPLE_RATE, VoiceInput, listMicrophones } from '../mic.js';
 import { BARGE_IN_SETTING } from '../voice.js';
 import { MemoryCard } from './memory.js';
@@ -97,6 +97,12 @@ const OUTFIT_SHORT = {
   witch: t('Witch'),
   santa: t('Christmas'),
   party: t('Party'),
+};
+
+/** The same for the decorations. */
+const EXTRA_SHORT = {
+  bow: t('Bow'),
+  whiskers: t('Whiskers'),
 };
 
 /** The languages a cloned voice can speak (those of Chatterbox the panel can name). */
@@ -248,44 +254,52 @@ export class CharacterView {
     const pickColor = (value, { now = true } = {}) => {
       flameColor = value;
       writeSetting('dc:flame-color', flameColor);
-      clearTimeout(colorTimer);
-      // Dragging in the picker sends many colours: only the last one goes to the flame.
-      colorTimer = setTimeout(() => this.companion?.sendToPet({ type: 'flame-color', value: flameColor }), now ? 0 : 120);
       renderSwatches();
-      renderWardrobe();
+      clearTimeout(colorTimer);
+      // Dragging in the picker sends many colours: only the last one goes to the
+      // flame, and the previews are redrawn once.
+      colorTimer = setTimeout(
+        () => {
+          this.companion?.sendToPet({ type: 'flame-color', value: flameColor });
+          renderWardrobe();
+          renderExtras();
+        },
+        now ? 0 : 120,
+      );
     };
     const custom = el('input', { type: 'color', class: 'swatch-picker', 'aria-label': t('Free colour') });
     custom.addEventListener('input', () => pickColor(custom.value.toLowerCase(), { now: false }));
+    // Built once and then only restyled: moving the picker's input in the page
+    // (rebuilding the row at every colour) closed it as soon as you dragged in it.
+    const namedSwatches = FLAME_COLORS.map((color) =>
+      el('button', {
+        type: 'button',
+        class: 'swatch',
+        role: 'radio',
+        'aria-label': color.label,
+        title: color.label,
+        style: { background: color.swatch },
+        onClick: () => pickColor(color.value),
+      }),
+    );
+    const freeSwatch = el('label', { class: 'swatch swatch-free' }, custom);
+    swatches.append(...namedSwatches, freeSwatch);
     const renderSwatches = () => {
       const free = flameColor.startsWith('#');
-      custom.value = free ? flameColor : '#a58bff';
-      swatches.replaceChildren(
-        ...FLAME_COLORS.map((color) =>
-          el('button', {
-            type: 'button',
-            class: `swatch${color.value === flameColor ? ' on' : ''}`,
-            role: 'radio',
-            'aria-checked': String(color.value === flameColor),
-            'aria-label': color.label,
-            title: color.label,
-            style: { background: color.swatch },
-            onClick: () => pickColor(color.value),
-          }),
-        ),
-        el(
-          'label',
-          {
-            class: `swatch swatch-free${free ? ' on' : ''}`,
-            title: free ? t('Free colour ({color})', { color: flameColor }) : t('Free colour'),
-            style: free ? { background: flameColor } : {},
-          },
-          custom,
-        ),
-      );
+      const value = free ? flameColor : '#a58bff';
+      if (custom.value !== value) custom.value = value;
+      FLAME_COLORS.forEach((color, i) => {
+        namedSwatches[i].classList.toggle('on', color.value === flameColor);
+        namedSwatches[i].setAttribute('aria-checked', String(color.value === flameColor));
+      });
+      freeSwatch.classList.toggle('on', free);
+      freeSwatch.title = free ? t('Free colour ({color})', { color: flameColor }) : t('Free colour');
+      freeSwatch.style.background = free ? flameColor : '';
     };
 
-    // The wardrobe: one preview per accessory, in the current colour.
+    // The wardrobe: one preview per accessory, in the current colour and with the decorations.
     let outfit = parseOutfit(readSetting('dc:flame-outfit', 'auto'));
+    let extras = parseExtras(readSetting('dc:flame-extras', []));
     const wardrobeNow = el('span', { class: 'wardrobe-now' });
     const wardrobe = el('div', { class: 'wardrobe', role: 'radiogroup', 'aria-label': t('Wardrobe') });
     const describe = (choice) => {
@@ -311,7 +325,7 @@ export class CharacterView {
             },
           });
           // SVG made in here with already validated colours (palettes.js): no user text.
-          tile.innerHTML = outfitPreview(choice === 'auto' ? seasonalOutfit() : choice, flameColor, { badge: choice === 'auto' });
+          tile.innerHTML = outfitPreview(choice === 'auto' ? seasonalOutfit() : choice, flameColor, { badge: choice === 'auto', extras });
           tile.append(el('span', {}, OUTFIT_SHORT[choice]));
           tile.addEventListener('pointerenter', () => (wardrobeNow.textContent = describe(choice)));
           tile.addEventListener('pointerleave', () => (wardrobeNow.textContent = describe(outfit)));
@@ -319,20 +333,50 @@ export class CharacterView {
         }),
       );
     };
+    // The decorations: on top of any outfit, each one on or off.
+    const decorations = el('div', { class: 'wardrobe', role: 'group', 'aria-label': t('Decorations') });
+    const renderExtras = () => {
+      decorations.replaceChildren(
+        ...EXTRAS.map((extra) => {
+          const on = extras.includes(extra);
+          const tile = el('button', {
+            type: 'button',
+            class: `wardrobe-item${on ? ' on' : ''}`,
+            'aria-pressed': String(on),
+            title: EXTRA_LABELS[extra],
+            onClick: () => {
+              extras = toggleExtra(extras, extra);
+              writeSetting('dc:flame-extras', extras);
+              this.companion?.sendToPet({ type: 'flame-extras', value: extras });
+              renderExtras();
+              renderWardrobe();
+            },
+          });
+          // SVG made in here with already validated colours (palettes.js): no user text.
+          tile.innerHTML = outfitPreview('none', flameColor, { extras: [extra] });
+          tile.append(el('span', {}, EXTRA_SHORT[extra]));
+          return tile;
+        }),
+      );
+    };
     // Changed from the island (the wardrobe is there too): the panel lines up.
     window.addEventListener('storage', (event) => {
-      if (event.key !== 'dc:flame-outfit') return;
+      if (event.key !== 'dc:flame-outfit' && event.key !== 'dc:flame-extras') return;
       outfit = parseOutfit(readSetting('dc:flame-outfit', 'auto'));
+      extras = parseExtras(readSetting('dc:flame-extras', []));
       renderWardrobe();
+      renderExtras();
     });
     renderSwatches();
     renderWardrobe();
+    renderExtras();
 
     const lookCard = this._card(
       'flame',
       t('Look'),
       el('div', { class: 'row' }, el('span', { class: 'row-label' }, t('Colour')), swatches),
       el('div', { class: 'wardrobe-block' }, el('div', { class: 'wardrobe-head' }, el('span', { class: 'row-label' }, t('Wardrobe')), wardrobeNow), wardrobe),
+      el('div', { class: 'wardrobe-block' }, el('div', { class: 'wardrobe-head' }, el('span', { class: 'row-label' }, t('Decorations')), el('span', { class: 'wardrobe-now' }, t('On top of any outfit'))), decorations),
       this._row(t('Size'), this.scale.node),
       this._row(t('Mouth'), this.gain.node, t('How wide she opens her mouth while speaking.')),
     );

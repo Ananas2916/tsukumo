@@ -119,21 +119,36 @@ const ART = {
   },
 };
 
+/** The decorations (EXTRAS), drawn over the face and under the outfit (a hat's brim covers the bow). */
+const EXTRA_ART = {
+  whiskers: `<g stroke="${INK}" stroke-width=".8" stroke-linecap="round" fill="none">
+      <path d="M24.5 46.6L15.6 45M24.5 47.9L15 48.1M24.5 49.2L16 51.3M39.5 46.6L48.4 45M39.5 47.9L49 48.1M39.5 49.2L48 51.3"/></g>
+      <g fill="#fff2f7" stroke="${INK}" stroke-width=".8"><ellipse cx="30.1" cy="48" rx="2.6" ry="2"/><ellipse cx="33.9" cy="48" rx="2.6" ry="2"/></g>
+      <ellipse cx="32" cy="46.1" rx="1.5" ry="1" fill="#ff7fa6" stroke="${INK}" stroke-width=".6"/>`,
+  bow: `<g transform="translate(43.2 37.6) rotate(-22)" fill="#ff5c8f" stroke="${INK}" stroke-width="1.1" stroke-linejoin="round">
+      <path d="M-.6 1.2-3 6.2-1 5.6.2 6.6ZM.6 1.2 3 6.2 1 5.6-.2 6.6Z"/>
+      <path d="M0 0C-2.6-3-6.6-4.8-8.2-2.8Q-9.2 0-8.2 2.8C-6.6 4.8-2.6 3 0 0Z"/><path d="M0 0C2.6-3 6.6-4.8 8.2-2.8Q9.2 0 8.2 2.8C6.6 4.8 2.6 3 0 0Z"/>
+      <ellipse rx="1.9" ry="2.2" fill="#e0447a"/></g>`,
+};
+
 /**
  * The SVG of a flame in `color` (a name or "#rrggbb") wearing `outfit` (one
- * of OUTFITS or 'none'). `badge`: an "A" dot for "automatic".
+ * of OUTFITS or 'none') and the decorations `extras`. `badge`: an "A" dot
+ * for "automatic".
  */
-export function outfitPreview(outfit, color, { badge = false } = {}) {
+export function outfitPreview(outfit, color, { badge = false, extras = [] } = {}) {
   const colors = palette(color);
   const id = (uid += 1);
   const art = ART[outfit] ?? ART.none;
   const draw = (part) => (typeof part === 'function' ? part(id) : (part ?? ''));
+  const decorations = (Array.isArray(extras) ? extras : []).map((extra) => EXTRA_ART[extra] ?? '').join('');
   return `<svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true">
     <defs><linearGradient id="g${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${hex(colors.high)}"/><stop offset="1" stop-color="${hex(colors.low)}"/></linearGradient></defs>
     ${draw(art.back)}
     <path d="${DROP}" fill="url(#g${id})" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round"/>
     <ellipse cx="26.3" cy="42" rx="2.1" ry="2.9" fill="${INK}"/><ellipse cx="37.7" cy="42" rx="2.1" ry="2.9" fill="${INK}"/>
     <circle cx="27" cy="40.8" r=".8" fill="#fff"/><circle cx="38.4" cy="40.8" r=".8" fill="#fff"/>
+    ${decorations}
     ${draw(art.front)}
     ${badge ? `<circle cx="54" cy="54" r="7" fill="${hex(colors.accent)}" stroke="${INK}" stroke-width="1.4"/><text x="54" y="57.6" text-anchor="middle" font-size="9.5" font-weight="800" fill="${INK}" font-family="system-ui,Segoe UI,sans-serif">A</text>` : ''}
   </svg>`;

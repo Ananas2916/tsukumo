@@ -107,6 +107,14 @@ from .providers import REGISTRIES, ProviderSpec, describe_all
 from .status import EngineMonitor, llm_entry
 from .transcript import Transcript
 from .agents_board import AgentBoard
+from .approvals import Approvals
+from .calendar_ics import CalendarService
+from .mailbox import MailService
+from .notebook import Notebook
+from .routes import Routes
+from .secretary import Secretary
+from .secretary_api import Services, calendar_urls, create_router, mail_config
+from .vault import Vault
 from .tts import build_tts_engine
 from .usage import UsageService
 from .usage import describe as describe_usage
@@ -270,6 +278,25 @@ PROACTIVE = Proactive(
     usage=lambda: USAGE.latest,
 )
 
+#: The secretary (secretary.py): to-dos and notes, the vault, the calendars, the mail.
+NOTEBOOK = Notebook(SETTINGS.state_dir / "notebook.json")
+VAULT = Vault(SETTINGS.state_dir / "vault.json")
+APPROVALS = Approvals(_broadcast)
+SECRETARY = Secretary(
+    companion=_current,
+    context=PC,
+    preferences=PREFERENCES,
+    broadcast=_broadcast,
+    notebook=NOTEBOOK,
+    reminders=REMINDERS,
+    vault=VAULT,
+    calendar=CalendarService(calendar_urls),
+    mail=MailService(mail_config),
+    routes=Routes(SETTINGS.state_dir / "places.json"),
+    proactive=PROACTIVE,
+    state_path=SETTINGS.state_dir / "secretary.json",
+)
+
 
 # ---------------------------------------------------------------------------
 # Application lifecycle
@@ -297,6 +324,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await MUSIC.start()
     if SETTINGS.proactive:
         await PROACTIVE.start()
+        # The secretary reads calendars and mail from the network: off with the spontaneous comments (tests).
+        await SECRETARY.start()
     if SETTINGS.detect_engines:
         _spawn(_detect_engines(), report=False)
     else:
@@ -332,6 +361,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await PROACTIVE.stop()
+        await SECRETARY.stop()
         await MUSIC.stop()
         _running_marker().unlink(missing_ok=True)
         await monitor.stop()
@@ -351,6 +381,19 @@ app.add_middleware(
 )
 # Added last = the outermost: it decides before everything else.
 app.add_middleware(SecurityMiddleware, policy=lambda: POLICY)
+# The secretary's endpoints (secretary_api.py): to-dos, notes, focus, vault, agents, approvals.
+app.include_router(
+    create_router(
+        Services(
+            secretary=SECRETARY,
+            vault=VAULT,
+            approvals=APPROVALS,
+            preferences=PREFERENCES,
+            broadcast=_broadcast,
+            language=lambda: "it" if (_current() is None or _current().voice_language == "it") else "en",
+        )
+    )
+)
 
 
 def companion() -> Companion:
@@ -416,6 +459,7 @@ class FactRequest(BaseModel):
 
 class ContextRequest(BaseModel):
     idle: float = Field(0, ge=0, description="Seconds without mouse or keyboard")
+    still: float | None = Field(None, ge=0, description="Seconds since the cursor moved or the window in front changed")
     locked: bool = Field(False, description="Screen locked")
     app: dict[str, Any] | None = Field(None, description="Foreground window: title, exe, fullscreen, own")
 
@@ -896,6 +940,8 @@ def _attach(instance: Companion) -> None:
     instance.on_memory_changed = _memory_changed
     instance.screen_capture = _request_screen
     instance.music = MUSIC
+    instance.proactive = PROACTIVE
+    instance.secretary = SECRETARY
     instance.usage_reply = _usage_reply
 
 
@@ -976,10 +1022,27 @@ async def _fire_due_reminders(now: float | None = None) -> list[ReminderItem]:
         instance = _current()
         if instance is None:
             continue
+        if reminder.followup and SECRETARY.mail.configured:
+            # "If Marco doesn't answer by Friday": the inbox says whether he did.
+            await SECRETARY.mail.refresh(force=True)
+            answered = SECRETARY.mail.wrote_since(reminder.followup, reminder.created)
+            if answered is not None:
+                text = (
+                    f"Niente da ricordare: {answered.sender} ha già risposto («{answered.subject}»)."
+                    if reminder.language == "it"
+                    else f"Nothing to remind you of: {answered.sender} already answered (“{answered.subject}”)."
+                )
+                _spawn(instance.announce(text, hub.broadcast, event=f"Follow-up not needed: {describe(reminder)}"))
+                continue
         if reminder.kind == "task":
             _spawn(instance.chat(task_prompt(reminder), hub.broadcast, hidden=True))
         else:
-            _spawn(instance.announce(announcement(reminder, late), hub.broadcast, event=f"Reminder due: {describe(reminder)}"))
+            said = announcement(reminder, late)
+            _spawn(instance.announce(said, hub.broadcast, event=f"Reminder due: {describe(reminder)}"))
+            if PC.fresh and not PC.present:
+                # Said to an empty room: said again when you're back.
+                clock = datetime.fromtimestamp(reminder.due).strftime("%H:%M")
+                SECRETARY.hold(f"{'Alle' if reminder.language == 'it' else 'At'} {clock}: {said}", f"Reminder due: {describe(reminder)}", kind="reminder")
     if fired:
         await hub.broadcast({"type": "reminders", "reminders": [item.as_dict() for item in REMINDERS.all()]})
     return fired
@@ -1142,15 +1205,20 @@ async def api_notify(request: NotifyRequest) -> dict[str, Any]:
     summary = agent_notify.summary_of(request.message)
     looking = PC.fresh and PC.idle < 30 and PC.activity.kind == "coding"
     silent = PC.fresh and PC.activity.dnd
+    focused = bool(SECRETARY.focus_until)
+    away = PC.fresh and not PC.present
     now = time.time()
-    quiet = looking or silent or now - _last_notice["at"] < 15
+    quiet = looking or silent or focused or away or now - _last_notice["at"] < 15
     await hub.broadcast(
         {"type": "notify", "source": source, "kind": kind, "title": name, "message": summary, "quiet": quiet, "silent": silent}
     )
+    text = agent_notify.announcement(source, kind, summary, instance.voice_language, brief=False)
+    if (away or focused) and kind == "done":
+        # Not to an empty room, not during focus: told when you're back (or at the end).
+        SECRETARY.hold(text, f"Notification from {name}: {summary or kind}", kind="agent")
     if quiet:
         return {"ok": True, "spoken": False}
     _last_notice["at"] = now
-    text = agent_notify.announcement(source, kind, summary, instance.voice_language, brief=False)
     _spawn(instance.announce(text, hub.broadcast, event=f"Notification from {name}: {summary or kind}"), report=False)
     return {"ok": True, "spoken": True}
 
@@ -1419,7 +1487,7 @@ def _music_page(ok: bool, message: str) -> str:
 @app.post("/api/context")
 async def set_context(request: ContextRequest) -> dict[str, Any]:
     """The shell says what the user is doing; the clients know it only if it changes."""
-    if PC.update(request.idle, request.locked, request.app):
+    if PC.update(request.idle, request.locked, request.app, still=request.still):
         activity = PC.activity
         logger.info(
             "Activity: %s%s%s",
@@ -1583,6 +1651,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "memory": MEMORY.as_dict(),
                 "usage": USAGE.latest,
                 "agents": hub.agents.public(),
+                "secretary": SECRETARY.status(),
+                "approvals": [] if websocket.scope.get("tsukumo.remote") else APPROVALS.public(),
                 # The suspended phone missed the replies: it gets them back from here.
                 "transcript": hub.transcript.recent(),
             }

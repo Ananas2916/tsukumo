@@ -18,8 +18,15 @@ logger = logging.getLogger(__name__)
 #: How often she speaks on her own (comments on videos, news, fun facts).
 CHATTER_LEVELS = ("off", "rare", "normal", "chatty")
 
-#: Topics of the spontaneous comments, each one can be turned on or off.
-TOPICS = ("night", "breaks", "weather", "battery", "usage", "youtube", "news", "facts", "films")
+#: Topics of the spontaneous comments, each one can be turned on or off. The
+#: last five are the secretary's (secretary.py): they don't depend on how much
+#: she chats, only on these switches.
+TOPICS = (
+    "night", "breaks", "weather", "battery", "usage", "youtube", "news", "facts", "films",
+    "briefing", "recap", "agenda", "mail", "todos",
+)
+#: How you travel, for "leave in 15 minutes" (routes.py).
+TRAVEL_MODES = ("car", "bike", "foot", "transit")
 
 DEFAULTS: dict[str, Any] = {
     "chatter": "normal",
@@ -33,6 +40,9 @@ DEFAULTS: dict[str, Any] = {
     #: That engine's models, in a comma-separated row: if the first doesn't
     #: answer (the free ones are sometimes saturated) the next is tried.
     "brainModels": "",
+    #: Where you leave from for the calendar's events, and how.
+    "home": "",
+    "travel": "car",
 }
 
 _ENGINE_ID = re.compile(r"^[a-z0-9_]{0,40}$")
@@ -75,6 +85,10 @@ class Preferences:
             self.data["city"] = changes["city"].strip()[:80]
         if isinstance(changes.get("brain"), str) and _ENGINE_ID.match(changes["brain"].strip()):
             self.data["brain"] = changes["brain"].strip()
+        if isinstance(changes.get("home"), str):
+            self.data["home"] = " ".join(changes["home"].split())[:160]
+        if changes.get("travel") in TRAVEL_MODES:
+            self.data["travel"] = changes["travel"]
         if isinstance(changes.get("brainModels"), str):
             names = [name.strip() for name in changes["brainModels"].split(",") if name.strip()]
             self.data["brainModels"] = ", ".join(names)[:400]

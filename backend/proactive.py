@@ -27,6 +27,9 @@ Never when it's a bother: nothing in full screen, in a meeting or in a game,
 nothing if you're not at the PC, nothing while she's already speaking, and
 at least 8 minutes pass between one comment and the next. In the panel you
 choose how much she chats (off, a little, normal, a lot) and about what.
+By voice too: the agent appends ``[[away]]`` when you say you're leaving
+(or aren't at the PC at all) and ``[[quiet: news 2h]]`` when you ask her to
+stop a kind of remark (``run_tags``).
 """
 
 from __future__ import annotations
@@ -34,14 +37,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
+import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from .context import PCContext
 from .llm import LLMClient, create_chatter_llm, describe_error
 from .news import NewsService
-from .preferences import Preferences
+from .preferences import TOPICS, Preferences
 from .reminders import speak_duration
 from .system import Battery, battery
 from .usage import when_words, window_words
@@ -69,6 +74,12 @@ NIGHT_YAWN_EVERY = 12 * 60
 #: Breaks: the first after two hours straight, then every hour.
 BREAK_AFTER_MINUTES = 120
 BREAK_REPEAT_MINUTES = 60
+#: "Take a break" only to someone surely there: cursor or window moved this recently (s).
+BREAK_STILL = 10 * 60
+#: Silenced by voice: "all" is every topic; without a duration, until this hour of the morning.
+QUIET_ALL = "all"
+QUIET_UNTIL_HOUR = 6
+QUIET_MAX = 24 * 60 * 60
 BATTERY_LEVELS = (20, 10, 5)
 #: Thresholds of the agents' limits (percentage used), and below what it has reset.
 USAGE_LEVELS = (80, 95)
@@ -186,6 +197,57 @@ GESTURES = {
 }
 
 
+#: Told to the brain at every turn (while she chats at all), so it can act on "I'm not at the PC".
+ATTENTION_DIRECTIVE = (
+    "Besides answering, Tsukumo speaks on her own (breaks, late night, weather, news, facts, films, YouTube, "
+    "battery, agent usage, the morning briefing, the evening recap, calendar notices, mail, the to-do list). If "
+    "the user says they are leaving the PC or aren't at it, also when answering one of those remarks, append "
+    "[[away]]. If they ask to stop a kind of remark, append [[quiet: TOPIC]] with TOPIC one of breaks, night, "
+    "weather, news, facts, films, youtube, battery, usage, briefing, recap, agenda, mail, todos or all, optionally "
+    "with a duration like [[quiet: news 2h]] (without one it lasts until tomorrow morning), and [[quiet: off]] when "
+    "they want them back. Writing the tag IS doing it. Never read or mention these tags."
+)
+
+_ATTENTION_TAG = re.compile(r"^\[\[\s*(away|quiet)\b\s*:?\s*(.*?)\s*\]\]$", re.IGNORECASE | re.DOTALL)
+_DURATION = re.compile(r"(\d+(?:[.,]\d+)?)\s*(hours?|hrs?|h|ore|minutes?|minuti|mins?|m)\b", re.IGNORECASE)
+
+
+def attention_tag(tag: str) -> tuple[str, str, float | None] | None:
+    """The brain's attention tags: ``[[away]]`` -> ``("away", "", None)``,
+    ``[[quiet: news 2h]]`` -> ``("quiet", "news", 7200)``, ``[[quiet: off]]`` ->
+    ``("quiet", "off", None)``. An unknown topic gives ``("quiet", "", None)``
+    (taken, then ignored); ``None`` if it's another kind of tag.
+    """
+    match = _ATTENTION_TAG.match(tag.strip())
+    if match is None:
+        return None
+    if match.group(1).lower() == "away":
+        return ("away", "", None)
+    rest = match.group(2).lower()
+    duration = None
+    found = _DURATION.search(rest)
+    if found:
+        hours = found.group(2).lower().startswith(("h", "ore"))
+        duration = min(QUIET_MAX, float(found.group(1).replace(",", ".")) * (3600 if hours else 60))
+        rest = rest[: found.start()] + rest[found.end() :]
+    words = rest.replace(",", " ").split()
+    topic = words[0].strip(".;") if words else QUIET_ALL
+    if topic in ("off", "on", "none", "resume"):
+        return ("quiet", "off", None)
+    if topic != QUIET_ALL and topic not in TOPICS:
+        return ("quiet", "", None)
+    return ("quiet", topic, duration or None)
+
+
+def next_morning(ts: float, hour: int = QUIET_UNTIL_HOUR) -> float:
+    """The next ``hour`` o'clock after ``ts`` (today's if it's still night)."""
+    moment = datetime.fromtimestamp(ts)
+    morning = moment.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if morning <= moment:
+        morning += timedelta(days=1)
+    return morning.timestamp()
+
+
 def italian_percent(p: int) -> tuple[str, str]:
     """("l'80", "all'80") / ("il 90", "al 90"): the Italian article follows the number's sound."""
     vowel = str(p).startswith("8") or p in (1, 11)
@@ -255,6 +317,8 @@ class Proactive:
         self.next_break_minutes = BREAK_AFTER_MINUTES
         self.next_chatter_at: float | None = None
         self.fact_topics: list[str] = []
+        #: Topics silenced by voice (``[[quiet: ...]]``): until when, as a timestamp.
+        self.quiet_until: dict[str, float] = {}
         #: The chatter brain, and the choice it was born from (see _chatter_brain).
         self._brain: LLMClient | None = None
         self._brain_key: tuple[Any, ...] | None = None
@@ -309,7 +373,7 @@ class Proactive:
             return None
 
         # At night now and then she yawns, even without saying anything.
-        if prefs.topic("night") and self._is_night(now) and ts - self.last.get("yawn", 0) >= NIGHT_YAWN_EVERY:
+        if self._on("night", ts) and self._is_night(now) and ts - self.last.get("yawn", 0) >= NIGHT_YAWN_EVERY:
             self.last["yawn"] = ts
             await self.broadcast({"type": "gesture", "name": "yawn"})
 
@@ -340,7 +404,8 @@ class Proactive:
         # The higher thresholds are noted too: at 9% you don't say "20%" after "10%".
         self.battery_warned.update(value for value in BATTERY_LEVELS if value >= level)
         critical = level == BATTERY_LEVELS[-1]
-        if not critical and (not self.context.present or ts - self.last_any < MIN_GAP / 4):
+        # Almost flat is said even to someone who asked for quiet: it's about to switch off.
+        if not critical and (not self.context.present or ts - self.last_any < MIN_GAP / 4 or not self._on("battery", ts)):
             return None
         await self._say(companion, f"battery_{level}", event=f"Battery at {reading.percent}%", p=reading.percent)
         self.last_any = ts
@@ -353,9 +418,9 @@ class Proactive:
         notice. But it waits for you to be at the PC and not in a meeting, and
         every threshold is said once per window.
         """
-        if not self.preferences.topic("usage") or self.usage is None:
-            return None
         ts = now.timestamp()
+        if not self._on("usage", ts) or self.usage is None:
+            return None
         context = self.context
         if not context.present or context.activity.dnd or ts - self.last_any < MIN_GAP / 4:
             return None
@@ -400,9 +465,9 @@ class Proactive:
         return now.hour < NIGHT_UNTIL_HOUR
 
     async def _night(self, companion: "Companion", now: datetime) -> str | None:
-        if not self.preferences.topic("night") or not self._is_night(now):
+        if not self._on("night", now.timestamp()) or not self._is_night(now):
             return None
-        if self.context.idle > 120 and not self.context.activity.watching:
+        if self.context.absent_seconds() > 120 and not self.context.activity.watching:
             return None
         if now.timestamp() - self.last.get("night", 0) < NIGHT_REPEAT:
             return None
@@ -425,7 +490,11 @@ class Proactive:
         if minutes < BREAK_AFTER_MINUTES:
             self.next_break_minutes = BREAK_AFTER_MINUTES
             return None
-        if not self.preferences.topic("breaks") or self._is_night(now) or minutes < self.next_break_minutes:
+        if not self._on("breaks", now.timestamp()) or self._is_night(now) or minutes < self.next_break_minutes:
+            return None
+        # Windows may say "someone's here" all night (phantom input): the reminder waits
+        # for the cursor or a window to move, it isn't said to an empty room.
+        if self.context.still >= BREAK_STILL:
             return None
         self.next_break_minutes = minutes + BREAK_REPEAT_MINUTES
         lang = self._lang(companion)
@@ -434,7 +503,7 @@ class Proactive:
         return f"break:{round(minutes)}"
 
     async def _weather(self, companion: "Companion", now: datetime) -> str | None:
-        if not self.preferences.topic("weather") or self.weather is None:
+        if not self._on("weather", now.timestamp()) or self.weather is None:
             return None
         lang = self._lang(companion)
         weather = await self.weather.get(self.preferences.city, lang)
@@ -465,7 +534,7 @@ class Proactive:
 
     async def _youtube(self, companion: "Companion", now: datetime) -> str | None:
         activity = self.context.activity
-        if not self.preferences.topic("youtube") or activity.kind != "youtube" or not activity.detail:
+        if not self._on("youtube", now.timestamp()) or activity.kind != "youtube" or not activity.detail:
             return None
         title = activity.detail
         if title in self.youtube_seen or self.context.activity_seconds(now.timestamp()) < YOUTUBE_WATCHED:
@@ -487,7 +556,7 @@ class Proactive:
 
     async def _chatter(self, companion: "Companion", now: datetime) -> str | None:
         prefs = self.preferences
-        topics = [topic for topic in ("news", "facts", "films") if prefs.topic(topic)]
+        topics = [topic for topic in ("news", "facts", "films") if self._on(topic, now.timestamp())]
         if not topics or not self._brain_ready(companion):
             return None
         ts = now.timestamp()
@@ -538,6 +607,41 @@ class Proactive:
                 )
                 return f"films:{kind}"
         return None
+
+    # ------------------------------------------------------------------ attention
+    def _on(self, topic: str, ts: float) -> bool:
+        """The topic is on in the panel and not silenced by voice right now."""
+        if not self.preferences.topic(topic):
+            return False
+        return ts >= max(self.quiet_until.get(topic, 0.0), self.quiet_until.get(QUIET_ALL, 0.0))
+
+    def directive(self) -> str:
+        """What the brain must know to act on "I'm not at the PC" and "stop the news".
+
+        Even with the chatter off: the secretary's notices still come.
+        """
+        return ATTENTION_DIRECTIVE
+
+    def run_tags(self, tags: list[str], now: float | None = None) -> list[str]:
+        """Runs the brain's ``[[away]]`` and ``[[quiet: ...]]`` tags; returns the other tags."""
+        others: list[str] = []
+        ts = time.time() if now is None else now
+        for tag in tags:
+            parsed = attention_tag(tag)
+            if parsed is None:
+                others.append(tag)
+                continue
+            kind, topic, duration = parsed
+            if kind == "away":
+                self.context.mark_away(ts)
+                logger.info("The user is away (they said so): quiet until they're back")
+            elif topic == "off":
+                self.quiet_until.clear()
+                logger.info("Spontaneous remarks allowed again")
+            elif topic:
+                self.quiet_until[topic] = ts + duration if duration else next_morning(ts)
+                logger.info("Quiet about %s until %s", topic, datetime.fromtimestamp(self.quiet_until[topic]).strftime("%a %H:%M"))
+        return others
 
     # ------------------------------------------------------------------ voice
     def _lang(self, companion: "Companion") -> str:
@@ -616,5 +720,7 @@ class Proactive:
             "weather": self.last_condition,
             "brain": self.preferences.brain,
             "brainError": error if self.preferences.brain else None,
+            "quiet": {topic: until for topic, until in self.quiet_until.items() if until > time.time()},
+            "away": self.context.away_since is not None,
         }
 

@@ -169,9 +169,19 @@ def classify(app: dict[str, Any] | None) -> Activity:
 
 @dataclass
 class PCContext:
-    """The last context received from the shell, plus some bookkeeping over time."""
+    """The last context received from the shell, plus some bookkeeping over time.
+
+    Two signs of presence. ``idle`` is Windows' own (seconds since the last
+    input), but phantom input fakes it: a controller, a driver or a game that
+    keeps "touching" the PC pins it at zero all night. ``still`` is the
+    shell's heartbeat: seconds since the cursor moved or another window came
+    to the front, which phantom input doesn't do. Long stillness means nobody
+    is there, whatever Windows says.
+    """
 
     idle: float = 0.0
+    #: Seconds since the cursor moved or the window in front changed.
+    still: float = 0.0
     locked: bool = False
     activity: Activity = field(default_factory=Activity)
     #: When the last update arrived (``time.time()``), 0 = never.
@@ -180,6 +190,8 @@ class PCContext:
     session_start: float | None = None
     #: Since when the same activity has been in the foreground (same video, same program).
     activity_since: float = 0.0
+    #: The user said they were leaving (the agent's ``[[away]]``): away until a sign of life.
+    away_since: float | None = None
 
     #: A break at least this long closes the work session.
     BREAK_SECONDS = 10 * 60
@@ -187,21 +199,43 @@ class PCContext:
     AWAY_SECONDS = 5 * 60
     #: Without updates for this long the shell is closed: the context doesn't count.
     STALE_SECONDS = 30
+    #: Typing without touching the mouse is normal; a cursor and a window still
+    #: for this long, with "input" all the time, is phantom input (beyond it,
+    #: the stillness counts as absence).
+    STILL_GRACE = 15 * 60
+    #: Watching something nobody touches anything, but even a film ends.
+    WATCHING_STILL = 3 * 60 * 60
+    #: After "I'm leaving" the last click on the way out isn't a return.
+    AWAY_GRACE = 60
 
-    def update(self, idle: float, locked: bool, app: dict[str, Any] | None, now: float | None = None) -> bool:
-        """Records an update; true if the activity changed."""
+    def update(
+        self,
+        idle: float,
+        locked: bool,
+        app: dict[str, Any] | None,
+        now: float | None = None,
+        still: float | None = None,
+    ) -> bool:
+        """Records an update; true if the activity changed. Without ``still`` (an older shell) only ``idle`` counts."""
         now = time.time() if now is None else now
         previous = self.activity
         activity = Activity("locked", "") if locked else classify(app)
+        # A heartbeat that stopped for longer than a break: the PC slept or the
+        # shell was closed, and nobody works through a suspended PC.
+        if self.updated_at and now - self.updated_at > self.BREAK_SECONDS:
+            self.session_start = None
         self.idle = max(0.0, float(idle or 0))
+        self.still = self.idle if still is None else max(0.0, float(still))
         self.locked = bool(locked)
         self.updated_at = now
+        if self.away_since is not None and now - self.still >= self.away_since + self.AWAY_GRACE:
+            self.away_since = None
 
         present = self.present_at(activity)
         if present:
             if self.session_start is None:
                 self.session_start = now
-        elif self.idle >= self.BREAK_SECONDS or locked:
+        elif self.absent_seconds(activity) >= self.BREAK_SECONDS or locked or self.away_since is not None:
             self.session_start = None
 
         changed = (activity.kind, activity.detail, activity.fullscreen) != (previous.kind, previous.detail, previous.fullscreen)
@@ -210,11 +244,23 @@ class PCContext:
         self.activity = activity
         return changed
 
+    def absent_seconds(self, activity: Activity | None = None) -> float:
+        """How long the user seems to have been gone, by the input or by the stillness."""
+        activity = activity or self.activity
+        if activity.watching:
+            return max(0.0, self.still - self.WATCHING_STILL)
+        return max(self.idle, self.still - self.STILL_GRACE)
+
     def present_at(self, activity: Activity | None = None) -> bool:
         activity = activity or self.activity
-        if self.locked or activity.kind == "locked":
+        if self.locked or activity.kind == "locked" or self.away_since is not None:
             return False
-        return self.idle < self.AWAY_SECONDS or activity.watching
+        return self.absent_seconds(activity) < self.AWAY_SECONDS
+
+    def mark_away(self, now: float | None = None) -> None:
+        """The user said they're leaving (or not at the PC): a break starts now."""
+        self.away_since = time.time() if now is None else now
+        self.session_start = None
 
     @property
     def present(self) -> bool:
@@ -237,6 +283,7 @@ class PCContext:
         return {
             "type": "context",
             "idle": round(self.idle),
+            "still": round(self.still),
             "locked": self.locked,
             "present": self.present,
             "activity": self.activity.as_dict(),

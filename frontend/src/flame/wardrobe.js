@@ -8,7 +8,7 @@
  * fox mask, the sakura hair clip, a chochin lantern floating beside her...
  * pointed hats, which suit a flame perfectly, and for every mood a bow tie,
  * a crown, an angel's halo or a little devil's horns, headphones for the
- * music, cat ears, a top hat.
+ * music, cat ears, a top hat. On top of any of them, the decorations.
  */
 
 import { t } from '../i18n.js';
@@ -60,9 +60,33 @@ export const OUTFIT_LABELS = {
   party: t('Party hat'),
 };
 
+/**
+ * The decorations: small things worn on top of any outfit, each one on or
+ * off (a hair bow with the crown, whiskers and a muzzle with the cat ears).
+ */
+export const EXTRAS = ['bow', 'whiskers'];
+
+export const EXTRA_LABELS = {
+  bow: t('Hair bow'),
+  whiskers: t('Whiskers and muzzle'),
+};
+
 /** A saved choice; anything unknown (other versions, garbage) counts as "auto". */
 export function parseOutfit(raw) {
   return typeof raw === 'string' && SELECTIONS.includes(raw) ? raw : DEFAULT_OUTFIT;
+}
+
+/** The saved decorations ("bow,whiskers" or a list): only known ones, once each, in EXTRAS order. */
+export function parseExtras(raw) {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(',') : [];
+  const wanted = new Set(list.map((item) => (typeof item === 'string' ? item.trim() : '')));
+  return EXTRAS.filter((extra) => wanted.has(extra));
+}
+
+/** The decorations with `extra` switched on or off. */
+export function toggleExtra(extras, extra) {
+  const current = parseExtras(extras);
+  return parseExtras(current.includes(extra) ? current.filter((item) => item !== extra) : [...current, extra]);
 }
 
 /**

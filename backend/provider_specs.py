@@ -877,6 +877,56 @@ TTS_REGISTRY.register(
 
 TTS_REGISTRY.register(
     ProviderSpec(
+        id="voicestudio",
+        label="VoiceStudio",
+        kind="tts",
+        category="local",
+        pricing="free",
+        tagline="The voices you cloned or designed in VoiceStudio.",
+        description=(
+            "Speaks with the voice profiles of the VoiceStudio app, which has to be "
+            "open. Clone or design a voice there, then pick it here. Every voice "
+            "speaks any language."
+        ),
+        local=True,
+        has_voices=True,
+        aliases=("voice-studio", "omnivoice"),
+        fields=(
+            ProviderField(
+                env="VOICESTUDIO_VOICE",
+                label="Voice",
+                source="voices",
+                help="Press Check for your VoiceStudio voices.",
+            ),
+            ProviderField(
+                env="VOICESTUDIO_LANGUAGE",
+                label="Language",
+                default="auto",
+                placeholder="it",
+                help="auto follows the text; a code like it or en fixes it, and she answers in it.",
+            ),
+            ProviderField(
+                env="VOICESTUDIO_URL",
+                label="Address",
+                type="url",
+                default="http://127.0.0.1:3900",
+                advanced=True,
+            ),
+            ProviderField(
+                env="VOICESTUDIO_MODEL",
+                label="Model",
+                default="tts-1",
+                help="tts-1 uses the engine selected in VoiceStudio; or an engine id like omnivoice.",
+                advanced=True,
+            ),
+        ),
+        requires=("VoiceStudio open (voicestudio.sh)",),
+        docs="https://github.com/debpalash/VoiceStudio",
+    )
+)
+
+TTS_REGISTRY.register(
+    ProviderSpec(
         id="piper",
         label="Piper",
         kind="tts",

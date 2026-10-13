@@ -22,6 +22,7 @@ const {
   app,
   BrowserWindow,
   Menu,
+  clipboard,
   Notification,
   Tray,
   desktopCapturer,
@@ -739,6 +740,17 @@ function sendToPanel(channel, payload) {
 let screenLocked = false;
 /** The backend answers: from then on we also send it the context. */
 let backendUp = false;
+/**
+ * The heartbeat: when the cursor last moved or another window came to the
+ * front. Phantom input (a controller, a driver, a game) can keep Windows'
+ * idle time at zero all night; it doesn't move the cursor or switch windows.
+ */
+const STILL_CURSOR_PX = 6;
+/** Typing without the mouse is normal: beyond this stillness the phantom input doesn't count (s). */
+const STILL_GRACE_S = 15 * 60;
+let stillCursor = null;
+let stillWindow = null;
+let lastSignOfLife = Date.now();
 
 /**
  * Every few seconds: how long the PC has been idle (to the character, for
@@ -747,15 +759,36 @@ let backendUp = false;
  */
 function pollPresence() {
   const idle = powerMonitor.getSystemIdleTime();
-  sendToPet('pet:presence', { idle });
-  if (backendUp) pushContext(idle);
+  const app = desktop.foregroundWindow(ownHandles());
+  const still = stillSeconds(app);
+  // Her sleep too: with phantom input Windows' idle never grows, the stillness does.
+  sendToPet('pet:presence', { idle: Math.max(idle, still - STILL_GRACE_S) });
+  if (backendUp) pushContext(idle, still, app);
 }
 
-async function pushContext(idle) {
+/** Seconds since the last sign of life (a cursor jitter of a few pixels isn't one). */
+function stillSeconds(app) {
+  const now = Date.now();
+  const cursor = screen.getCursorScreenPoint();
+  if (!stillCursor || Math.hypot(cursor.x - stillCursor.x, cursor.y - stillCursor.y) >= STILL_CURSOR_PX) {
+    stillCursor = cursor;
+    lastSignOfLife = now;
+  }
+  // The window, not its title: Spotify or an autoplaying video retitle themselves.
+  const front = app ? `${app.handle ?? ''}|${app.exe ?? ''}` : '';
+  if (front !== stillWindow) {
+    stillWindow = front;
+    lastSignOfLife = now;
+  }
+  return Math.round((now - lastSignOfLife) / 1000);
+}
+
+async function pushContext(idle, still, app) {
   const payload = {
     idle,
+    still,
     locked: screenLocked,
-    app: desktop.foregroundWindow(ownHandles()),
+    app,
   };
   try {
     await fetch(`${BACKEND_URL}/api/context`, {
@@ -774,7 +807,11 @@ function watchPresence() {
   for (const event of ['lock-screen', 'unlock-screen', 'suspend', 'resume']) {
     powerMonitor.on(event, () => {
       if (event === 'lock-screen') screenLocked = true;
-      if (event === 'unlock-screen') screenLocked = false;
+      if (event === 'unlock-screen') {
+        screenLocked = false;
+        // Someone typed the password: that's a person.
+        lastSignOfLife = Date.now();
+      }
       sendToPet('pet:presence', { event });
     });
   }
@@ -1369,6 +1406,30 @@ async function captureScreen() {
 }
 
 handleIpc('pet:capture-screen', () => captureScreen());
+
+/**
+ * "Copiami l'IBAN": the value is read here, from the backend (local only),
+ * and goes straight to the clipboard: it never passes through a page. After
+ * a minute, if it's still there, the clipboard is emptied.
+ */
+let secretTimer = null;
+handleIpc('pet:copy-secret', async (_event, id) => {
+  if (typeof id !== 'string' || !/^[0-9a-f]{6,32}$/.test(id)) return false;
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/vault/${id}`, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) return false;
+    const { value } = await response.json();
+    if (typeof value !== 'string' || !value) return false;
+    clipboard.writeText(value);
+    clearTimeout(secretTimer);
+    secretTimer = setTimeout(() => {
+      if (clipboard.readText() === value) clipboard.clear();
+    }, 60_000);
+    return true;
+  } catch {
+    return false;
+  }
+});
 
 // Reminders and notifications: even with the character covered or in full screen.
 onIpc('pet:notify', (_event, { title, body } = {}) => {

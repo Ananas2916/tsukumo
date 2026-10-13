@@ -28,11 +28,15 @@ and her own sounds (`sfx.js`, synthesized: never ship sound or model files).
 | `backend/provider_specs.py` | Declarative registry of every engine (LLM, TTS, STT). The panel renders itself from it |
 | `backend/llm/` | `cli_agents.py` (Claude Code, Codex, Antigravity, Gemini CLI… via subprocess), `openclaw.py`, `openai_compatible.py`, `ollama.py`, `anthropic.py`, `gemini.py`, `mock.py`, `detect.py` |
 | `backend/tts/`, `backend/stt/` | Voice and speech-recognition engines |
-| `backend/reminders.py` | Natural-language timers/reminders (IT/EN), `[[remind]]` tags, persistent store |
+| `backend/reminders.py` | Natural-language timers/reminders (IT/EN), daily/weekly/monthly/yearly repeats, follow-ups, `[[remind]]` tags, persistent store |
+| `backend/secretary.py`, `secretary_api.py`, `frontend/src/panel/secretary.js` | **The secretary**: morning briefing, evening recap, "leave in 15 minutes", clashes, deadlines, nudges, mail notices, focus time, "while you were away"; its endpoints; the Agenda cards. Reads, acts only on her own things |
+| `backend/notebook.py`, `vault.py` | To-do list and notes (quick capture without a brain, `[[todo]]`/`[[note]]`/`[[done]]`); the vault (DPAPI, values only to the PC) |
+| `backend/calendar_ics.py`, `mailbox.py`, `routes.py` | Calendars from private iCal links (RRULE, EXDATE, time zones); IMAP read-only (bulk/people/waiting/parcels/bills, drafts only); travel times on OpenStreetMap |
+| `backend/approvals.py`, `scripts/tsukumo_mcp.py` | Claude Code's permission questions in her island; her body as MCP tools for the agents |
 | `backend/agents_board.py`, `backend/llm/tasks.py` | **Agents at work**: Tsukumo's own agent (observed in `ConnectionHub.broadcast`) and external Claude Code/Codex sessions from the hooks, with their task lists |
 | `backend/transcript.py` | The last chat lines with a growing `seq`, sent in `hello` so a reconnecting client catches up |
 | `backend/proactive.py` | Spontaneous comments (time, weather, battery, YouTube, news) |
-| `backend/usage.py`, `notify.py` | Agent usage limits from local files; Claude Code/Codex hooks |
+| `backend/usage.py`, `notify.py` | Agent usage limits from local files; hooks for Claude Code, Codex, Gemini CLI, Cursor, Claude Code's permissions and the MCP server (connected from the panel, with a backup) |
 | `frontend/src/flame.js`, `flame/` | **The flame (Tsukumo herself)**: moods, reactions, work props (terminal, page, lens, helper flame), effects. `motion.js` (keyed curves, springs, contact squash) and `moves.js` (every reaction as curves: anticipation, action, overshoot, hold); `wardrobe.js` (outfits, seasonal "auto") and `outfits.js` (their 3D, soft parts on springs); `palettes.js` (named colours and free `#rrggbb`) |
 | `frontend/src/main.js`, `stage.js`, `hud.js`, `island.js`, `sfx.js` | Her window: `stage.js` renders her (scene, camera, frame rate, anchors for the physics, per-pixel click-through), `main.js` wires voice, socket and Electron, the right-click menu (`hud.js` holds its state, `island.js` draws the Coucou-style island with the Spotify mini-player), `sfx.js` her synthesized sounds |
 | `frontend/dashboard.html`, `src/dashboard.js`, `src/dashboard/` | **Dashboard**: week, today, weather, agents, chat. The pet window docks into its corner (`setPetStage` in `electron/main.js`); "−" sends her back to the desktop |

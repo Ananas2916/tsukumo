@@ -62,6 +62,25 @@ class ProviderField:
         return data
 
 
+#: What a brain can do by itself, beyond answering. Tsukumo's own abilities
+#: (reminders, the list, notes, music, the calendar and mail summaries) work
+#: with every brain: these are the agent's, and differ from one to the other.
+CAPABILITIES = ("files", "shell", "web", "mcp", "memory")
+#: The agents whose abilities are known; the other command-line agents read
+#: files and run commands, the plain models only answer.
+AGENT_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "claude_code": ("files", "shell", "web", "mcp", "memory"),
+    "codex": ("files", "shell", "web", "mcp", "memory"),
+    "antigravity": ("files", "shell", "web", "mcp", "memory"),
+    "openclaw": ("files", "shell", "web", "mcp", "memory"),
+    "hermes": ("files", "shell", "web", "mcp", "memory"),
+    "gemini_cli": ("files", "shell", "web", "mcp"),
+    "cursor_agent": ("files", "shell", "web", "mcp"),
+    "command": (),
+}
+CLI_AGENT_CAPABILITIES = ("files", "shell")
+
+
 @dataclass(frozen=True)
 class ProviderSpec:
     """Describes a selectable engine, with everything needed to configure it."""
@@ -87,6 +106,18 @@ class ProviderSpec:
     has_voices: bool = False
     #: Where the key is created or the program downloaded.
     docs: str = ""
+    #: What the brain can do by itself (CAPABILITIES); empty = from AGENT_CAPABILITIES.
+    capabilities: tuple[str, ...] = ()
+
+    @property
+    def abilities(self) -> tuple[str, ...]:
+        if self.kind != "llm":
+            return ()
+        if self.capabilities:
+            return self.capabilities
+        if self.id in AGENT_CAPABILITIES:
+            return AGENT_CAPABILITIES[self.id]
+        return CLI_AGENT_CAPABILITIES if self.category == "agent" else ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +133,7 @@ class ProviderSpec:
             "requires": list(self.requires),
             "hasVoices": self.has_voices,
             "docs": self.docs,
+            "capabilities": list(self.abilities),
             "fields": [f.as_dict() for f in self.fields],
         }
 

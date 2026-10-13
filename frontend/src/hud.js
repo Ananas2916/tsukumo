@@ -79,6 +79,10 @@ export class Hud {
     this.activeTab = null;
     this.frame = null;
     this._hideTimer = null;
+    /** Permission questions from the agents (backend/approvals.py), oldest first. */
+    this.approvals = [];
+    /** Focus time: until when (epoch seconds), or null. */
+    this.focusUntil = null;
 
     this.island = new Island(islandRoot, this);
   }
@@ -110,7 +114,8 @@ export class Hud {
 
   _keepOpen() {
     clearTimeout(this._hideTimer);
-    this._hideTimer = setTimeout(() => this.hide(), AUTO_HIDE_MS);
+    // A permission question waits for its click: the island doesn't close under it.
+    this._hideTimer = setTimeout(() => (this.approvals.length ? this._keepOpen() : this.hide()), AUTO_HIDE_MS);
   }
 
   /** The top edge of the open island, in window pixels: the speech bubble sits above it. */
@@ -208,9 +213,31 @@ export class Hud {
     this.island.render();
   }
 
-  /** What she wears (`selection` as in the panel, 'auto' too) and her colour: for the island's wardrobe. */
-  setWardrobe(selection, color) {
-    this.wardrobe = { selection, color };
+  /** What she wears (`selection` as in the panel, 'auto' too), her colour and the decorations: for the island's wardrobe. */
+  setWardrobe(selection, color, extras = []) {
+    this.wardrobe = { selection, color, extras };
+    this.island.render();
+  }
+
+  /** The permission questions waiting (the `approval` messages): the island opens on the first. */
+  setApprovals(list) {
+    this.approvals = (list ?? []).filter((item) => item && item.id);
+    if (this.approvals.length && !this.visible) this.show();
+    this.island.render();
+  }
+
+  addApproval(item) {
+    if (!item?.id || this.approvals.some((other) => other.id === item.id)) return;
+    this.setApprovals([...this.approvals, item]);
+  }
+
+  removeApproval(id) {
+    this.setApprovals(this.approvals.filter((item) => item.id !== id));
+  }
+
+  /** Focus time (the secretary): the island shows until when, a click ends it. */
+  setFocus(until) {
+    this.focusUntil = until && until * 1000 > Date.now() ? until : null;
     this.island.render();
   }
 
@@ -262,6 +289,8 @@ export class Hud {
       }
       case 'power':
         return this.island.powerPill.classList.contains('confirm') ? t('Click again to quit') : t('Quit Tsukumo');
+      case 'focus':
+        return t('Focus time — click to end it');
       default:
         return NAMES[id] ?? '';
     }

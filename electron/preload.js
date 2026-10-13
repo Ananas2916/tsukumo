@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('companion', {
   },
   /** Screenshot of the screen the cursor is on: returns the PNG's path. */
   captureScreen: () => ipcRenderer.invoke('pet:capture-screen'),
+  /** A vault item to the clipboard: the main process reads it and copies it (the page never sees it). */
+  copySecret: (id) => ipcRenderer.invoke('pet:copy-secret', id),
 
   // --- Tsukumo ---------------------------------------------------------------
   /**

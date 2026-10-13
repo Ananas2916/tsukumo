@@ -14,7 +14,7 @@ PANEL = ROOT / "frontend" / "src" / "panel"
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="serve node")
 
 HARNESS = """
-import { OUTFITS, SELECTIONS, OUTFIT_LABELS, parseOutfit, resolveOutfit, seasonalOutfit } from %(wardrobe)s;
+import { OUTFITS, SELECTIONS, OUTFIT_LABELS, parseOutfit, resolveOutfit, seasonalOutfit, EXTRAS, EXTRA_LABELS, parseExtras, toggleExtra } from %(wardrobe)s;
 import { palette, paletteKey, PALETTES, PALETTE_LABELS, swatchColor, fromColor } from %(palettes)s;
 import { outfitPreview } from %(art)s;
 
@@ -43,14 +43,29 @@ out.fallback = palette('nope') === PALETTES.lilac;
 out.swatches = Object.keys(PALETTE_LABELS).map(swatchColor);
 out.grey = fromColor(0x808080);
 
-// Every preview in the panel draws, in every colour, with no holes.
+out.extras = EXTRAS;
+out.extraLabels = EXTRAS.every((e) => typeof EXTRA_LABELS[e] === 'string');
+out.parseExtras = [
+  parseExtras(['whiskers', 'bow', 'bow']),
+  parseExtras('bow, nope'),
+  parseExtras(null),
+  parseExtras(42),
+  parseExtras([7, '__proto__', 'whiskers']),
+];
+out.toggle = [toggleExtra(['bow'], 'whiskers'), toggleExtra(['bow', 'whiskers'], 'bow'), toggleExtra('garbage', 'bow')];
+
+// Every preview in the panel draws, in every colour, with no holes, with and without decorations.
 out.previews = [];
 for (const outfit of ['none', ...OUTFITS]) {
   for (const color of ['lilac', 'ember', '#3fa7ff']) {
-    const svg = outfitPreview(outfit, color, { badge: outfit === 'witch' });
-    out.previews.push({ outfit, color, ok: svg.startsWith('<svg') && !/undefined|NaN|null/.test(svg) });
+    for (const extras of [[], EXTRAS]) {
+      const svg = outfitPreview(outfit, color, { badge: outfit === 'witch', extras });
+      out.previews.push({ outfit, color, extras, ok: svg.startsWith('<svg') && !/undefined|NaN|null/.test(svg) });
+    }
   }
 }
+const plain = outfitPreview('none', 'lilac');
+out.decorated = EXTRAS.map((extra) => outfitPreview('none', 'lilac', { extras: [extra] }).length > plain.length);
 console.log(JSON.stringify(out));
 """
 
@@ -161,3 +176,23 @@ def test_every_outfit_is_made_and_drawn(result):
 
 def test_the_new_outfits_are_there(result):
     assert {"bowtie", "crown", "angel", "devil", "headphones", "catears", "tophat"} <= set(result["outfits"])
+
+
+def test_decorations_parse_to_known_ones_in_order(result):
+    assert result["extras"] == ["bow", "whiskers"]
+    assert result["extraLabels"]
+    assert result["parseExtras"] == [["bow", "whiskers"], ["bow"], [], [], ["whiskers"]]
+
+
+def test_toggling_a_decoration(result):
+    assert result["toggle"] == [["bow", "whiskers"], ["whiskers"], ["bow"]]
+
+
+def test_every_decoration_is_made_and_drawn(result):
+    """Each decoration has its 3D (outfits.js, EXTRA_BUILD) and shows in the previews."""
+    import re
+
+    build = _block((FLAME / "outfits.js").read_text(encoding="utf-8"), "const EXTRA_BUILD = {")
+    made = set(re.findall(r"^  (\w+)\(", build, re.M))
+    assert set(result["extras"]) <= made, set(result["extras"]) - made
+    assert all(result["decorated"])

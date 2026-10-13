@@ -2,7 +2,7 @@
 
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 import pytest
@@ -12,7 +12,8 @@ from backend.context import PCContext
 from backend.news import Headline, NewsService, parse_feed
 from backend.pipeline import Companion
 from backend.preferences import Preferences
-from backend.proactive import MIN_GAP, Proactive, spoken_clock
+from backend.config import Settings
+from backend.proactive import ATTENTION_DIRECTIVE, MIN_GAP, Proactive, attention_tag, next_morning, spoken_clock
 from backend.system import Battery
 from backend.weather import Weather, WeatherService, condition_of
 
@@ -275,3 +276,94 @@ def test_preferences_endpoint(client, monkeypatch):
     changed = client.post("/api/preferences", json={"chatter": "rare", "topics": {"youtube": False}}).json()
     assert changed["chatter"] == "rare" and changed["topics"]["youtube"] is False
     assert time.time() > 0
+
+
+def test_no_break_reminder_to_an_empty_room(client, rig):
+    """Phantom input keeps the session open: the reminder waits for the cursor or a window to move."""
+    now = at(16)
+    rig.context.session_start = now.timestamp() - 125 * 60
+    rig.next_break_minutes = 120
+    rig.context.update(0, False, window("x - VS Code", "Code.exe"), still=11 * 60)
+    assert client.portal.call(rig.tick, now) is None
+    rig.context.update(0, False, window("x - VS Code", "Code.exe"), still=3)
+    assert client.portal.call(rig.tick, now) == "break:125"
+
+
+@pytest.mark.parametrize(
+    ("tag", "parsed"),
+    [
+        ("[[away]]", ("away", "", None)),
+        ("[[ Away ]]", ("away", "", None)),
+        ("[[quiet: breaks]]", ("quiet", "breaks", None)),
+        ("[[quiet: news 2h]]", ("quiet", "news", 7200)),
+        ("[[quiet: all 30m]]", ("quiet", "all", 1800)),
+        ("[[quiet: weather 1.5 hours]]", ("quiet", "weather", 5400)),
+        ("[[quiet: films 45 minutes]]", ("quiet", "films", 2700)),
+        ("[[quiet: news 99h]]", ("quiet", "news", 86400)),
+        ("[[quiet]]", ("quiet", "all", None)),
+        ("[[quiet: off]]", ("quiet", "off", None)),
+        ("[[quiet: gossip]]", ("quiet", "", None)),
+        ("[[awayy]]", None),
+        ('[[remind {"at": "2026-01-01T09:00", "text": "x"}]]', None),
+        ("[[remember: likes tea]]", None),
+        ("[[music: pause]]", None),
+    ],
+)
+def test_attention_tags(tag, parsed):
+    assert attention_tag(tag) == parsed
+
+
+def test_next_morning():
+    assert datetime.fromtimestamp(next_morning(at(2).timestamp())) == at(6)
+    assert datetime.fromtimestamp(next_morning(at(15).timestamp())) == at(6) + timedelta(days=1)
+
+
+def test_quiet_by_voice_silences_a_topic_until_tomorrow(client, rig):
+    now = at(16)
+    rig.context.session_start = now.timestamp() - 125 * 60
+    rig.next_break_minutes = 120
+    left = rig.run_tags(["[[quiet: breaks]]", "[[remember: x]]"], now=now.timestamp())
+    assert left == ["[[remember: x]]"]
+    assert client.portal.call(rig.tick, now) is None
+    rig.run_tags(["[[quiet: off]]"], now=now.timestamp())
+    assert client.portal.call(rig.tick, now) == "break:125"
+
+
+def test_quiet_all_keeps_only_an_almost_flat_battery(client, rig):
+    rig.run_tags(["[[quiet: all 2h]]"], now=at(1).timestamp())
+    assert client.portal.call(rig.tick, at(1, 12)) is None
+    rig.readings["value"] = Battery(percent=18, plugged=False)
+    assert client.portal.call(rig.tick, at(1, 20)) is None
+    rig.readings["value"] = Battery(percent=4, plugged=False)
+    assert client.portal.call(rig.tick, at(1, 21)) == "battery:4"
+    assert client.portal.call(rig.tick, at(3, 30)) == "night:coding"  # two hours later
+
+
+def test_away_by_voice_makes_her_quiet(client, rig):
+    rig.run_tags(["[[away]]"])
+    assert client.portal.call(rig.tick, at(1, 12)) is None
+    assert rig.status()["away"] is True
+
+
+def test_the_agent_hears_about_remarks_and_its_tags_are_run(client, rig):
+    """The brain gets the directive; [[away]] in its reply reaches the remarks and isn't spoken."""
+
+    class Agent(Scripted):
+        stateful = True
+
+    sent = []
+
+    async def emit(message):
+        sent.append(message)
+
+    companion = Companion(Settings.from_env())
+    companion.proactive = rig
+    companion.llm = Agent(["Va bene, a dopo! ", "[[away]]"])
+    client.portal.call(companion.announce, "Fai una pausa!", emit, "The user has been at the PC for 125 minutes")
+    reply = client.portal.call(companion.chat, "non sono al pc", emit)
+    assert reply == "Va bene, a dopo!"
+    assert rig.context.away_since is not None
+    system = " ".join(m.content for m in companion.llm.messages if m.role == "system")
+    assert ATTENTION_DIRECTIVE in system
+    # An agent doesn't get the history: it's told what she said on her own.
+    assert "Fai una pausa!" in companion.llm.messages[-1].content

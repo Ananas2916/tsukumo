@@ -95,3 +95,66 @@ def test_context_endpoint_broadcasts_only_changes(client, monkeypatch):
 def test_battery_reading_never_raises():
     reading = battery()
     assert reading is None or 0 <= reading.percent <= 100
+
+
+def test_phantom_input_does_not_keep_her_company():
+    """Windows says "someone's here" all night (idle 0): the cursor and the window say otherwise."""
+    pc = PCContext()
+    files = app("Documenti", "explorer.exe")
+    pc.update(0, False, files, now=0, still=0)
+    assert pc.present_at() and pc.session_start == 0
+    pc.update(0, False, files, now=10 * 60, still=10 * 60)  # typing without the mouse: still there
+    assert pc.present_at()
+    pc.update(0, False, files, now=21 * 60, still=21 * 60)
+    assert not pc.present_at()
+    pc.update(0, False, files, now=26 * 60, still=26 * 60)
+    assert pc.session_start is None
+    pc.update(0, False, files, now=27 * 60, still=0)  # the mouse moves: back, a new session
+    assert pc.present_at() and pc.session_start == 27 * 60
+
+
+def test_a_stopped_heartbeat_is_a_break():
+    """No updates for longer than a break: the PC slept or the shell was closed."""
+    pc = PCContext()
+    coding = app("x - VS Code", "Code.exe")
+    pc.update(1, False, coding, now=1000, still=1)
+    pc.update(1, False, coding, now=1005, still=1)
+    assert pc.session_start == 1000
+    pc.update(1, False, coding, now=1005 + 3 * 3600, still=1)
+    assert pc.session_start == 1005 + 3 * 3600
+
+
+def test_watching_counts_as_presence_but_not_forever():
+    pc = PCContext()
+    video = app("Documentario - YouTube - Google Chrome", "chrome.exe")
+    pc.update(5000, False, video, now=10, still=2 * 3600)
+    assert pc.present_at()
+    pc.update(9000, False, video, now=20, still=4 * 3600)
+    assert not pc.present_at()
+
+
+def test_saying_you_are_away_holds_until_a_sign_of_life():
+    pc = PCContext()
+    coding = app("x - VS Code", "Code.exe")
+    pc.update(0, False, coding, now=100, still=5)
+    pc.mark_away(now=100)
+    assert not pc.present_at() and pc.session_start is None
+    pc.update(0, False, coding, now=130, still=0)  # the last click on the way out
+    assert not pc.present_at()
+    pc.update(0, False, coding, now=600, still=470)  # phantom input, nothing moved since then
+    assert not pc.present_at() and pc.session_start is None
+    pc.update(0, False, coding, now=900, still=0)  # back at the mouse
+    assert pc.present_at() and pc.session_start == 900
+
+
+def test_context_endpoint_takes_the_heartbeat(client, monkeypatch):
+    async def record(message):
+        pass
+
+    monkeypatch.setattr(server, "PC", PCContext())
+    monkeypatch.setattr(server.hub, "broadcast", record)
+    body = {"idle": 0, "still": 1800, "locked": False, "app": {**app("Documenti", "explorer.exe"), "handle": 42}}
+    client.post("/api/context", json=body)
+    state = client.get("/api/context").json()
+    assert state["still"] == 1800 and state["present"] is False
+    assert client.post("/api/context", json={**body, "still": -1}).status_code == 422

@@ -119,11 +119,33 @@ export class WorkView {
       el(
         'p',
         { class: 'card-sub' },
-        t("When Claude Code or Codex, used on your own, finish a job (or wait for you), she calls you. If you're already looking at the editor, a bubble is enough."),
+        t("When Claude Code, Codex, Gemini CLI or Cursor, used on your own, finish a job (or wait for you), she calls you. If you're already looking at the editor, a bubble is enough; if you're away, she tells you when you're back."),
       ),
       this.notifyList,
     );
-    this.root.append(usageCard, notifyCard);
+    this.approvalList = el('div', { class: 'integration-list' });
+    const approvalCard = this._card(
+      'hand',
+      t('Permissions in her island'),
+      el(
+        'p',
+        { class: 'card-sub' },
+        t("When Claude Code asks permission to run a command or edit a file, the question also appears in her island: Allow, Always or Deny, like Coucou's notch. If you don't answer, Claude Code asks in its own window as always. The phone can never approve."),
+      ),
+      this.approvalList,
+    );
+    this.mcpList = el('div', { class: 'integration-list' });
+    const mcpCard = this._card(
+      'clip',
+      t("Tsukumo's tools for your agents (MCP)"),
+      el(
+        'p',
+        { class: 'card-sub' },
+        t('Your agents get her body as tools: speak through her, show you a card, add a reminder, a to-do or a note, read your agenda, know if you are at the PC. Email, maps and the rest stay with the agent and its own connectors.'),
+      ),
+      this.mcpList,
+    );
+    this.root.append(usageCard, notifyCard, approvalCard, mcpCard);
   }
 
   _card(iconName, title, ...children) {
@@ -236,41 +258,43 @@ export class WorkView {
 
   _renderIntegrations(status) {
     this.integrations = status;
-    this.notifyList.replaceChildren(
-      ...['claude', 'codex'].map((tool) => {
-        const item = status?.[tool];
-        if (!item) return null;
-        const state = item.outdated
-          ? t('Connected, without the agents dashboard')
-          : item.installed
-            ? t('Connected|integration')
-            : item.conflict
-              ? t('Already has its own notification')
-              : item.available
-                ? t('Not connected')
-                : t('Not installed');
-        return el(
-          'div',
-          { class: 'integration' },
-          el('span', { class: 'integration-text' }, el('strong', {}, item.label), el('small', { title: item.file }, state)),
-          // Connected before the dashboard: "Update" adds the missing hooks.
-          item.outdated
-            ? el('button', { class: 'btn primary', type: 'button', onClick: () => this._change(tool, 'install') }, el('span', {}, t('Update')))
-            : null,
-          el(
-            'button',
-            {
-              class: `btn${item.installed ? '' : ' primary'}`,
-              type: 'button',
-              disabled: !item.available || item.conflict,
-              onClick: () => this._change(tool, item.installed ? 'uninstall' : 'install'),
-            },
-            el('span', {}, item.installed ? t('Disconnect') : t('Connect')),
-          ),
-        );
-      }),
-    );
+    this.notifyList.replaceChildren(...['claude', 'codex', 'gemini', 'cursor'].map((tool) => this._integrationRow(tool, status?.[tool])));
+    this.approvalList.replaceChildren(this._integrationRow('claude_approvals', status?.claude_approvals));
+    this.mcpList.replaceChildren(...['mcp_claude', 'mcp_codex', 'mcp_gemini', 'mcp_cursor'].map((tool) => this._integrationRow(tool, status?.[tool])));
     if (this.usage) this._setUsage(this.usage);
+  }
+
+  /** One agent's row: what's connected, and the button to connect or disconnect it. */
+  _integrationRow(tool, item) {
+    if (!item) return null;
+    const state = item.outdated
+      ? t('Connected, without the agents dashboard')
+      : item.installed
+        ? t('Connected|integration')
+        : item.conflict
+          ? t('Already has its own notification')
+          : item.available
+            ? t('Not connected')
+            : t('Not installed');
+    return el(
+      'div',
+      { class: 'integration' },
+      el('span', { class: 'integration-text' }, el('strong', {}, tx(item.label)), el('small', { title: item.file }, state)),
+      // Connected before the dashboard: "Update" adds the missing hooks.
+      item.outdated
+        ? el('button', { class: 'btn primary', type: 'button', onClick: () => this._change(tool, 'install') }, el('span', {}, t('Update')))
+        : null,
+      el(
+        'button',
+        {
+          class: `btn${item.installed ? '' : ' primary'}`,
+          type: 'button',
+          disabled: !item.available || item.conflict,
+          onClick: () => this._change(tool, item.installed ? 'uninstall' : 'install'),
+        },
+        el('span', {}, item.installed ? t('Disconnect') : t('Connect')),
+      ),
+    );
   }
 
   async _change(tool, action) {
@@ -278,7 +302,14 @@ export class WorkView {
       const data = await request('/api/integrations', 'POST', { tool, action });
       if (!data.ok) throw new Error(tx(data.error) ?? t('failed'));
       this._renderIntegrations(data.status);
-      const done = tool === 'claude_usage' ? t("The limits arrive with Claude Code's next reply.") : t("Connected: I'll call you when it's done.");
+      const done =
+        tool === 'claude_usage'
+          ? t("The limits arrive with Claude Code's next reply.")
+          : tool === 'claude_approvals'
+            ? t("Connected: Claude Code's permission questions will also appear in her island.")
+            : tool.startsWith('mcp_')
+              ? t("Connected: restart the agent to see Tsukumo's tools.")
+              : t("Connected: I'll call you when it's done.");
       this.app.toast(action === 'install' ? done : t('Disconnected.'));
       this._loadUsage();
     } catch (error) {

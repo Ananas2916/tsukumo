@@ -70,6 +70,16 @@ const STATE_TEXT = {
   off: t('Off'),
 };
 
+/** What a brain can do by itself (backend/providers.py, CAPABILITIES). */
+const ABILITY_WORDS = {
+  files: t('Reads and edits files'),
+  shell: t('Runs commands'),
+  web: t('Searches the web'),
+  mcp: t('Uses connectors (MCP)'),
+  memory: t('Remembers by itself'),
+};
+const ABILITY_ICONS = { files: 'book', shell: 'bolt', web: 'globe', mcp: 'clip', memory: 'cube' };
+
 export class EnginesView {
   constructor(app, root) {
     this.app = app;
@@ -258,13 +268,28 @@ export class EnginesView {
 
   _badges(spec) {
     const price = PRICING[spec.pricing] ?? PRICING.free;
-    return el(
+    const badges = el(
       'div',
       { class: 'badges' },
       this._foundBadge(spec),
       spec.recommended ? el('span', { class: 'badge accent' }, icon('star', 12), t('Recommended')) : null,
       el('span', { class: `badge ${price.tone}` }, icon(price.icon, 12), price.label),
       el('span', { class: 'badge' }, icon(spec.local ? 'laptop' : 'cloud', 12), spec.local ? t('On your PC') : t('Goes through the internet')),
+    );
+    if (spec.kind !== 'llm') return badges;
+    // What this brain can do by itself: Tsukumo's own abilities work with any of them.
+    const abilities = spec.capabilities ?? [];
+    return el(
+      'div',
+      {},
+      badges,
+      el(
+        'div',
+        { class: 'capabilities', title: t("Reminders, the list, notes, music, the calendar and mail summaries are Tsukumo's: they work with every brain.") },
+        ...(abilities.length
+          ? abilities.map((name) => el('span', { class: 'badge info' }, icon(ABILITY_ICONS[name] ?? 'check', 12), ABILITY_WORDS[name] ?? name))
+          : [el('span', { class: 'badge' }, icon('chat', 12), t('Answers only'))]),
+      ),
     );
   }
 

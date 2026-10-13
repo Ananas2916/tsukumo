@@ -1,13 +1,18 @@
-"""Claude Code and Codex hook: tells Tsukumo when they've finished.
+"""The agents' hook: tells Tsukumo when they've finished (or wait for you).
 
-The two programs launch it (see backend/notify.py, which connects it from
-the panel):
+The programs launch it (see backend/notify.py, which connects it from the
+panel):
 
 * Claude Code: ``tsukumo_notify.py claude``, with the hook's JSON on
   standard input: ``Stop`` and ``Notification`` for the notifications,
   ``UserPromptSubmit`` (it started) and ``PostToolUse`` of the task-list
   tools for the agents' dashboard;
-* Codex: ``tsukumo_notify.py codex '<json>'``, with the JSON as the last argument.
+* Claude Code's permissions: ``tsukumo_notify.py claude-permission``
+  (``PermissionRequest``): it waits for the click in her island and prints
+  the decision; no click, no output, and Claude Code asks as always;
+* Codex: ``tsukumo_notify.py codex '<json>'``, with the JSON as the last argument;
+* Gemini CLI: ``tsukumo_notify.py gemini`` (``AfterAgent``, ``Notification``, ``BeforeAgent``);
+* Cursor: ``tsukumo_notify.py cursor`` (``afterAgentResponse``, ``beforeSubmitPrompt``).
 
 It must be instant and never fail: if Tsukumo is off (no
 ``state/running.json``) it exits right away, without even trying to connect.
@@ -118,6 +123,63 @@ def from_claude(payload: dict) -> dict | None:
     return None
 
 
+def from_gemini(payload: dict) -> dict | None:
+    event = payload.get("hook_event_name")
+    where = _where(payload, "gemini")
+    if event == "AfterAgent":
+        if payload.get("stop_hook_active"):
+            return None
+        return {**where, "kind": "done", "message": str(payload.get("prompt_response") or "")}
+    if event == "Notification":
+        return {**where, "kind": "waiting", "message": str(payload.get("message") or "")}
+    if event == "BeforeAgent":
+        return {**where, "kind": "working", "message": str(payload.get("prompt") or "")[:300]}
+    return None
+
+
+def from_cursor(payload: dict) -> dict | None:
+    event = payload.get("hook_event_name")
+    roots = payload.get("workspace_roots") or []
+    cwd = roots[0] if isinstance(roots, list) and roots else ""
+    where = {"source": "cursor", "session": str(payload.get("conversation_id") or "")[:120], "project": Path(str(cwd)).name if cwd else ""}
+    if event == "afterAgentResponse":
+        return {**where, "kind": "done", "message": str(payload.get("text") or "")}
+    if event == "beforeSubmitPrompt":
+        return {**where, "kind": "working", "message": str(payload.get("prompt") or "")[:300]}
+    return None
+
+
+def permission(url: str, payload: dict) -> dict | None:
+    """Asks the island and waits; the hook's output for Claude Code, or None (no answer)."""
+    cwd = str(payload.get("cwd") or "")
+    body = {
+        "source": "claude",
+        "label": "Claude Code",
+        "tool": str(payload.get("tool_name") or ""),
+        "input": payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {},
+        "project": Path(cwd).name if cwd else "",
+    }
+    request = urllib.request.Request(
+        f"{url}/api/approvals",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=125) as response:
+        decision = json.loads(response.read().decode("utf-8") or "{}").get("decision")
+    if decision in ("allow", "always"):
+        result: dict = {"behavior": "allow"}
+        if decision == "always":
+            # "Always": the rule Claude Code itself proposed for this request.
+            suggestions = [item for item in payload.get("permission_suggestions") or [] if isinstance(item, dict) and item.get("type") == "addRules"]
+            if suggestions:
+                result["updatedPermissions"] = suggestions[:1]
+        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": result}}
+    if decision == "deny":
+        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "Denied from Tsukumo."}}}
+    return None
+
+
 def from_codex(payload: dict) -> dict | None:
     if payload.get("type") != "agent-turn-complete":
         return None
@@ -135,6 +197,9 @@ def send(url: str, body: dict) -> None:
 
 
 def main(argv: list[str]) -> int:
+    if len(argv) >= 2 and argv[1] in ("gemini", "cursor"):
+        # They parse the output as JSON: an empty object is "nothing to say", even when Tsukumo is off.
+        sys.stdout.write("{}")
     if os.environ.get("TSUKUMO_INTERNAL") == "1" or len(argv) < 2:
         return 0
     url = backend_url()
@@ -142,10 +207,19 @@ def main(argv: list[str]) -> int:
         return 0
     tool = argv[1]
     try:
+        if tool == "claude-permission":
+            answer = permission(url, json.loads(sys.stdin.read() or "{}"))
+            if answer:
+                sys.stdout.write(json.dumps(answer))
+            return 0
         if tool == "claude":
             body = from_claude(json.loads(sys.stdin.read() or "{}"))
         elif tool == "codex":
             body = from_codex(json.loads(argv[-1] if len(argv) > 2 else "{}"))
+        elif tool == "gemini":
+            body = from_gemini(json.loads(sys.stdin.read() or "{}"))
+        elif tool == "cursor":
+            body = from_cursor(json.loads(sys.stdin.read() or "{}"))
         else:
             return 0
         if body:

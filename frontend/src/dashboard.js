@@ -12,8 +12,8 @@
 
 import { apiUrl, wsUrl } from './config.js';
 import { el, iconButton, readSetting } from './dom.js';
-import { resolveOutfit } from './flame/wardrobe.js';
-import { AgentsWidget, TodayWidget, WeatherWidget, WeekWidget } from './dashboard/widgets.js';
+import { parseExtras, resolveOutfit } from './flame/wardrobe.js';
+import { AgentsWidget, TodayWidget, TodoWidget, WeatherWidget, WeekWidget } from './dashboard/widgets.js';
 import { clock } from './dashboard/time.js';
 import { LOCALE, t, translateDom, tx, watchLanguage } from './i18n.js';
 import { icon } from './icons.js';
@@ -70,11 +70,13 @@ const widgets = {
   today: new TodayWidget(),
   weather: new WeatherWidget(),
   agents: new AgentsWidget(),
+  todo: new TodoWidget(app),
 };
-$('dash-grid').append(widgets.week.node, widgets.today.node, widgets.weather.node, widgets.agents.node);
+$('dash-grid').append(widgets.week.node, widgets.today.node, widgets.todo.node, widgets.weather.node, widgets.agents.node);
 
 const DEPENDS = {
   reminders: ['week', 'today'],
+  secretary: ['week', 'today', 'todo'],
   agents: ['agents'],
   usage: ['agents'],
   weather: ['weather'],
@@ -116,11 +118,13 @@ function renderHeader() {
 /** Top left there's her: the flame in her colour, with what she's wearing. */
 function renderLogo() {
   // SVG made in wardrobe-art.js with already validated colours: no text from outside.
-  document.querySelector('.dash-logo').innerHTML = outfitPreview(resolveOutfit(readSetting('dc:flame-outfit', 'auto')), readSetting('dc:flame-color', 'lilac'));
+  document.querySelector('.dash-logo').innerHTML = outfitPreview(resolveOutfit(readSetting('dc:flame-outfit', 'auto')), readSetting('dc:flame-color', 'lilac'), {
+    extras: parseExtras(readSetting('dc:flame-extras', [])),
+  });
 }
 renderLogo();
 window.addEventListener('storage', (event) => {
-  if (event.key === 'dc:flame-outfit' || event.key === 'dc:flame-color') renderLogo();
+  if (event.key === 'dc:flame-outfit' || event.key === 'dc:flame-color' || event.key === 'dc:flame-extras') renderLogo();
 });
 
 const actions = $('dash-actions');
@@ -216,10 +220,11 @@ socket.on('hello', (message) => {
   store.agents = message.agents ?? [];
   store.usage = message.usage ?? null;
   store.persona = message.memory?.persona?.name ?? '';
+  store.secretary = message.secretary ?? null;
   app.emit('hello', message);
   app.emit('settings', app.settings);
   app.emit('engines', app.engines);
-  changed('reminders', 'agents', 'usage');
+  changed('reminders', 'agents', 'usage', 'secretary');
   renderBubble();
 });
 socket.on('engines', (message) => {
@@ -238,6 +243,10 @@ socket.on('state', (message) => {
 socket.on('reminders', (message) => {
   store.reminders = message.reminders ?? [];
   changed('reminders');
+});
+socket.on('secretary', (message) => {
+  store.secretary = message;
+  changed('secretary');
 });
 socket.on('agents', (message) => {
   store.agents = message.agents ?? [];

@@ -13,9 +13,11 @@ import { apiUrl } from '../config.js';
 import { el, iconButton } from '../dom.js';
 import { LOCALE, t, tx } from '../i18n.js';
 import { icon } from '../icons.js';
+import { SecretaryCards } from './secretary.js';
 
 const KIND_ICON = { timer: 'clock', reminder: 'bell', alarm: 'bell', task: 'robot' };
 const QUICK_TIMERS = [1, 5, 10, 25];
+const REPEAT_WORDS = { daily: t('every day'), weekly: t('every week'), monthly: t('every month'), yearly: t('every year') };
 const EXAMPLES = [t('remind me to drink in 20 minutes'), t('tomorrow at 9 remind me to call Anna'), t('every day at 1pm remind me to have lunch')];
 
 /** "4:32", "1:05:09": the timers' countdown. */
@@ -79,7 +81,7 @@ export class AgendaView {
       el(
         'section',
         { class: 'card' },
-        el('header', { class: 'card-head' }, el('span', { class: 'card-icon' }, icon('bell', 16)), el('h3', {}, 'Nuovo')),
+        el('header', { class: 'card-head' }, el('span', { class: 'card-icon' }, icon('bell', 16)), el('h3', {}, t('New'))),
         el('div', { class: 'agenda-add' }, this.input, this.addButton),
         this.error,
         quick,
@@ -99,10 +101,13 @@ export class AgendaView {
       if (message.event === 'fired') this.app.toast(`⏰ ${message.reminder?.label ?? 'Promemoria'}`);
     });
     this._set([]);
+    // The secretary: focus, to-dos, notes, calendars, mail, connections, vault.
+    this.secretary = new SecretaryCards(app, root);
   }
 
   shown() {
     this.load();
+    this.secretary.shown();
     this.input.focus();
   }
 
@@ -196,7 +201,7 @@ export class AgendaView {
               'small',
               {},
               el('span', { class: 'agenda-when' }, whenText(item)),
-              item.repeat === 'daily' ? el('span', { class: 'badge info' }, icon('repeat', 11), t('every day')) : null,
+              REPEAT_WORDS[item.repeat] ? el('span', { class: 'badge info' }, icon('repeat', 11), REPEAT_WORDS[item.repeat]) : null,
             ),
           ),
           iconButton('trash', { title: t('Remove'), onClick: () => this.remove(item) }),

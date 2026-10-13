@@ -2291,3 +2291,127 @@ textarea.field-input {
   flex: 1;
 }
 
+
+/* ---------------------------------------------------------------- the secretary (panel/secretary.js) */
+.badge.danger {
+  background: rgba(255, 107, 129, 0.14);
+  color: #ffa3b1;
+}
+
+.secretary-focus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.secretary-focus .card-sub:empty {
+  display: none;
+}
+
+.secretary-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.secretary-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secretary-date {
+  flex: 1;
+  min-width: 0;
+}
+
+.secretary-check {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.secretary-todo.done strong {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.secretary-todo.important strong {
+  color: #f7d88d;
+}
+
+.icon-btn.on {
+  color: #f5c451;
+}
+
+.secretary-done summary {
+  margin: 6px 2px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.secretary-note span:first-child {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.secretary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.secretary-mail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agenda-item.unread strong {
+  color: var(--text);
+}
+
+.agenda-item.unread::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* The brains' abilities (Engines): small chips under the name. */
+.capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* An agent's card in the chat (MCP "show"). */
+.card-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-msg p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.card-msg a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.card-msg small {
+  color: var(--muted);
+}

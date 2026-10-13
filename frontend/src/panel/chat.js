@@ -312,6 +312,8 @@ export class ChatView {
     });
 
     socket.on('notice', (message) => this.add({ role: 'notice', text: tx(message.message) }));
+    // A card from an agent (the MCP "show" tool): a result, a summary, a link.
+    socket.on('card', (message) => this.add({ role: 'card', title: message.title ?? '', text: message.text ?? '', url: message.url ?? null, source: message.source ?? '' }));
     socket.on('error', (message) =>
       this.add({
         role: 'error',
@@ -416,6 +418,21 @@ export class ChatView {
       node.append(icon('info', 14), el('span', {}, message.text));
       return;
     }
+    if (message.role === 'card') {
+      // Text from an agent: only text nodes, and the link only if it's http(s).
+      const safe = /^https?:\/\//i.test(message.url ?? '') ? message.url : null;
+      node.append(
+        el(
+          'div',
+          { class: 'bubble card-msg' },
+          el('strong', {}, message.title),
+          message.text ? el('p', {}, message.text) : null,
+          safe ? el('a', { href: safe, target: '_blank', rel: 'noreferrer' }, t('Open'), icon('external', 12)) : null,
+          message.source ? el('small', {}, message.source) : null,
+        ),
+      );
+      return;
+    }
     const bubble = el('div', { class: 'bubble' });
     // How long it made you wait: on mouse hover, for whoever wants to know.
     if (message.timings) bubble.title = describeTimings(message.timings);
@@ -472,7 +489,7 @@ export class ChatView {
       HISTORY_KEY,
       this.history
         .filter((message) => message.role !== 'assistant' || message.text)
-        .map(({ role, text, note, hint, source, action, steps }) => ({ role, text, note, hint, source, action, steps })),
+        .map(({ role, text, note, hint, source, action, steps, title, url }) => ({ role, text, note, hint, source, action, steps, title, url })),
     );
   }
 }
