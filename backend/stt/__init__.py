@@ -59,6 +59,14 @@ def create_stt_engine(settings: Settings) -> STTEngine | None:
                 language=str(options.get("WHISPER_LANGUAGE") or "auto"),
             )
 
+        if engine == "parakeet":
+            from .parakeet_engine import ParakeetSTT
+
+            return ParakeetSTT(
+                model=str(options.get("PARAKEET_MODEL") or "v3"),
+                quantization=str(options.get("PARAKEET_QUANTIZATION") or "int8"),
+            )
+
         if engine == "whisper_cpp":
             from .http_engines import WhisperCppSTT
 

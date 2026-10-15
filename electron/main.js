@@ -44,6 +44,7 @@ const desktop = require('./desktop');
 const i18n = require('./i18n');
 const { PetPhysics } = require('./pet-physics');
 const spotify = require('./spotify');
+const updates = require('./updates');
 
 const { t } = i18n;
 
@@ -293,6 +294,10 @@ const settings = {
   dashboardMaximized: false,
   /** The interface's language as the pages last said it ('en', 'it'), for the tray and the waiting card. */
   language: null,
+  /** Ask GitHub now and then whether a new version is out. */
+  updateChecks: true,
+  /** The last version already announced with a notification: each one is announced once. */
+  updateNotified: null,
 };
 
 /** No saved settings: it's the first time, the panel opens with the introduction. */
@@ -1349,8 +1354,15 @@ function createTray() {
 
 function updateTrayMenu() {
   if (!tray) return;
+  const update = availableUpdate
+    ? [
+        { label: t('Download Tsukumo {version}', { version: availableUpdate.version }), click: () => openOutside(availableUpdate.url) },
+        { type: 'separator' },
+      ]
+    : [];
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      ...update,
       { label: 'Dashboard', click: () => showDashboard() },
       { label: t('Open the chat'), click: () => showPanel({ tab: 'chat' }) },
       { label: t('Character'), click: () => showPanel({ tab: 'character' }) },
@@ -1370,6 +1382,12 @@ function updateTrayMenu() {
         checked: settings.pinned,
         click: togglePinned,
       },
+      {
+        label: t('Tell me about new versions'),
+        type: 'checkbox',
+        checked: settings.updateChecks,
+        click: toggleUpdateChecks,
+      },
       { type: 'separator' },
       { label: t('Restart'), click: () => restartBackend() },
       { label: t('Open the log'), click: () => shell.openPath(LOG_FILE) },
@@ -1377,6 +1395,60 @@ function updateTrayMenu() {
       { label: t('Quit'), click: () => app.quit() },
     ]),
   );
+}
+
+// ---------------------------------------------------------------------------
+// New versions: GitHub is asked shortly after startup and then twice a day.
+// Only the installed app asks (a run from the repo is already the newest),
+// unless DC_CHECK_UPDATES=1 forces it for a test.
+// ---------------------------------------------------------------------------
+const UPDATE_FIRST_MS = 60_000;
+const UPDATE_EVERY_MS = 12 * 3600 * 1000;
+let availableUpdate = null;
+let updateTimer = null;
+
+const updateChecksWanted = () =>
+  process.env.DC_CHECK_UPDATES === '1' || (PACKAGED && process.env.DC_CHECK_UPDATES !== '0');
+
+async function checkUpdates() {
+  if (!settings.updateChecks) return;
+  let found;
+  try {
+    found = await updates.checkForUpdate(app.getVersion());
+  } catch (error) {
+    console.warn(`[electron] update check: ${error.message}`);
+    return;
+  }
+  if (!found) return;
+  availableUpdate = found;
+  updateTrayMenu();
+  console.log(`[electron] Tsukumo ${found.version} is out`);
+  if (settings.updateNotified === found.version || !Notification.isSupported()) return;
+  settings.updateNotified = found.version;
+  saveSettings();
+  const notice = new Notification({
+    title: t('Tsukumo {version} is out', { version: found.version }),
+    body: t('Click to see what is new and download it.'),
+    icon: path.join(__dirname, 'icon.ico'),
+  });
+  notice.on('click', () => openOutside(found.url));
+  notice.show();
+}
+
+function scheduleUpdateChecks() {
+  clearInterval(updateTimer);
+  updateTimer = null;
+  if (!settings.updateChecks || !updateChecksWanted()) return;
+  setTimeout(checkUpdates, UPDATE_FIRST_MS);
+  updateTimer = setInterval(checkUpdates, UPDATE_EVERY_MS);
+}
+
+function toggleUpdateChecks() {
+  settings.updateChecks = !settings.updateChecks;
+  if (!settings.updateChecks) availableUpdate = null;
+  saveSettings();
+  updateTrayMenu();
+  scheduleUpdateChecks();
 }
 
 // ---------------------------------------------------------------------------
@@ -1635,6 +1707,7 @@ if (!app.requestSingleInstanceLock()) {
     // card instead of making you think the double click didn't work.
     createPetWindow();
     createTray();
+    scheduleUpdateChecks();
     setInterval(tick, TICK_MS);
     setInterval(keepOnTop, ON_TOP_MS);
     setInterval(pollMusic, MUSIC_POLL_MS);

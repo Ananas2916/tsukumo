@@ -37,7 +37,7 @@ once: *More info → Run anyway*.
 | **What** | Desktop companion: a spirit flame + voice + ears, driven by any LLM or agent |
 | **Brains** | 28 engines: 18 agents (Claude Code, Codex, Gemini CLI, OpenClaw, Antigravity, Cursor CLI, GitHub Copilot CLI, OpenCode, Qwen Code, Amp, Goose, Crush, Factory Droid, Continue CLI, Kiro CLI, Cline, Hermes Agent, any CLI command), 2 local servers (LM Studio / any OpenAI-compatible server, Ollama), 8 cloud brains (Claude, Gemini, Groq, OpenRouter, DeepSeek, Mistral, Together, GPT4Free) |
 | **Voices** | 11 engines: Kokoro (default, local), Kokoro-FastAPI, Piper, Chatterbox (voice cloning), Windows voices, ElevenLabs, OpenAI, Azure, Google Cloud, Cartesia, Edge |
-| **Ears** | Faster-Whisper (local), whisper.cpp server, Whisper API, browser speech recognition |
+| **Ears** | Faster-Whisper or NVIDIA Parakeet (local), whisper.cpp server, Whisper API, browser speech recognition |
 | **Privacy** | Everything runs locally by default. Cloud engines are an explicit choice in the panel, never a default |
 | **Stack** | Python 3.10+ (FastAPI, ONNX Runtime) · Three.js · Electron 44 |
 | **Interfaces** | WebSocket `ws://127.0.0.1:8770/ws` · REST `http://127.0.0.1:8770/api/*` · OpenAPI docs at `/docs` |
@@ -110,6 +110,12 @@ It installs per-user, with no admin rights. It bundles an embedded Python with
 all dependencies, the backend, the UI and Kokoro (int8). Tsukumo herself is
 all geometry: nothing else to download. Settings, state and logs live in
 `%APPDATA%\Tsukumo`, so updates never touch them.
+
+When a new version is published here, Tsukumo tells you with a Windows
+notification and a "Download" item in her notification area menu. She only
+asks GitHub which release is the latest (shortly after startup, then twice a
+day); installing stays your click. Untick *Tell me about new versions* in
+that menu to stop asking.
 
 On first launch the panel opens a six-step welcome:
 
@@ -270,6 +276,13 @@ Tsukumo starts with one in your Windows display language.
 activity detection, or wake word. She can be interrupted by talking over her:
 the mic stays "guarded" while she speaks, and the backend drops transcripts
 that are her own voice echoing back.
+
+**Speech recognition on your PC.** Faster-Whisper is the default.
+`parakeet` (NVIDIA Parakeet TDT 0.6B v3 through ONNX) is the fast one: about
+half a second for a sentence on the CPU, punctuation included, in 25 European
+languages, and it leaves the GPU to the voice. It detects the language by
+itself, so a lone "yes" can come out wrong; whole sentences are fine. The
+model (~670 MB) downloads the first time you use it.
 
 ---
 
@@ -656,7 +669,7 @@ file). Everything below can also be set from the panel.
 | `DC_TTS_ENGINE` | `kokoro` | see [Voices](#voices-and-listening) |
 | `DC_VOICE` | system language | Kokoro voice (other engines have their own field) |
 | `DC_REPLY_LANGUAGE` | `auto` | `auto` (the voice's language), `same` (yours), or a language |
-| `DC_STT_ENGINE` | `none` | `faster_whisper`, `whisper_cpp`, `openai_whisper_api`, `browser` |
+| `DC_STT_ENGINE` | `none` | `faster_whisper`, `parakeet`, `whisper_cpp`, `openai_whisper_api`, `browser` |
 | `DC_DETECT_ENGINES` | `1` | look for installed brains at startup |
 | `DC_PROACTIVE` | `1` | spontaneous comments (tune them in the panel) |
 | `DC_LLM_FALLBACK` | `0` | answer with canned phrases instead of showing a brain error |

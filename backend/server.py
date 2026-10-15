@@ -660,6 +660,10 @@ async def _check_stt(spec: ProviderSpec, draft: Settings) -> dict[str, Any]:
         if importlib.util.find_spec("faster_whisper") is None:
             return {"ok": False, "detail": "Pacchetto mancante: pip install faster-whisper"}
         return {"ok": True, "detail": f"Ready (model {options.get('WHISPER_MODEL') or 'base'})"}
+    if spec.id == "parakeet":
+        if importlib.util.find_spec("onnx_asr") is None:
+            return {"ok": False, "detail": 'Missing package: pip install "onnx-asr[cpu,hub]"'}
+        return {"ok": True, "detail": f"Ready (Parakeet {options.get('PARAKEET_MODEL') or 'v3'})"}
     if spec.id == "whisper_cpp":
         url = str(options.get("WHISPER_CPP_URL") or "")
         try:

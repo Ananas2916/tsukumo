@@ -27,6 +27,10 @@ onnxruntime>=1.18
 # For NVIDIA GPUs replace the line above with:
 #   onnxruntime-gpu>=1.18
 
+# NVIDIA Parakeet speech recognition on the same ONNX Runtime: a few MB of
+# code, the model (~670 MB) downloads only when you choose it.
+onnx-asr[hub]>=0.12
+
 
 # --- Optional providers ---------------------------------------------------
 # None of the following is needed for the companion to work: the default is

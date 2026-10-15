@@ -8,6 +8,8 @@
 const IT = {
   "Always in front of windows": "Sempre davanti alle finestre",
   "Character": "Personaggio",
+  "Click to see what is new and download it.": "Clicca per vedere le novità e scaricarla.",
+  "Download Tsukumo {version}": "Scarica Tsukumo {version}",
   "Engines": "Motori",
   "Ghost mode": "Modalita fantasma",
   "I can't start Tsukumo": "Non riesco ad avviare Tsukumo",
@@ -23,9 +25,11 @@ const IT = {
   "Restarting…": "Riavvio…",
   "Show the commands beside her": "Mostra i comandi accanto a lei",
   "Starting the brain and the voice.": "Avvio il cervello e la voce.",
+  "Tell me about new versions": "Avvisami delle nuove versioni",
   "The backend closed by itself. The reason is below and in the log (notification area icon -> Open the log).": "Il backend si e' chiuso da solo. Il motivo e' qui sotto e nel log (icona nell'area di notifica -> Apri il log).",
   "The backend isn't answering. Check the log from the notification area icon.": "Il backend non risponde. Controlla il log dall'icona nell'area di notifica.",
   "The shortcut {key} is already in use.": "La scorciatoia {key} è già in uso.",
+  "Tsukumo {version} is out": "È uscito Tsukumo {version}",
   "{name} - panel": "{name} - pannello",
   "{name} is waking up…": "{name} si sta svegliando…",
 };

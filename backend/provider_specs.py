@@ -1376,6 +1376,46 @@ STT_REGISTRY.register(
 
 STT_REGISTRY.register(
     ProviderSpec(
+        id="parakeet",
+        label="NVIDIA Parakeet",
+        kind="stt",
+        category="local",
+        pricing="free",
+        tagline="Parakeet TDT on your computer: Whisper large quality, fast on the CPU.",
+        description=(
+            "NVIDIA's Parakeet TDT 0.6B through ONNX: half a second for a sentence "
+            "on the CPU, punctuation included, and the GPU stays free for the voice. "
+            "v3 speaks 25 European languages and detects which one by itself."
+        ),
+        local=True,
+        fields=(
+            ProviderField(
+                env="PARAKEET_MODEL",
+                label="Model",
+                type="select",
+                default="v3",
+                options=(
+                    {"value": "v3", "label": "v3 — 25 languages, Italian included"},
+                    {"value": "v2", "label": "v2 — English only"},
+                ),
+            ),
+            ProviderField(
+                env="PARAKEET_QUANTIZATION",
+                label="Precision",
+                type="select",
+                default="int8",
+                options=(
+                    {"value": "int8", "label": "int8 — ~670 MB, fast"},
+                    {"value": "none", "label": "full — ~2.5 GB, a touch more precise"},
+                ),
+            ),
+        ),
+        requires=('pip install "onnx-asr[cpu,hub]"',),
+    )
+)
+
+STT_REGISTRY.register(
+    ProviderSpec(
         id="whisper_cpp",
         label="whisper.cpp",
         kind="stt",
