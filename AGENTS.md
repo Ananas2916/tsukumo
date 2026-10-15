@@ -34,6 +34,7 @@ and her own sounds (`sfx.js`, synthesized: never ship sound or model files).
 | `backend/calendar_ics.py`, `mailbox.py`, `routes.py` | Calendars from private iCal links (RRULE, EXDATE, time zones); IMAP read-only (bulk/people/waiting/parcels/bills, drafts only); travel times on OpenStreetMap |
 | `backend/approvals.py`, `scripts/tsukumo_mcp.py` | Claude Code's permission questions in her island; her body as MCP tools for the agents |
 | `backend/agents_board.py`, `backend/llm/tasks.py` | **Agents at work**: Tsukumo's own agent (observed in `ConnectionHub.broadcast`) and external Claude Code/Codex sessions from the hooks, with their task lists |
+| `backend/park.py`, `frontend/src/dashboard/park.js` | **The park**: the agents on this PC (Claude Code's registry `~/.claude/sessions/*.json`, never the `.key` files; the hooks; OpenClaw and LM Studio probed on localhost) and who messages whom (SendMessage, cross-session messages, subagents, her MCP tools) from the transcripts' tails; a canvas tile. Local clients only (`broadcast_local`, `LOCAL_ONLY`) |
 | `backend/transcript.py` | The last chat lines with a growing `seq`, sent in `hello` so a reconnecting client catches up |
 | `backend/proactive.py` | Spontaneous comments (time, weather, battery, YouTube, news) |
 | `backend/usage.py`, `notify.py` | Agent usage limits from local files; hooks for Claude Code, Codex, Gemini CLI, Cursor, Claude Code's permissions and the MCP server (connected from the panel, with a backup) |

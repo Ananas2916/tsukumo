@@ -32,6 +32,7 @@ os.environ.update(
         "DC_DETECT_ENGINES": "0",
         # No spontaneous comments: weather and news go through the network.
         "DC_PROACTIVE": "0",
+        "DC_PARK": "0",
         "DC_LOG_LEVEL": "warning",
     }
 )

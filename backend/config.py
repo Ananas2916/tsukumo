@@ -251,6 +251,9 @@ class Settings:
     # Spontaneous comments (late hour, weather, battery, YouTube, news...): how
     # much and about what is chosen in the panel; this turns them off entirely.
     proactive: bool = True
+    # The dashboard's park (park.py): it reads Claude Code's running sessions
+    # and their transcripts from ~/.claude. Off in the tests, like the detection.
+    park: bool = True
     # Agent sessions (OpenClaw, Claude Code, Codex): they survive restarts, so
     # the conversation picks up where it left off.
     state_dir: Path = ROOT / "state"
@@ -313,6 +316,7 @@ class Settings:
             status_interval=_env_float("STATUS_INTERVAL", 10.0),
             detect_engines=_env_bool("DETECT_ENGINES", True),
             proactive=_env_bool("PROACTIVE", True),
+            park=_env_bool("PARK", True),
             state_dir=_env_path("STATE_DIR", ROOT / "state"),
             viseme_gain=_env_float("VISEME_GAIN", 1.15),
             viseme_silence_threshold=_env_float("VISEME_SILENCE", 0.07),

@@ -1,6 +1,6 @@
 /**
  * The dashboard: the week (reminders and timers), today, the weather, the
- * agents at work and the chat. She sits in the
+ * agents at work, the park (every agent on this PC) and the chat. She sits in the
  * corner above the text field: it's the real companion, docked by Electron
  * onto the window (see `setPetStage` in electron/main.js). "−" closes the
  * dashboard and sends her back to the desktop.
@@ -14,6 +14,7 @@ import { apiUrl, wsUrl } from './config.js';
 import { el, iconButton, readSetting } from './dom.js';
 import { parseExtras, resolveOutfit } from './flame/wardrobe.js';
 import { AgentsWidget, TodayWidget, TodoWidget, WeatherWidget, WeekWidget } from './dashboard/widgets.js';
+import { ParkWidget } from './dashboard/park.js';
 import { clock } from './dashboard/time.js';
 import { LOCALE, t, translateDom, tx, watchLanguage } from './i18n.js';
 import { icon } from './icons.js';
@@ -30,6 +31,7 @@ const $ = (id) => document.getElementById(id);
 const store = {
   reminders: [],
   agents: [],
+  park: null,
   usage: null,
   weather: null,
   weatherError: false,
@@ -71,13 +73,15 @@ const widgets = {
   weather: new WeatherWidget(),
   agents: new AgentsWidget(),
   todo: new TodoWidget(app),
+  park: new ParkWidget(),
 };
-$('dash-grid').append(widgets.week.node, widgets.today.node, widgets.todo.node, widgets.weather.node, widgets.agents.node);
+$('dash-grid').append(widgets.week.node, widgets.today.node, widgets.todo.node, widgets.weather.node, widgets.agents.node, widgets.park.node);
 
 const DEPENDS = {
   reminders: ['week', 'today'],
   secretary: ['week', 'today', 'todo'],
   agents: ['agents'],
+  park: ['park'],
   usage: ['agents'],
   weather: ['weather'],
 };
@@ -221,10 +225,11 @@ socket.on('hello', (message) => {
   store.usage = message.usage ?? null;
   store.persona = message.memory?.persona?.name ?? '';
   store.secretary = message.secretary ?? null;
+  store.park = message.park ?? null;
   app.emit('hello', message);
   app.emit('settings', app.settings);
   app.emit('engines', app.engines);
-  changed('reminders', 'agents', 'usage', 'secretary');
+  changed('reminders', 'agents', 'usage', 'secretary', 'park');
   renderBubble();
 });
 socket.on('engines', (message) => {
@@ -252,6 +257,10 @@ socket.on('agents', (message) => {
   store.agents = message.agents ?? [];
   changed('agents');
   renderBubble();
+});
+socket.on('park', (message) => {
+  store.park = { agents: message.agents ?? [], links: message.links ?? [], lmstudio: message.lmstudio ?? null };
+  changed('park');
 });
 socket.on('usage', (message) => {
   store.usage = message;
@@ -283,4 +292,4 @@ changed('reminders', 'agents', 'weather');
 socket.connect();
 reportStage();
 
-window.tsukumoDashboard = { app, store };
+window.tsukumoDashboard = { app, store, widgets };

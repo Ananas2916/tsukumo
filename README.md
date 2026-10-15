@@ -366,6 +366,14 @@ has its own controls).
 - **Agents at work**: Tsukumo's own agent and the Claude Code and Codex sessions
   running in your terminals, with their task lists, from the same hooks that
   notify you.
+- **The park**: every agent online on this PC hanging out on a lawn. Claude
+  Code sessions (read from Claude Code's own list of running sessions), Codex,
+  OpenClaw in the pond, LM Studio's kiosk with the model it serves, and Tsukumo
+  on the fountain. Who works runs around with a laptop, who's idle dozes on the
+  bench, who waits for you jumps and waves; when one session messages another
+  it walks over and says what about. Only who, to whom and a one-line label are
+  read from the transcripts, never the messages, and none of it reaches the
+  phone. `DC_PARK=0` turns it off.
 - **Chat**: the same conversation as the panel.
 
 "−" closes it and sends her back to the desktop; *Open at startup* makes it the

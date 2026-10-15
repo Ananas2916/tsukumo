@@ -12,7 +12,7 @@ import { KIND_ICON, KIND_LABEL, collect } from './events.js';
 import { addDays, clock, dayNumber, nowSeconds, sameDay, sinceText, startOfDay, startOfWeek, weekTitle, weekdayShort, whenText } from './time.js';
 
 /** A tile: header with icon and title, any controls on the right. */
-function card(className, iconName, title, ...actions) {
+export function card(className, iconName, title, ...actions) {
   const body = el('div', { class: 'w-body' });
   const node = el(
     'section',

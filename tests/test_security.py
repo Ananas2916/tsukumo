@@ -264,6 +264,8 @@ def test_local_only_paths():
     assert local_only("GET", "/api/phone")
     assert local_only("POST", "/api/phone/serve")
     assert not local_only("POST", "/api/phone/session")
+    # The park shows the other programs' sessions and who wrote to whom: not to the phone.
+    assert local_only("GET", "/api/park")
 
 
 # The phone page's shell: the only thing that opens from afar without a token.

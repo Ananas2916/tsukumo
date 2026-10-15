@@ -80,6 +80,8 @@ const PATHS = {
   sit: '<circle cx="12" cy="5" r="2.5"/><path d="M9 21v-5h6l2 5M9 16l1-7h4l1 7"/>',
   hand: '<path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 16 0v-2a2 2 0 0 0-4 0"/>',
   dots: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  // The dashboard's park.
+  tree: '<path d="M12 22v-6"/><path d="M8 16h8a4 4 0 0 0 1.5-7.7A5.5 5.5 0 0 0 6.6 8.3 4 4 0 0 0 8 16z"/>',
   // The flame's wardrobe: a hanger.
   hanger: '<path d="M10 6.5a2 2 0 1 1 2.6 1.9c-.4.1-.6.5-.6.9V10"/><path d="M12 10 3.6 15.6c-.9.6-.5 1.9.6 1.9h15.6c1.1 0 1.5-1.3.6-1.9z"/>',
 };

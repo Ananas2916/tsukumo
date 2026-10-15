@@ -29,6 +29,7 @@ Server -> client::
     {"type": "preferences", ...}             # how much she chats and about what
     {"type": "notify", "source": "claude", "title": "Claude Code", ...}  # an external agent is done
     {"type": "usage", "agents": [...]}      # usage and limits of Claude Code, Codex, Antigravity
+    {"type": "park", "agents": [...], "links": [...], "lmstudio": {...}}  # the dashboard's park, local clients only
     {"type": "capture", "text": "..."}       # "look at the screen": take a screenshot
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
     {"type": "transcript_partial", "sentence": 3, "live": true, "text": "..."}  # to the speaker only
@@ -110,6 +111,7 @@ from .status import EngineMonitor, llm_entry
 from .transcript import Transcript
 from .agents_board import AgentBoard
 from .approvals import Approvals
+from .park import Park
 from .calendar_ics import CalendarService
 from .mailbox import MailService
 from .notebook import Notebook
@@ -206,21 +208,36 @@ class ConnectionHub:
     def __init__(self) -> None:
         self._clients: set[WebSocket] = set()
         self._text_only: set[WebSocket] = set()
+        #: Clients from afar (the phone): they don't get the park (``broadcast_local``).
+        self._remote: set[WebSocket] = set()
         self._lock = asyncio.Lock()
         self.transcript = Transcript()
         #: The agents at work (dashboard): Tsukumo's agent is followed from here.
         self.agents = AgentBoard(own_name=lambda: _brain_label())
 
-    async def add(self, websocket: WebSocket, text_only: bool = False) -> None:
+    async def add(self, websocket: WebSocket, text_only: bool = False, remote: bool = False) -> None:
         async with self._lock:
             self._clients.add(websocket)
             if text_only:
                 self._text_only.add(websocket)
+            if remote:
+                self._remote.add(websocket)
 
     async def remove(self, websocket: WebSocket) -> None:
         async with self._lock:
             self._clients.discard(websocket)
             self._text_only.discard(websocket)
+            self._remote.discard(websocket)
+
+    async def broadcast_local(self, message: dict[str, Any]) -> None:
+        """Only to the clients on this PC: what the other programs do stays here."""
+        async with self._lock:
+            targets = [client for client in self._clients if client not in self._remote]
+        for client in targets:
+            try:
+                await client.send_json(message)
+            except Exception:
+                await self.remove(client)
 
     @property
     def count(self) -> int:
@@ -244,6 +261,7 @@ class ConnectionHub:
                 for client in dead:
                     self._clients.discard(client)
                     self._text_only.discard(client)
+                    self._remote.discard(client)
         if agents_changed:
             await self.broadcast({"type": "agents", "agents": self.agents.public()})
 
@@ -255,6 +273,20 @@ def _brain_label() -> str:
     """The current brain's name ("Claude Code"), for the dashboard."""
     instance = getattr(app.state, "companion", None)
     return str(getattr(getattr(instance, "llm", None), "label", "") or "Tsukumo")
+
+
+def _brain_session() -> str | None:
+    """Her own Claude Code session, when that's her brain: the park doesn't count it twice."""
+    instance = getattr(app.state, "companion", None)
+    value = getattr(getattr(instance, "llm", None), "session_id", None)
+    return value if isinstance(value, str) else None
+
+
+#: The dashboard's park: the agents on this PC and who talks to whom (park.py).
+PARK = Park(hub.agents, brain=lambda: SETTINGS.selected("llm"), brain_session=_brain_session)
+#: How often the park looks again: registry and transcripts (local files), the services (localhost).
+PARK_INTERVAL = 3.0
+PARK_SERVICES_INTERVAL = 20.0
 
 #: Background tasks must be referenced, otherwise the garbage collector may
 #: collect them halfway through (see asyncio.create_task in the docs).
@@ -337,6 +369,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         DETECTION_DONE.set()
     usage_task = asyncio.create_task(_usage_loop(), name="usage")
+    park_task = asyncio.create_task(_park_loop(), name="park") if SETTINGS.park else None
     # The PC's name on Tailscale, for the phone (phone.py). It's a probe on the
     # PC like the engine detection, and it's turned off with it (in the tests).
     tailscale_task = asyncio.create_task(_detect_tailscale(), name="tailscale") if SETTINGS.detect_engines else None
@@ -360,7 +393,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        for task in (reminder_task, usage_task, tailscale_task):
+        for task in (reminder_task, usage_task, park_task, tailscale_task):
             if task is None:
                 continue
             task.cancel()
@@ -981,6 +1014,55 @@ async def _usage_loop() -> None:
         await asyncio.sleep(USAGE_INTERVAL)
 
 
+async def _park_loop() -> None:
+    """Looks at the park every few seconds; if something changed, the dashboards see it."""
+    last = None
+    services_at = 0.0
+    async with httpx.AsyncClient(timeout=1.5) as http:
+        while True:
+            try:
+                if time.monotonic() - services_at >= PARK_SERVICES_INTERVAL:
+                    services_at = time.monotonic()
+                    PARK.set_services(*await _park_services(http))
+                await asyncio.to_thread(PARK.scan)
+                snapshot = PARK.public()
+                key = json.dumps(snapshot, sort_keys=True, default=str)
+                if key != last:
+                    last = key
+                    await hub.broadcast_local({"type": "park", **snapshot})
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # pragma: no cover - it must never die
+                logger.exception("Park")
+            await asyncio.sleep(PARK_INTERVAL)
+
+
+async def _park_services(http: httpx.AsyncClient) -> tuple[bool, dict[str, Any] | None]:
+    """OpenClaw's gateway answers? Which model has LM Studio loaded? (localhost only)."""
+    gateway = str(SETTINGS.option("OPENCLAW_URL") or "http://127.0.0.1:18789").rstrip("/")
+    gateway = gateway.replace("ws://", "http://").replace("wss://", "https://")
+    base = str(SETTINGS.option("OPENAI_BASE_URL") or SETTINGS.openai_base_url).rstrip("/").removesuffix("/v1")
+    openclaw, lmstudio = False, None
+
+    def local(url: str) -> bool:  # a gateway elsewhere isn't "on this PC"
+        try:
+            return is_loopback(httpx.URL(url).host)
+        except (httpx.InvalidURL, ValueError, TypeError):
+            return False
+
+    if local(gateway):
+        with contextlib.suppress(httpx.HTTPError):
+            openclaw = (await http.get(f"{gateway}/health")).is_success
+    if local(base):
+        with contextlib.suppress(httpx.HTTPError, ValueError):
+            response = await http.get(f"{base}/api/v0/models")  # LM Studio's own API: it says what's loaded
+            if response.is_success:
+                models = response.json().get("data") or []
+                loaded = [item for item in models if isinstance(item, dict) and item.get("state") == "loaded" and item.get("type") != "embeddings"]
+                lmstudio = {"model": str(loaded[0].get("id") or "")[:60] if loaded else ""}
+    return openclaw, lmstudio
+
+
 async def _request_screen(text: str) -> bool:
     """Asks whoever can for a screenshot; the message will come back with the file attached."""
     targets = list(SCREEN_CLIENTS)
@@ -1237,6 +1319,12 @@ async def api_notify(request: NotifyRequest) -> dict[str, Any]:
 async def get_agents() -> dict[str, Any]:
     """The agents at work: Tsukumo's and the external sessions seen by the hooks."""
     return {"agents": hub.agents.public()}
+
+
+@app.get("/api/park")
+async def get_park() -> dict[str, Any]:
+    """The park: the agents on this PC and who talks to whom (local only)."""
+    return PARK.public()
 
 
 @app.get("/api/integrations")
@@ -1644,7 +1732,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     # The phone's page: no audio, and what it writes isn't read aloud.
     text_only = websocket.query_params.get("mode") == "text"
     await websocket.accept()
-    await hub.add(websocket, text_only=text_only)
+    await hub.add(websocket, text_only=text_only, remote=bool(websocket.scope.get("tsukumo.remote")))
     logger.info("Client connected (%d in all)", hub.count)
 
     try:
@@ -1663,6 +1751,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "agents": hub.agents.public(),
                 "secretary": SECRETARY.status(),
                 "approvals": [] if websocket.scope.get("tsukumo.remote") else APPROVALS.public(),
+                # The other programs' sessions and messages: not for afar.
+                "park": None if websocket.scope.get("tsukumo.remote") else PARK.public(),
                 # The suspended phone missed the replies: it gets them back from here.
                 "transcript": hub.transcript.recent(),
             }
