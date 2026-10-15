@@ -1,6 +1,7 @@
 /**
- * The flame's effects: rings, flashes, trail, speed lines
- * and little figures flying away (hearts, notes, stars). They live in the
+ * The flame's effects: rings, flashes, trail, speed lines, the embers of
+ * your voice flying into her and little figures flying away (hearts, notes,
+ * stars). They live in the
  * world, not on her: when the window runs (sprint, throw) `drift` pulls them
  * back, so they stay still on the desktop.
  */
@@ -49,6 +50,17 @@ export class FlameFx {
     sprite.position.copy(position);
     this.scene.add(sprite);
     this.items.push({ kind: 'trail', mesh: sprite, material: sprite.material, size, life: 0, max: 0.32 });
+  }
+
+  /**
+   * An ember of your voice: it lights up at `from` and is drawn into `to`
+   * (her bulb), slowly at first and then fast, curving a little (`swirl`).
+   */
+  ember(from, to, { size = 0.04, life = 0.5, swirl = 0 } = {}) {
+    const sprite = glowSprite(this.colors.soft, 0.001, 0);
+    sprite.position.copy(from);
+    this.scene.add(sprite);
+    this.items.push({ kind: 'ember', mesh: sprite, material: sprite.material, from: from.clone(), to: to.clone(), size, swirl, life: 0, max: life });
   }
 
   line(position, length, thickness) {
@@ -115,6 +127,14 @@ export class FlameFx {
           item.mesh.scale.setScalar(item.size * (0.1 + 0.9 * easeOutCubic(k)));
           item.material.opacity = 1 - k;
           break;
+        case 'ember': {
+          const pull = k * k * k;
+          item.mesh.position.lerpVectors(item.from, item.to, pull);
+          item.mesh.position.x += Math.sin(k * Math.PI) * item.swirl;
+          item.mesh.scale.setScalar(Math.max(0.001, item.size * (1 - pull * 0.7)));
+          item.material.opacity = Math.min(1, k / 0.2);
+          break;
+        }
         case 'trail':
           item.mesh.scale.setScalar(item.size * (1 - k * 0.6));
           item.material.opacity = 0.5 * (1 - k);

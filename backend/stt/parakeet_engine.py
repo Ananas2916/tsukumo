@@ -31,6 +31,8 @@ class ParakeetSTT(STTEngine):
     """Local transcription through the ``onnx-asr`` package."""
 
     name = "parakeet"
+    # About 0.5 s for a 4 s sentence on the CPU: it can keep up while you talk.
+    live = True
 
     def __init__(self, model: str = "v3", quantization: str = "int8") -> None:
         try:

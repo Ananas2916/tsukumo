@@ -272,10 +272,13 @@ Portuguese, `z` Chinese). Multilingual voices (ElevenLabs, OpenAI, Azure
 Multilingual) reply in the language you write in. If no voice was chosen,
 Tsukumo starts with one in your Windows display language.
 
-**Listening.** Push-to-talk (global `Ctrl+Space`), always-on with voice
-activity detection, or wake word. She can be interrupted by talking over her:
-the mic stays "guarded" while she speaks, and the backend drops transcripts
-that are her own voice echoing back.
+**Listening.** Push-to-talk (hold the right `Ctrl` anywhere on Windows, or
+toggle with the global `Ctrl+Space`), always-on with voice activity
+detection, or wake word. While you talk she takes your voice in: its
+spectrum ripples her outline and its embers fly into her, and with Parakeet
+your words appear in her bubble as you say them. She can be interrupted by
+talking over her: the mic stays "guarded" while she speaks, and the backend
+drops transcripts that are her own voice echoing back.
 
 **Speech recognition on your PC.** Faster-Whisper is the default.
 `parakeet` (NVIDIA Parakeet TDT 0.6B v3 through ONNX) is the fast one: about

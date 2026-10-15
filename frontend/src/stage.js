@@ -53,6 +53,8 @@ export class Stage {
     this._thinking = false;
     this._working = null;
     this._listening = false;
+    /** Your voice while she listens: `() => {level, bands}` (see setEar). */
+    this._ear = null;
     this._music = null;
     /** The menu is open (it makes her light up). */
     this._menu = false;
@@ -373,6 +375,15 @@ export class Stage {
     return this._sleep >= 0.99;
   }
 
+  /**
+   * Where she hears you from: a function returning `{level, bands}` (the
+   * microphone's volume and four bands, 0..1), read every frame while she
+   * listens.
+   */
+  setEar(read) {
+    this._ear = read;
+  }
+
   /** The user is talking to her (the microphone hears the voice). */
   setListening(value) {
     this._listening = Boolean(value);
@@ -603,6 +614,7 @@ export class Stage {
       thinking: this._thinking,
       working: this._working,
       listening: this._listening,
+      hearing: this._listening && this._ear ? this._ear() : null,
       sleep: this._sleep,
       look: this._flameLook(),
       music: this._music,

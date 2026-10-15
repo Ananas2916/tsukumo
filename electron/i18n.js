@@ -26,6 +26,7 @@ const IT = {
   "Show the commands beside her": "Mostra i comandi accanto a lei",
   "Starting the brain and the voice.": "Avvio il cervello e la voce.",
   "Tell me about new versions": "Avvisami delle nuove versioni",
+  "Hold right Ctrl to talk": "Tieni premuto Ctrl destro per parlare",
   "The backend closed by itself. The reason is below and in the log (notification area icon -> Open the log).": "Il backend si e' chiuso da solo. Il motivo e' qui sotto e nel log (icona nell'area di notifica -> Apri il log).",
   "The backend isn't answering. Check the log from the notification area icon.": "Il backend non risponde. Controlla il log dall'icona nell'area di notifica.",
   "The shortcut {key} is already in use.": "La scorciatoia {key} è già in uso.",

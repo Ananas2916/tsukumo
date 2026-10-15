@@ -775,6 +775,37 @@ body.island-open #stage {
   transform: rotate(45deg);
 }
 
+/* Your words while you're still talking: lighter, and an ember for a caret. */
+.bubble.live {
+  color: var(--text-2);
+  font-style: italic;
+}
+.bubble.steady {
+  animation: none;
+}
+.bubble.live::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, var(--accent) 55%, transparent 75%);
+  animation: ember-caret 0.9s ease-in-out infinite;
+}
+@keyframes ember-caret {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble.live::before {
+    animation: none;
+  }
+}
+
 /* --------------------------------------------- file dragged onto her --- */
 .drop-target #stage {
   filter: drop-shadow(0 0 10px rgba(165, 139, 255, 0.85));

@@ -281,6 +281,15 @@ export class Sfx {
     this._tone(N.B3, { at: 0.16, duration: 0.42, gain: 0.22, type: 'triangle', harmonic: 0.06 });
   }
 
+  /**
+   * She starts listening (right Ctrl held): a soft breath in and one glass
+   * note. Quiet and short, since the microphone is already open.
+   */
+  ear() {
+    this._noise({ duration: 0.12, gain: 0.05, frequency: 2600, sweepTo: 900, q: 0.9, attack: 0.5 });
+    this._tone(N.E6, { duration: 0.14, gain: 0.06, harmonic: 0.15 });
+  }
+
   /** Your message leaves: a quick breath up. */
   send() {
     this._noise({ duration: 0.14, gain: 0.08, frequency: 1200, sweepTo: 4200, q: 0.9, attack: 0.2 });
@@ -339,6 +348,7 @@ export class Sfx {
 /** The effects `play()` accepts. */
 export const SOUNDS = new Set([
   'pop',
+  'ear',
   'greet',
   'open',
   'close',

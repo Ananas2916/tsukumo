@@ -112,9 +112,19 @@ export class UI {
   }
 
   // ---------------------------------------------------------------- bubble
-  showBubble(text, durationMs = 4200) {
+  /**
+   * @param {string} text
+   * @param {number} [durationMs]
+   * @param {{live?: boolean}} [options] live: your words while you're still
+   *   talking (they change in place, with an ember for a caret)
+   */
+  showBubble(text, durationMs = 4200, { live = false } = {}) {
     const { bubble } = this.elements;
+    // Live updates replace the text without the pop: it would bounce at every word.
+    const wasLive = bubble.classList.contains('live') && !bubble.classList.contains('hidden');
     bubble.textContent = text;
+    bubble.classList.toggle('live', live);
+    bubble.classList.toggle('steady', live && wasLive);
     bubble.classList.remove('hidden');
     clearTimeout(this._bubbleTimer);
     this._bubbleTimer = setTimeout(() => bubble.classList.add('hidden'), durationMs);

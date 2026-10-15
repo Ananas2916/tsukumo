@@ -43,6 +43,7 @@ function load() {
       GetWindowTextLengthW: user32.func('int __stdcall GetWindowTextLengthW(intptr_t hwnd)'),
       GetWindowTextW: user32.func('int __stdcall GetWindowTextW(intptr_t hwnd, _Out_ void *buffer, int max)'),
       GetForegroundWindow: user32.func('intptr_t __stdcall GetForegroundWindow()'),
+      GetAsyncKeyState: user32.func('int16 __stdcall GetAsyncKeyState(int key)'),
       GetWindowThreadProcessId: user32.func('uint32 __stdcall GetWindowThreadProcessId(intptr_t hwnd, _Out_ uint32 *pid)'),
       OpenProcess: kernel32.func('intptr_t __stdcall OpenProcess(uint32 access, bool inherit, uint32 pid)'),
       QueryFullProcessImageNameW: kernel32.func(
@@ -237,10 +238,30 @@ function keepOnTop(hwnd) {
   return api.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 }
 
+/** Whether a key (a Windows virtual-key code) is down right now, wherever the focus is. */
+function keyDown(vk) {
+  if (!load()) return false;
+  return (api.GetAsyncKeyState(vk) & 0x8000) !== 0;
+}
+
+/**
+ * Whether any key other than `except` is down: it tells "right Ctrl held to
+ * talk" from "right Ctrl + C". Only the state is read, never which key it
+ * was, and nothing is kept.
+ */
+function otherKeyDown(except) {
+  if (!load()) return false;
+  // From 0x08: 0x01-0x06 are the mouse buttons, and clicking while you talk is fine.
+  for (let vk = 0x08; vk <= 0xfe; vk += 1) {
+    if (!except.includes(vk) && (api.GetAsyncKeyState(vk) & 0x8000) !== 0) return true;
+  }
+  return false;
+}
+
 /** Native handle of a BrowserWindow, as a number comparable with listWindows'. */
 function handleOf(browserWindow) {
   const buffer = browserWindow.getNativeWindowHandle();
   return buffer.length >= 8 ? Number(buffer.readBigUInt64LE(0)) : buffer.readUInt32LE(0);
 }
 
-module.exports = { available: () => Boolean(load()), listWindows, windowRect, keepOnTop, handleOf, foregroundWindow };
+module.exports = { available: () => Boolean(load()), listWindows, windowRect, keepOnTop, handleOf, foregroundWindow, keyDown, otherKeyDown };

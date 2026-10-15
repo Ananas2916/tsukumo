@@ -8,6 +8,7 @@ Client -> server::
     {"type": "say",    "text": "hi!", "voice": "..."}   # voice only
     {"type": "settings", "voice": "af_heart", "replyLanguage": "auto", "muted": false}
     {"type": "voice",  "audio": "<pcm16 base64>"}          # from the microphone
+    {"type": "voice_partial", "audio": "...", "sentence": 3}  # the sentence so far (live words)
     {"type": "cancel"}                       # interrupts the current turn
     {"type": "reset"}                        # empties the conversation memory
     {"type": "ping"}
@@ -30,6 +31,7 @@ Server -> client::
     {"type": "usage", "agents": [...]}      # usage and limits of Claude Code, Codex, Antigravity
     {"type": "capture", "text": "..."}       # "look at the screen": take a screenshot
     {"type": "state",  "value": "thinking" | "speaking" | "idle"}
+    {"type": "transcript_partial", "sentence": 3, "live": true, "text": "..."}  # to the speaker only
     {"type": "user",   "text": "...", "seq": 1759...}
     {"type": "token",  "text": "..."}        # the brain's streaming
     {"type": "speech", "audio": "<wav base64>", "visemes": [...], ...}
@@ -167,6 +169,10 @@ _reminders_wake: asyncio.Event | None = None
 
 #: Clients that can take a screenshot (the character's window in Electron).
 SCREEN_CLIENTS: set[WebSocket] = set()
+#: Clients with a live transcription in progress: one at a time each.
+PARTIAL_CLIENTS: set[WebSocket] = set()
+#: Live words only for the first seconds: beyond them each pass costs too much.
+MAX_PARTIAL_BYTES = 16 * 16000 * 2
 
 #: Brains found on the PC (see ``llm/detect.py``): ``{id: {"found", "detail"}}``.
 #: It fills in the background shortly after startup; before that it's empty.
@@ -1699,6 +1705,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 # transcribe it and, unless asked otherwise, treat it exactly as if it had
                 # been written in the chat.
                 _spawn(_handle_voice(instance, message))
+            elif kind == "voice_partial":
+                # The sentence so far, while you're still talking: the words go
+                # back to this client only, and nothing starts.
+                _spawn(_handle_partial(instance, websocket, message), report=False)
             elif kind == "settings":
                 # Voice, language and mute chosen in the panel: we send them back to
                 # everyone, so every window stays aligned. The voice is checked in a
@@ -1728,6 +1738,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.warning("WebSocket closed with an error: %s", describe_error(exc))
     finally:
         SCREEN_CLIENTS.discard(websocket)
+        PARTIAL_CLIENTS.discard(websocket)
         await hub.remove(websocket)
         logger.info("Client disconnected (%d left)", hub.count)
 
@@ -1781,6 +1792,40 @@ async def _handle_voice(instance: Companion, message: dict[str, Any]) -> None:
         return
     if message.get("autoSend", True):
         await instance.chat(transcript.text, hub.broadcast)
+
+
+async def _handle_partial(instance: Companion, websocket: WebSocket, message: dict[str, Any]) -> None:
+    """Transcribes the sentence so far and sends the words back to whoever is talking.
+
+    It's only a preview: it isn't broadcast, it doesn't go in the transcript and
+    it never starts a turn (the real transcription comes with ``voice``). Slow
+    engines answer ``live: false`` so the client stops asking for this sentence;
+    a client asking again before the previous answer gets nothing.
+    """
+    sentence = message.get("sentence")
+    reply: dict[str, Any] = {"type": "transcript_partial", "sentence": sentence}
+    stt = instance.stt
+    if stt is None or not stt.live:
+        await websocket.send_json({**reply, "live": False})
+        return
+    if websocket in PARTIAL_CLIENTS:
+        return
+    try:
+        pcm16 = base64.b64decode(message.get("audio") or "", validate=True)
+    except (ValueError, binascii.Error):
+        return
+    if not pcm16 or len(pcm16) > MAX_PARTIAL_BYTES:
+        await websocket.send_json({**reply, "live": True, "text": ""})
+        return
+
+    PARTIAL_CLIENTS.add(websocket)
+    try:
+        transcript = await instance.transcribe(pcm16)
+        await websocket.send_json({**reply, "live": True, "text": transcript.text if transcript else ""})
+    except Exception as exc:  # the real transcription will say what's wrong
+        logger.debug("Live transcription failed: %s", describe_error(exc))
+    finally:
+        PARTIAL_CLIENTS.discard(websocket)
 
 
 def _spawn(coro, report: bool = True) -> None:

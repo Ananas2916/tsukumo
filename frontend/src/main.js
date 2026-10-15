@@ -124,11 +124,17 @@ const voice = new VoiceController({
       stage.setListening(event.speaking);
     }
     if (event.type === 'level') state.micLevel = event.level;
+    // Your words so far, while you're still talking (live transcription).
+    if (event.type === 'partial') ui.showBubble(event.text, 4000, { live: true });
     if (event.type === 'enabled') reportVoice();
     // You called her by name: "here I am".
     if (event.type === 'summoned') stage.play('greet');
   },
 });
+
+// She hears you: the volume and four bands of your voice, read by the stage every frame.
+const earBands = new Float32Array(4);
+stage.setEar(() => ({ level: state.micLevel, bands: voice.mic.bands(earBands) }));
 
 /** Rhythm of Spotify's music, listening to the system audio (Electron only). */
 const music = new MusicListener();
@@ -746,6 +752,8 @@ function syncVoiceState() {
 
 // What she understood: always showing it, even when she misunderstood,
 // avoids guessing the reason for a strange reply.
+socket.on('transcript_partial', (message) => voice.handlePartial(message));
+
 socket.on('transcript', (message) => {
   const text = (message.text ?? '').trim();
   if (!text) return;
@@ -885,9 +893,10 @@ function setDancing(value) {
 // ---------------------------------------------------------------------------
 // Voice: push-to-talk
 // ---------------------------------------------------------------------------
-// Two ways, because Electron can't tell when a global shortcut is
-// *released*: from outside the key works as a toggle, inside the window we
-// use real keydown/keyup and press-and-hold really works.
+// Three ways. Holding the right Ctrl anywhere (Electron watches the key, see
+// watchHoldToTalk in electron/main.js) is press-and-hold. The global
+// shortcut is a toggle, because Electron can't tell when it's *released*.
+// Inside the window we use real keydown/keyup.
 let pushHeld = false;
 
 function reportVoice() {
@@ -917,8 +926,40 @@ async function pushToggle() {
   reportVoice();
 }
 
+/** Right Ctrl held down: talk while it's down. */
+async function pushHold(action) {
+  if (action === 'cancel') {
+    // It was a shortcut (right Ctrl + C...): nothing was meant for her.
+    if (!pushHeld) return;
+    pushHeld = false;
+    voice.pushCancel();
+    reportVoice();
+    return;
+  }
+  if (action === 'end') {
+    if (!pushHeld) return;
+    pushHeld = false;
+    voice.pushEnd();
+    reportVoice();
+    return;
+  }
+  if (!state.voiceAvailable || voice.mode !== 'push' || pushHeld) return;
+  pushHeld = true;
+  await player.resume();
+  if (!voice.listening && !(await voice.enable({ mode: 'push' }))) {
+    pushHeld = false;
+    return;
+  }
+  // Released while the microphone was still opening: nothing to record.
+  if (!pushHeld) return;
+  sfx.play('ear');
+  voice.pushStart();
+  reportVoice();
+}
+
 window.companion?.onPushToTalk?.(({ action }) => {
   if (action === 'toggle') pushToggle();
+  else pushHold(action);
 });
 
 // Press and hold, when the window has focus. `repeat` must be ignored or the

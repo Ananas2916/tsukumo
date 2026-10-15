@@ -91,6 +91,18 @@ const BARGE_FRAMES = 6;
 /** In guarded listening the preroll is longer: the sentence has already started. */
 const GUARD_PREROLL = 0.8;
 
+/**
+ * The four bands the flame listens to, in Hz: the chest of the voice, the
+ * vowels, the consonants' body and the hiss of "s" and "f". At 16 kHz the
+ * spectrum stops at 8 kHz, which is all a voice needs.
+ */
+const BANDS = [
+  [80, 300],
+  [300, 1000],
+  [1000, 2500],
+  [2500, 6000],
+];
+
 export class VoiceInput {
   /**
    * @param {object} options
@@ -115,6 +127,8 @@ export class VoiceInput {
     this.context = null;
     this.source = null;
     this.processor = null;
+    this.analyser = null;
+    this._spectrum = null;
 
     this.running = false;
     /** Opening in progress (one at a time) and how many times it was closed. */
@@ -184,6 +198,15 @@ export class VoiceInput {
     this.processor.onaudioprocess = (event) => this._onFrame(event.inputBuffer.getChannelData(0));
 
     this.source.connect(this.processor);
+    // The spectrum is for the flame (her silhouette follows your voice): it's
+    // read once a frame by the stage, never per audio buffer.
+    this.analyser = this.context.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.analyser.smoothingTimeConstant = 0.55;
+    this.analyser.minDecibels = -85;
+    this.analyser.maxDecibels = -25;
+    this._spectrum = new Uint8Array(this.analyser.frequencyBinCount);
+    this.source.connect(this.analyser);
     // The ScriptProcessor doesn't run unless it's connected to an output; a
     // zero gain keeps it alive without playing the microphone on the speakers.
     const silence = this.context.createGain();
@@ -203,10 +226,45 @@ export class VoiceInput {
     this.buffers = [];
     this.preroll = [];
     this.processor?.disconnect();
+    this.analyser?.disconnect();
     this.source?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
     this.context?.close().catch(() => {});
-    this.processor = this.source = this.stream = this.context = null;
+    this.processor = this.analyser = this.source = this.stream = this.context = null;
+  }
+
+  /**
+   * How loud each of the four `BANDS` is right now, 0..1, written into `out`.
+   * All zeros when the microphone is closed or muted (her own voice).
+   */
+  bands(out = new Float32Array(BANDS.length)) {
+    out.fill(0);
+    if (!this.analyser || this.muted) return out;
+    this.analyser.getByteFrequencyData(this._spectrum);
+    const binHz = this.context.sampleRate / this.analyser.fftSize;
+    BANDS.forEach(([low, high], i) => {
+      const from = Math.max(1, Math.floor(low / binHz));
+      const to = Math.min(this._spectrum.length - 1, Math.ceil(high / binHz));
+      let sum = 0;
+      for (let bin = from; bin <= to; bin += 1) sum += this._spectrum[bin];
+      out[i] = sum / ((to - from + 1) * 255);
+    });
+    return out;
+  }
+
+  /** Seconds of the sentence being captured, 0 when nothing is being captured. */
+  get capturedSeconds() {
+    return this.capturing ? this.capturedFrames / SAMPLE_RATE : 0;
+  }
+
+  /**
+   * The sentence so far, as 16-bit PCM, without ending it: what the live
+   * transcription reads while you're still talking. `null` when nothing is
+   * being captured.
+   */
+  snapshot() {
+    if (!this.capturing || !this.buffers.length) return null;
+    return floatToPcm16(merge(this.buffers, this.capturedFrames));
   }
 
   /** Changes mode without reopening the microphone. */
@@ -253,6 +311,12 @@ export class VoiceInput {
   endPush() {
     if (this.mode !== 'push' || !this.capturing) return;
     this._flush();
+  }
+
+  /** `push` mode: the key was part of a shortcut, not a request to talk. Nothing is sent. */
+  cancelPush() {
+    if (this.mode !== 'push' || !this.capturing) return;
+    this._discard();
   }
 
   // ------------------------------------------------------------------
@@ -346,15 +410,19 @@ export class VoiceInput {
 
     const seconds = total / SAMPLE_RATE;
     if (seconds < MIN_UTTERANCE) return;
-
-    const merged = new Float32Array(total);
-    let offset = 0;
-    for (const frame of frames) {
-      merged.set(frame, offset);
-      offset += frame.length;
-    }
-    this.onUtterance(floatToPcm16(merged), seconds);
+    this.onUtterance(floatToPcm16(merge(frames, total)), seconds);
   }
+}
+
+/** The captured frames end to end. */
+function merge(frames, total) {
+  const merged = new Float32Array(total);
+  let offset = 0;
+  for (const frame of frames) {
+    merged.set(frame, offset);
+    offset += frame.length;
+  }
+  return merged;
 }
 
 /** Float32 -1..1 -> 16-bit little-endian PCM, the format the backend expects. */

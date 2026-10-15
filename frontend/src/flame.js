@@ -107,6 +107,14 @@ const FIDGETS = ['look', 'look', 'stretch', 'hop', 'spin', 'gust'];
 const FIDGET_EVERY = [9, 22];
 /** Shaken while you hold her: many fast reversals in a short time and her head spins. */
 const SHAKE = { speed: 900, turns: 4, window: 1.2 };
+/**
+ * Your voice, as she hears it: the microphone's RMS from where it stops being
+ * room noise to a loud voice close to the microphone. The curve lifts quiet
+ * voices, or a soft speaker would barely move her.
+ */
+const HEAR = { floor: 0.006, loud: 0.11, curve: 0.7 };
+/** At most this many embers of your voice per second, at full volume. */
+const EMBERS_PER_SECOND = 26;
 
 export class Flame {
   /**
@@ -195,6 +203,9 @@ export class Flame {
     this._point = new THREE.Vector3();
     /** Shadow for the stage: where and how big, in metres, and how dark. */
     this.shadow = { x: 0, z: 0, size: 0, opacity: 0 };
+    /** Listening: how much of your voice she has taken in (s), and the embers owed. */
+    this._heard = 0;
+    this._embers = 0;
   }
 
   _build() {
@@ -212,7 +223,8 @@ export class Flame {
     this.geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(this.geometry.attributes.position.count * 3), 3));
     this._paint();
 
-    this.uniforms = { uTime: { value: 0 }, uSway: { value: 1 }, uLean: { value: 0 } };
+    // uHear: your voice in four bands, from the bulb (low) to the tip (high).
+    this.uniforms = { uTime: { value: 0 }, uSway: { value: 1 }, uLean: { value: 0 }, uHear: { value: new THREE.Vector4() } };
     this.material = toon(0xffffff, { vertexColors: true, emissive: new THREE.Color(this.colors.emissive), emissiveIntensity: 0.22 });
     const ink = flat(INK, { side: THREE.BackSide });
     sway(this.material, this.uniforms);
@@ -555,6 +567,7 @@ export class Flame {
 
     let mood = 'idle';
     const sleep = input.sleep ?? 0;
+    const hearing = hearLevel(input.hearing?.level);
     if (this.held) mood = 'held';
     else if (this.falling) mood = 'fall';
     else if (input.hungry) mood = 'hungry';
@@ -564,6 +577,13 @@ export class Flame {
     else if (input.thinking) mood = 'think';
     else if (sleep > 0.9) mood = 'asleep';
     else if (sleep > 0.4) mood = 'drowsy';
+
+    // You stopped talking: she swallows what she heard (a small gulp), if it was something.
+    if (mood !== 'listen' && this._heard > 0.25) {
+      this.squash.impact(0.1);
+      this.fx.flash(this.centerWorld(this._point), 0.55 * this.size);
+    }
+    if (mood !== 'listen') this._heard = 0;
 
     // She wakes up: the bubble pops and she jolts.
     if (this._asleep && mood !== 'asleep') {
@@ -626,10 +646,16 @@ export class Flame {
       lookX *= 0.35;
       lookY = lookY * 0.35 + 0.05;
     } else if (mood === 'listen') {
-      sy += 0.03;
-      glow = 0.6;
-      flicker = 0.6;
-      swayAmount = 0.4;
+      // She takes your voice in: it swells her and brightens her, its
+      // spectrum ripples her outline (uHear) and its embers fly into her.
+      const voice = hearing;
+      sy += 0.03 + voice * 0.09;
+      sx -= voice * 0.03;
+      glow = 0.6 + voice * 0.55;
+      flicker = 0.6 + voice * 2.2;
+      swayAmount = 0.4 + voice * 0.5;
+      this._heard += voice * dt;
+      this._drawEmbers(voice, dt);
       wide = true;
       tilt = 0.2;
       forward = 0.08;
@@ -1069,6 +1095,13 @@ export class Flame {
     this.uniforms.uTime.value = this.swayPhase;
     this.uniforms.uSway.value = damp(this.uniforms.uSway.value, swayAmount * MOTION + mouth * 0.6, 8, dt);
     this.glow.material.opacity = damp(this.glow.material.opacity, clamp(glow * 0.75, 0, 1), 18, dt);
+    // The bands rise fast and fall a bit slower: syllables, not a jittery meter.
+    const ear = this.uniforms.uHear.value;
+    const bands = mood === 'listen' ? input.hearing?.bands : null;
+    ['x', 'y', 'z', 'w'].forEach((key, i) => {
+      const target = bands ? clamp(bands[i] ?? 0, 0, 1) * MOTION : 0;
+      ear[key] = damp(ear[key], target, target > ear[key] ? 22 : 9, dt);
+    });
 
     // Position: at home, floating.
     const scale = this.size;
@@ -1150,6 +1183,26 @@ export class Flame {
     this.fx.update(dt);
   }
 
+  /**
+   * The embers of your voice: they appear around her and fly into her bulb,
+   * more of them the louder you speak. It's the opposite of her own voice,
+   * which goes out of her.
+   */
+  _drawEmbers(voice, dt) {
+    this._embers += voice * EMBERS_PER_SECOND * dt * MOTION;
+    if (this._embers < 1) return;
+    const s = this.size;
+    const into = this.centerWorld(this._point).clone();
+    while (this._embers >= 1) {
+      this._embers -= 1;
+      // From the sides and from below, never from above: there's her tip.
+      const angle = rand(-Math.PI * 0.95, Math.PI * 0.05) + (Math.random() < 0.5 ? 0 : Math.PI * 0.9);
+      const distance = rand(0.85, 1.25) * s;
+      const from = into.clone().add(new THREE.Vector3(Math.cos(angle) * distance, Math.sin(angle) * distance * 0.8, 0.25 * s));
+      this.fx.ember(from, into, { size: rand(0.12, 0.2) * s, life: rand(0.45, 0.65), swirl: rand(-0.25, 0.25) * s });
+    }
+  }
+
   /** The trail behind her, running (`run`) or flying (`flying`): `{dir, lineAt}`. */
   _spawnTrail(motion, dt) {
     const center = this.centerWorld(this._point);
@@ -1166,13 +1219,25 @@ export class Flame {
   }
 }
 
+/** The microphone's RMS as she hears it, 0..1 (see HEAR). */
+function hearLevel(rms) {
+  if (!rms) return 0;
+  return clamp((rms - HEAR.floor) / (HEAR.loud - HEAR.floor), 0, 1) ** HEAR.curve;
+}
+
 /** The tip sways and while running lags behind (uLean); the outline does the same. */
 function sway(material, uniforms) {
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = `uniform float uTime;\nuniform float uSway;\nuniform float uLean;\n${shader.vertexShader}`.replace(
+    shader.vertexShader = `uniform float uTime;\nuniform float uSway;\nuniform float uLean;\nuniform vec4 uHear;\n${shader.vertexShader}`.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
+      // Your voice on her outline: each height takes its band (low on the
+      // bulb, high on the tip) and the edge ripples around her with it.
+      float hk = clamp((position.y + ${R.toFixed(2)}) / ${UNIT.toFixed(2)}, 0.0, 1.0);
+      float hb = mix(mix(uHear.x, uHear.y, smoothstep(0.0, 0.4, hk)), mix(uHear.z, uHear.w, smoothstep(0.6, 1.0, hk)), smoothstep(0.35, 0.65, hk));
+      float ripple = sin(uTime * 13.0 + position.y * 10.0 + atan(position.z, position.x) * 3.0);
+      transformed.xz *= 1.0 + hb * (0.1 + 0.09 * ripple);
       float h = smoothstep(0.0, ${(UNIT - R).toFixed(2)}, position.y);
       transformed.x += sin(uTime * 3.2 + position.y * 3.0) * 0.1 * uSway * h - uLean * h * h * 0.55;
       transformed.z += cos(uTime * 2.6 + position.y * 2.0) * 0.04 * uSway * h;`,

@@ -10,6 +10,9 @@
 import { LOCALE, t, tx } from './i18n.js';
 import { Island } from './island.js';
 
+/** Holding the right Ctrl talks to her: only in the Windows shell. */
+const HOLD_TO_TALK = Boolean(window.companion) && /Windows/.test(navigator.userAgent);
+
 /** What the limit windows are called, for the caption. */
 const WINDOW_WORDS = { 300: t('5 hours'), 10080: t('week'), 43200: t('month') };
 
@@ -265,7 +268,11 @@ export class Hud {
       case 'mic': {
         const stt = this.engines?.stt;
         if (!stt || stt.state === 'off') return t('Listening off — click to choose one');
-        return this.mic.enabled ? t("I'm listening — click to stop") : t('{name} — click to talk to her', { name: stt.label });
+        if (this.mic.enabled) return t("I'm listening — click to stop");
+        // On Windows the shell watches the right Ctrl (electron/main.js, watchHoldToTalk).
+        return HOLD_TO_TALK
+          ? t('{name} — click, or hold right Ctrl, to talk to her', { name: stt.label })
+          : t('{name} — click to talk to her', { name: stt.label });
       }
       case 'music':
         return this.dancing ? t('Dancing to Spotify — click to stop') : t('Still — click to dance to Spotify');

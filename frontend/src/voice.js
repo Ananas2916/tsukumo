@@ -16,6 +16,14 @@
  * listening too the microphone stays open while she speaks, but guarded: it
  * takes a loud, sustained voice (mic.js, `setGuarded`), and the backend
  * drops transcriptions that are her own voice (pipeline, `is_echo`).
+ *
+ * While you talk she also reads along: the sentence so far goes to the
+ * backend now and then (`voice_partial`) and the words come back as
+ * `partial` events. Only engines fast enough to redo the whole sentence in a
+ * fraction of a second say yes (Parakeet); the others answer `live: false`
+ * and we stop asking until the next sentence. One request at a time, so a
+ * slow PC never piles them up, and never in wake-word mode: there we don't
+ * know yet whether the sentence is for her.
  */
 
 import { readSetting } from './dom.js';
@@ -26,6 +34,11 @@ export const BARGE_IN_SETTING = 'dc:barge-in';
 
 /** The available modes, in the order they appear in the panel. */
 export const MODES = ['push', 'vad', 'wake'];
+
+/** Live transcription: how often to ask, from how much audio, and up to how much. */
+const PARTIAL_EVERY = 0.7;
+const PARTIAL_FROM = 0.6;
+const PARTIAL_UNTIL = 15;
 
 export class VoiceController {
   /**
@@ -49,10 +62,16 @@ export class VoiceController {
     this.paused = false;
     this.deviceId = readSetting(MIC_SETTING, '');
     this._options = {};
+    /** The sentence being captured (its number), and the live transcription's state for it. */
+    this._sentence = 0;
+    this._partial = { busy: false, askedAt: 0, off: false };
 
     this.mic = new VoiceInput({
       onUtterance: (pcm16, seconds) => this._onUtterance(pcm16, seconds),
-      onLevel: (level) => this.onEvent({ type: 'level', level }),
+      onLevel: (level) => {
+        this.onEvent({ type: 'level', level });
+        this._askPartial();
+      },
       onActivity: (speaking) => this._onActivity(speaking),
       onBargeIn: () => this._onBargeIn(),
       onError: (error) => this.onEvent({ type: 'error', message: error.message }),
@@ -155,8 +174,50 @@ export class VoiceController {
     this.mic.endPush();
   }
 
+  /** The push-to-talk key turned out to be part of a shortcut: drop what was heard. */
+  pushCancel() {
+    if (this.mode !== 'push') return;
+    this.mic.cancelPush();
+  }
+
+  /**
+   * To be hooked to the backend's `transcript_partial` message.
+   * Late answers (the sentence is over, or it's another one) are dropped.
+   */
+  handlePartial(message) {
+    if (message.sentence !== this._sentence) return;
+    this._partial.busy = false;
+    if (message.live === false) {
+      this._partial.off = true;
+      return;
+    }
+    const text = (message.text ?? '').trim();
+    if (text && this.mic.capturing) this.onEvent({ type: 'partial', text });
+  }
+
+  _askPartial() {
+    const partial = this._partial;
+    // Offline it would be queued and arrive stale: better nothing.
+    if (partial.busy || partial.off || this.mode === 'wake' || this.mic.muted || !this.socket.connected) return;
+    const seconds = this.mic.capturedSeconds;
+    if (seconds < PARTIAL_FROM || seconds > PARTIAL_UNTIL) return;
+    const now = performance.now() / 1000;
+    if (now - partial.askedAt < PARTIAL_EVERY) return;
+    const pcm16 = this.mic.snapshot();
+    if (!pcm16) return;
+    partial.busy = true;
+    partial.askedAt = now;
+    this.socket.send({ type: 'voice_partial', audio: toBase64(pcm16), sentence: this._sentence });
+  }
+
   // ------------------------------------------------------------------
   _onActivity(speaking) {
+    if (speaking) {
+      // A new sentence: earlier answers no longer count, and we ask again even
+      // if the previous engine said no (it may have been changed from the panel).
+      this._sentence += 1;
+      this._partial = { busy: false, askedAt: performance.now() / 1000, off: false };
+    }
     this.onEvent({ type: 'activity', speaking });
   }
 

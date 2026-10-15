@@ -973,6 +973,7 @@ export const IT = {
   "{name} is thinking…": "{name} sta pensando…",
   "{name} is waiting for you": "{name} ti aspetta",
   "{name} — click to talk to her": "{name} — clic per parlarle",
+  "{name} — click, or hold right Ctrl, to talk to her": "{name} — clic, o tieni premuto Ctrl destro, per parlarle",
   "{n} days": "{n} giorni",
   "{n} h ago": "da {n} h",
   "{n} hours": "{n} ore",

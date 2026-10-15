@@ -298,6 +298,8 @@ const settings = {
   updateChecks: true,
   /** The last version already announced with a notification: each one is announced once. */
   updateNotified: null,
+  /** Hold the right Ctrl to talk to her (Windows only). */
+  holdToTalk: true,
 };
 
 /** No saved settings: it's the first time, the panel opens with the introduction. */
@@ -1388,6 +1390,16 @@ function updateTrayMenu() {
         checked: settings.updateChecks,
         click: toggleUpdateChecks,
       },
+      ...(desktop.available()
+        ? [
+            {
+              label: t('Hold right Ctrl to talk'),
+              type: 'checkbox',
+              checked: settings.holdToTalk,
+              click: toggleHoldToTalk,
+            },
+          ]
+        : []),
       { type: 'separator' },
       { label: t('Restart'), click: () => restartBackend() },
       { label: t('Open the log'), click: () => shell.openPath(LOG_FILE) },
@@ -1676,6 +1688,42 @@ function registerPushToTalk(key) {
 
 handleIpc('voice:set-key', (_event, key) => registerPushToTalk(key));
 
+// Press and hold anywhere: the right Ctrl. Not a keyboard hook (see above):
+// Windows is asked whether that one key is down, about thirty times a
+// second, and only while push-to-talk can listen. If another key goes down
+// with it, it was a shortcut (right Ctrl + C) and what was heard is dropped.
+const HOLD_KEY = 0xa3; // VK_RCONTROL
+/** Keys that don't make it a shortcut: Ctrl itself, in its three codes. */
+const HOLD_ALONE = [0x11, 0xa2, HOLD_KEY];
+const HOLD_POLL_MS = 30;
+const hold = { down: false, shortcut: false };
+
+function watchHoldToTalk() {
+  if (!desktop.available()) return;
+  setInterval(() => {
+    const wanted = settings.holdToTalk && voiceState.available && voiceState.mode === 'push';
+    const down = wanted && desktop.keyDown(HOLD_KEY);
+    if (down && !hold.down) {
+      hold.down = true;
+      // A key already down (C, then right Ctrl): a shortcut from the start.
+      hold.shortcut = desktop.otherKeyDown(HOLD_ALONE);
+      if (!hold.shortcut) sendToPet('voice:push-to-talk', { action: 'start' });
+    } else if (down && !hold.shortcut && desktop.otherKeyDown(HOLD_ALONE)) {
+      hold.shortcut = true;
+      sendToPet('voice:push-to-talk', { action: 'cancel' });
+    } else if (!down && hold.down) {
+      hold.down = false;
+      if (!hold.shortcut) sendToPet('voice:push-to-talk', { action: 'end' });
+    }
+  }, HOLD_POLL_MS);
+}
+
+function toggleHoldToTalk() {
+  settings.holdToTalk = !settings.holdToTalk;
+  saveSettings();
+  updateTrayMenu();
+}
+
 onIpc('voice:state', (_event, state) => {
   voiceState = state ?? {};
   sendToPanel('voice:command', { type: 'state', ...voiceState });
@@ -1716,6 +1764,7 @@ if (!app.requestSingleInstanceLock()) {
     const key = process.env.DC_PUSH_TO_TALK_KEY || settings.pushToTalkKey || 'Control+Space';
     const shortcut = registerPushToTalk(key);
     if (!shortcut.ok) console.warn(`[electron] push-to-talk: ${shortcut.error}`);
+    watchHoldToTalk();
 
     const backend = await ensureBackend();
     if (!backend.ok) {

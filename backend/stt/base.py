@@ -41,6 +41,11 @@ class STTEngine(ABC):
 
     #: Short name of the engine, exposed via /api/health.
     name: str = "stt"
+    #: Fast enough to transcribe the sentence again and again while you're
+    #: still talking (live words in her bubble). Only for engines that redo a
+    #: few seconds of audio in a fraction of a second on an ordinary CPU:
+    #: on a slow one the live words would delay the real transcription.
+    live: bool = False
 
     @abstractmethod
     def transcribe(
