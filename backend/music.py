@@ -587,12 +587,9 @@ _DONE = {
 
 #: How to ask for music, explained to the brain (once per "on topic" turn).
 TAG_HELP = (
-    "To control their music, append at the very end [[music: play Artist - Title; Artist - Title]] to play "
-    "songs now (when they want something similar, a mood or an artist, pick 5-8 real, existing songs that fit "
-    "their taste), [[music: queue Artist - Title; ...]] to add songs after the current one, [[music: pause]], "
-    "[[music: resume]], [[music: next]], [[music: previous]], or [[music: like]] / [[music: dislike]] when they "
-    "say they love or hate the current song. Never read or mention the tag, and name at most one or two of the "
-    "songs you picked."
+    "Their music: [[music: play Artist - Title; Artist - Title]] plays now (for a mood, an artist or \"something "
+    "similar\" pick 5-8 real songs that fit their taste, and name at most one or two), [[music: queue ...]] adds "
+    "after the current one; also [[music: pause]], resume, next, previous, like, dislike."
 )
 
 

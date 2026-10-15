@@ -39,7 +39,7 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from .activity import describe_openclaw_tool
-from .base import LLMClient, Message, describe_error, with_directive
+from .base import ContextLedger, LLMClient, Message, describe_error, last_user_text
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,8 @@ class OpenClawClient(LLMClient):
         self._chat_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
         self._session_key: str | None = None
+        #: What of the directive the session has seen: it keeps every message forever.
+        self._context = ContextLedger()
         self._session_id: str | None = None
         self._closing = False
 
@@ -277,6 +279,15 @@ class OpenClawClient(LLMClient):
     # LLMClient
     # ------------------------------------------------------------------
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+        try:
+            async for piece in self._turn(messages):
+                yield piece
+        except BaseException:
+            # A turn that failed or was cancelled may not have stored the context.
+            self._context.forget()
+            raise
+
+    async def _turn(self, messages: list[Message]) -> AsyncIterator[str]:
         """Sends only the user's LAST message: the conversation's memory already
         lives in the OpenClaw session on the server, so sending the whole local
         history again (as the other, stateless backends do) would be redundant and
@@ -287,14 +298,16 @@ class OpenClawClient(LLMClient):
         # The agent has its own personality and doesn't see our system prompt: we
         # only pass it the speech constraints (the voice's language, no emoji) in
         # front of the message. Without them, it answers in the language you write
-        # in even if the voice is English, and becomes incomprehensible.
-        text = with_directive(messages)
-
+        # in even if the voice is English, and becomes incomprehensible. Only the
+        # pieces the session hasn't seen yet: it keeps the earlier ones.
         try:
             await self._ensure_connected()
         except (OSError, asyncio.TimeoutError) as exc:
             raise OpenClawError(f"OpenClaw Gateway unreachable ({describe_error(exc)})") from exc
         session_key = await self._ensure_session()
+        bracket = self._context.bracket(messages, session_key)
+        text = last_user_text(messages)
+        text = f"{bracket}\n\n{text}" if bracket else text
 
         # Empty any chat events left from a previous turn interrupted halfway
         # (for example by a cancel on the user's side).
@@ -374,6 +387,7 @@ class OpenClawClient(LLMClient):
         """
         self._session_key = None
         self._session_id = None
+        self._context.forget()
         if self.session_state_path and self.session_state_path.is_file():
             try:
                 self.session_state_path.unlink()

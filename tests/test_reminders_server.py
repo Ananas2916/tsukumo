@@ -86,6 +86,8 @@ def test_the_brain_knows_the_agenda_is_its_calendar(client, events, monkeypatch)
     client.portal.call(instance.chat, "metti l'esame nel mio calendario il primo e il due gennaio 2099", server.hub.broadcast)
     directive = brain.messages[-2].content
     assert "calendar" in directive and "one tag per day" in directive
+    # The rule common to every tag is said once, not in each instruction.
+    assert directive.count("Never read, mention or explain a tag") == 1 and "Never read or mention" not in directive
     assert [item.text for item in server.REMINDERS.all()] == ["esame", "esame"]
 
 

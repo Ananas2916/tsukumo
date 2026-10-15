@@ -900,10 +900,14 @@ class Secretary:
 
     def directive(self, prompt: str, agent: bool) -> str:
         """What the brain gets this turn: the tags always, the data only when it comes up."""
+        return " ".join(self.directive_parts(prompt, agent))
+
+    def directive_parts(self, prompt: str, agent: bool) -> list[str]:
+        """``directive`` in pieces, so a session-keeping agent gets the tag rules only once."""
         parts = [
             nb.DIRECTIVE,
-            "To protect focus time append [[focus: 90m]] ([[focus: off]] to end it). The user's personal values (IBAN, "
-            "tax code...) are in Tsukumo's vault: you never see them; to copy one for them append [[copy: its name]].",
+            "Focus time: [[focus: 90m]], [[focus: off]]. Their personal values (IBAN, tax code...) are in Tsukumo's "
+            "vault, which you never see: [[copy: its name]] copies one for them.",
         ]
         now = self.clock()
         if _CALENDAR_WORDS.search(prompt) and (self.calendar.events or self.reminders.all()):
@@ -932,7 +936,7 @@ class Secretary:
                     + '\nTo prepare a reply append [[draft {"to": "address", "subject": "Re: ...", "body": "the text"}]]: '
                     "it goes to their Drafts folder and is never sent; say so.)"
                 )
-        return " ".join(parts)
+        return parts
 
     # ------------------------------------------------------------ status
     def status(self) -> dict[str, Any]:

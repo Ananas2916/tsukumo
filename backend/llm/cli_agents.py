@@ -52,7 +52,16 @@ from typing import Any
 
 from .activity import describe_antigravity_tool, describe_claude_tool, describe_codex_item
 from .tasks import TASK_TOOLS, TaskList
-from .base import Activity, LLMClient, Message, describe_error, last_user_message, last_user_text, speech_directive
+from .base import (
+    Activity,
+    ContextLedger,
+    LLMClient,
+    Message,
+    describe_error,
+    last_user_message,
+    last_user_text,
+    speech_directive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +295,8 @@ class _CLIAgent(LLMClient):
         self._version: str | None = None
         #: The agent's task list: it lives as long as the session, from one turn to the next.
         self.tasks = TaskList()
+        #: What of the directive the session has seen, for the agents that get it in the message.
+        self.context = ContextLedger()
 
     def _require_executable(self) -> str:
         if not self.executable:
@@ -296,6 +307,7 @@ class _CLIAgent(LLMClient):
         self.session_id = None
         self.session.clear()
         self.tasks.clear()
+        self.context.forget()
         logger.info("%s: conversation reset", self.label)
 
     async def health(self) -> dict[str, Any]:
@@ -643,8 +655,8 @@ class CodexClient(_CLIAgent):
         text = last_user_text(messages)
         if not text:
             return
-        directive = speech_directive(messages)
-        prompt = f"[{SPOKEN_STYLE} {directive}]\n\n{text}"
+        bracket = self.context.bracket(messages, self.session_id, SPOKEN_STYLE)
+        prompt = f"{bracket}\n\n{text}" if bracket else text
         last = last_user_message(messages)
         parser = CodexStreamParser(self.tasks)
         try:
@@ -654,15 +666,19 @@ class CodexClient(_CLIAgent):
                     yield piece
                 for activity in parser.take_activities():
                     self.report(activity)
-        except AgentError:
-            if parser.error:
+        except BaseException as exc:
+            # A turn that didn't arrive may not have stored the context: send it all next time.
+            self.context.forget()
+            if isinstance(exc, AgentError) and parser.error:
                 raise AgentError(f"Codex: {parser.error}") from None
             raise
         if parser.thread_id and parser.thread_id != self.session_id:
             self.session_id = parser.thread_id
             self.session.save(parser.thread_id)
         if parser.error:
+            self.context.forget()
             raise AgentError(f"Codex: {parser.error}")
+        self.context.adopt(self.session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -812,12 +828,14 @@ class AntigravityClient(_CLIAgent):
         text = last_user_text(messages)
         if not text:
             return
-        prompt = f"[{SPOKEN_STYLE} {speech_directive(messages)}]\n\n{text}"
         last = last_user_message(messages)
         folders = last.folders if last else ()
         produced = False
         for attempt in (1, 2):
             parser = AntigravityStreamParser()
+            # Built at every attempt: a conversation opened again needs the whole context.
+            bracket = self.context.bracket(messages, self.session_id, SPOKEN_STYLE)
+            prompt = f"{bracket}\n\n{text}" if bracket else text
             try:
                 argv = self.build_argv(prompt, folders)
                 async for line in stream_process(argv, cwd=self.cwd, timeout=self.timeout, env=ANTIGRAVITY_ENV):
@@ -827,20 +845,27 @@ class AntigravityClient(_CLIAgent):
                     for activity in parser.take_activities():
                         self.report(activity)
             except AgentError as exc:
-                if parser.error:
-                    raise AgentError(f"Antigravity: {parser.error}") from None
-                if attempt == 1 and self.session_id and not produced and not parser.conversation_id:
+                if attempt == 1 and self.session_id and not produced and not parser.conversation_id and not parser.error:
                     # The saved conversation no longer exists: a new one is opened.
                     logger.warning("Antigravity conversation not resumed (%s): opening a new one", exc)
                     await self.reset()
                     continue
+                self.context.forget()
+                if parser.error:
+                    raise AgentError(f"Antigravity: {parser.error}") from None
+                raise
+            except BaseException:
+                # Cancelled halfway: the context may not have been stored.
+                self.context.forget()
                 raise
             break
         if parser.conversation_id and parser.conversation_id != self.session_id:
             self.session_id = parser.conversation_id
             self.session.save(parser.conversation_id)
         if parser.error:
+            self.context.forget()
             raise AgentError(f"Antigravity: {parser.error}")
+        self.context.adopt(self.session_id)
         if parser.stale_error:
             logger.info("Antigravity answered, but the conversation still reports: %s", parser.stale_error)
         if parser.denied and not produced:

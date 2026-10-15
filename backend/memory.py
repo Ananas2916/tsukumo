@@ -180,6 +180,10 @@ class MemoryStore:
         ``agent``: an agent already has a character and tools of its own; it's only
         asked to speak like the character.
         """
+        return " ".join(self.directive_parts(agent))
+
+    def directive_parts(self, agent: bool) -> list[str]:
+        """``directive`` in pieces: a new memory doesn't make an agent re-read the personality."""
         if agent:
             parts = [f"You are the voice of {self.name}; speak with this personality: {self.traits}."]
         else:
@@ -191,11 +195,8 @@ class MemoryStore:
                 facts = facts[1:]
                 known = "; ".join(fact.text for fact in facts)
             parts.append(f"What you remember about the user: {known}.")
-        parts.append(
-            "When the user tells you a lasting fact or preference about themselves, append at the very end "
-            "[[remember: the fact, in a few words]]. Never read or mention the tag."
-        )
-        return " ".join(parts)
+        parts.append("A lasting fact or preference the user tells you about themselves: append [[remember: it, in a few words]].")
+        return parts
 
 
 # ---------------------------------------------------------------------------

@@ -446,11 +446,10 @@ def run_tags(tags: list[str], notebook: Notebook) -> tuple[list[str], bool]:
 
 
 DIRECTIVE = (
-    "Tsukumo also keeps a to-do list (things without a time) and notes. When the user asks to put something on "
-    'their list, or you plan work for them (a study plan, steps before a deadline), append one [[todo {"text": "what", '
-    '"by": "YYYY-MM-DD", "important": true}]] per item ("by" and "important" optional); [[done: what]] when they say '
-    "it's done; [[note: the text]] to keep a note. A time of day makes it a reminder instead ([[remind]]). Never read "
-    "or mention these tags."
+    "Tsukumo keeps a to-do list (no time of day) and notes: append one "
+    '[[todo {"text": "what", "by": "YYYY-MM-DD", "important": true}]] per item ("by", "important" optional), also '
+    "when you plan work for them; [[done: what]] when it's done; [[note: the text]] to keep a note. With a time "
+    "of day it's a [[remind]] instead."
 )
 
 

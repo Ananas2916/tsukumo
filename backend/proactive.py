@@ -199,13 +199,10 @@ GESTURES = {
 
 #: Told to the brain at every turn (while she chats at all), so it can act on "I'm not at the PC".
 ATTENTION_DIRECTIVE = (
-    "Besides answering, Tsukumo speaks on her own (breaks, late night, weather, news, facts, films, YouTube, "
-    "battery, agent usage, the morning briefing, the evening recap, calendar notices, mail, the to-do list). If "
-    "the user says they are leaving the PC or aren't at it, also when answering one of those remarks, append "
-    "[[away]]. If they ask to stop a kind of remark, append [[quiet: TOPIC]] with TOPIC one of breaks, night, "
-    "weather, news, facts, films, youtube, battery, usage, briefing, recap, agenda, mail, todos or all, optionally "
-    "with a duration like [[quiet: news 2h]] (without one it lasts until tomorrow morning), and [[quiet: off]] when "
-    "they want them back. Writing the tag IS doing it. Never read or mention these tags."
+    "Tsukumo also speaks on her own. If the user says they're leaving or away from the PC, append [[away]]. "
+    "If they ask to stop a kind of remark, append [[quiet: TOPIC]], TOPIC one of breaks, night, weather, news, "
+    "facts, films, youtube, battery, usage, briefing, recap, agenda, mail, todos or all, with an optional duration "
+    "([[quiet: news 2h]]; else until tomorrow morning); [[quiet: off]] brings them back."
 )
 
 _ATTENTION_TAG = re.compile(r"^\[\[\s*(away|quiet)\b\s*:?\s*(.*?)\s*\]\]$", re.IGNORECASE | re.DOTALL)

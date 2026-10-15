@@ -702,25 +702,29 @@ _REPEAT_ALIASES = {
 }
 
 
-def action_directive(now: datetime | None = None) -> str:
-    """What to tell the brain so it can schedule reminders and actions."""
+def local_time(now: datetime | None = None) -> str:
+    """The clock line: the only piece of the directive that changes at every turn."""
+    return f"Local time: {(now or datetime.now()):%A %Y-%m-%d %H:%M}."
+
+
+def action_directive(now: datetime | None = None, clock: bool = True) -> str:
+    """What to tell the brain so it can schedule reminders and actions.
+
+    ``clock=False`` leaves the time out, for whoever sends it as a piece of its own.
+    """
     now = now or datetime.now()
-    stamp = now.strftime("%A %Y-%m-%d %H:%M")
     example = now + timedelta(days=1)
     return (
-        f"Local time: {stamp}. The user's agenda (the calendar in Tsukumo's panel, also on their phone) is made "
-        "of these reminders, and this tag is how you add to it: never say you have no access to their calendar, "
-        "and don't look for another calendar tool. If the user asks you to remind them of something, to set a "
-        "timer or an alarm, to put an event, appointment or deadline in their agenda or calendar, or to do "
-        "something at a later time, confirm in one short sentence and append at the very end "
-        '[[remind {"at": "YYYY-MM-DDTHH:MM", "text": "what to remind"}]], one tag per day when it spans several days '
-        '(no time given: 09:00; use "in": seconds instead of "at" for relative times, "do": "the task" instead of "text" for '
-        'something you must do yourself then, "repeat": "daily", "weekly", "monthly" or "yearly" if it repeats, a birthday '
-        'being yearly; "unless_reply_from": "name or address" for a follow-up such as "if Marco doesn\'t answer by Friday '
-        'remind me", which is skipped if that person writes back). Never read or mention the tag. '
-        f'Example: "aggiungi domani cinema con Giulia" -> reply "Segnato per domani!" and append '
-        f'[[remind {{"at": "{example:%Y-%m-%d}T09:00", "text": "cinema con Giulia"}}]]. Writing the tag IS adding it to '
-        "their calendar: it appears on the PC and on the phone at once, so never say you can't."
+        (f"{local_time(now)} " if clock else "")
+        + "The user's agenda (in Tsukumo, on the PC and the phone) is made of reminders. For a reminder, timer, "
+        "alarm, event, appointment, deadline or anything to do later, confirm briefly and append "
+        '[[remind {"at": "YYYY-MM-DDTHH:MM", "text": "what"}]], one tag per day if it spans several days (no time: 09:00). '
+        'Optional: "in": seconds instead of "at"; "do": "task" instead of "text" if you must do it yourself then; '
+        '"repeat": "daily", "weekly", "monthly" or "yearly" (birthdays yearly); "unless_reply_from": "name or address" '
+        "for a follow-up that is skipped if that person writes back. "
+        f'E.g. "aggiungi domani cinema con Giulia" -> "Segnato per domani!" '
+        f'[[remind {{"at": "{example:%Y-%m-%d}T09:00", "text": "cinema con Giulia"}}]]. '
+        "This tag IS their calendar: never say you have no access to it, and don't look for another calendar tool."
     )
 
 

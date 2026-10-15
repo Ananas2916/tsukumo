@@ -27,7 +27,7 @@ from .music import MusicService, is_music_tag
 from .llm import LLMClient, Message, MockLLM, create_llm_client, describe_error
 from .llm.base import Activity
 from .phonemes import phones_for
-from .reminders import ReminderStore, TagFilter, action_directive, command_reply, confirmations, from_tag, parse_requests
+from .reminders import ReminderStore, TagFilter, action_directive, command_reply, confirmations, from_tag, local_time, parse_requests
 from .providers import LLM_REGISTRY
 from .stt import SAMPLE_RATE as STT_SAMPLE_RATE
 from .stt import STTEngine, Transcript, create_stt_engine, from_pcm16
@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 
 #: Callback used to send a message to the frontend.
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
+
+#: What every [[tag]] has in common: the instructions about each tag rely on it.
+TAG_RULE = (
+    "Tsukumo acts on [[tags]] you append at the very end of your reply: writing one IS doing it, so never say you "
+    "can't. Never read, mention or explain a tag."
+)
 
 #: How many vocals to keep in memory (a few tens of KB each).
 VOCAL_CACHE_SIZE = 64
@@ -439,13 +445,13 @@ class Companion:
                 if local is not None:
                     return await self._finish_local(prompt, local, emit, turn, started)
 
-            music_note = ""
+            notes: list[str] = []
             if self.music is not None and not hidden and brain is None:
                 try:
-                    music_note = await self.music.directive(prompt)
+                    notes.append(await self.music.directive(prompt))
                 except Exception as exc:  # the music must never stop a turn
                     logger.warning("Music context unavailable: %s", exc)
-            messages = self._build_messages(prompt, attachments, llm, music_note)
+            messages = self._build_messages(prompt, attachments, llm, notes)
             buffer = ""
             full_reply = ""
             spoken = 0
@@ -739,30 +745,32 @@ class Companion:
         prompt: str,
         attachments: list[Attachment] | None = None,
         llm: LLMClient | None = None,
-        music_note: str = "",
+        notes: list[str] | None = None,
         folders: tuple[str, ...] = (),
     ) -> list[Message]:
         # The LAST system message is the speech constraints (language, plain
         # text): the agents, which have a personality of their own, receive only
-        # that and not our system prompt.
+        # that and not our system prompt. It travels in pieces too: an agent that
+        # keeps a session is sent only the ones it hasn't seen (``ContextLedger``).
         llm = llm or self.llm
-        directive = speech_directive(self._reply_language())
+        parts = [speech_directive(self._reply_language())]
         if self.memory is not None:
-            directive = f"{directive} {self.memory.directive(agent=llm.stateful)}"
+            parts += self.memory.directive_parts(agent=llm.stateful)
         if self.reminders is not None:
-            directive = f"{directive} {action_directive()}"
+            parts += [local_time(), action_directive(clock=False)]
         if self.proactive is not None and llm is self.llm:
-            attention = self.proactive.directive()
-            if attention:
-                directive = f"{directive} {attention}"
+            parts.append(self.proactive.directive())
         if self.secretary is not None and llm is self.llm:
-            directive = f"{directive} {self.secretary.directive(prompt, agent=llm.stateful)}"
-        if music_note:
-            # What's playing and what you like, or courses and deadlines: only when they come up.
-            directive = f"{directive} {music_note}"
+            parts += self.secretary.directive_parts(prompt, agent=llm.stateful)
+        # What's playing and what you like, or courses and deadlines: only when they come up.
+        parts += notes or []
+        parts = [part for part in parts if part]
+        if any("[[" in part for part in parts):
+            # Said once for every tag, not in each instruction.
+            parts.insert(1, TAG_RULE)
         messages = [
             Message("system", self.settings.system_prompt),
-            Message("system", directive),
+            Message("system", " ".join(parts), parts=tuple(parts)),
         ]
         if not llm.stateful:
             # An agent remembers by itself: sending it the history again would waste

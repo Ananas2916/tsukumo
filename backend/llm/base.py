@@ -48,6 +48,9 @@ class Message:
     images: tuple[str, ...] = ()
     #: Folders of the attached files: an agent must be able to read them (``--add-dir``).
     folders: tuple[str, ...] = ()
+    #: The directive's pieces (personality, tag rules, time, data...), which ``content``
+    #: joins: an agent keeping a session gets only the ones it hasn't seen (``ContextLedger``).
+    parts: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, str]:
         return {"role": self.role, "content": self.content}
@@ -133,15 +136,58 @@ def speech_directive(messages: list[Message]) -> str:
     return next((m.content for m in reversed(messages) if m.role == "system"), "")
 
 
-def with_directive(messages: list[Message]) -> str:
-    """The user's message preceded by the speech constraints, in brackets.
+#: Even an unchanged context is sent again in full this often: an agent may compact
+#: or trim its session, and the rules would fade with it.
+FULL_CONTEXT_EVERY = 20
 
-    Without it, an agent answers in the language you write in even if the voice
-    is English, and uses markdown and lists that make no sense read aloud.
+
+class ContextLedger:
+    """Which pieces of the directive an agent's session has already seen.
+
+    An agent that keeps its own session (OpenClaw, Codex, Antigravity) stores every
+    message it gets: repeating the whole bracket (personality, tag rules, courses,
+    timetable...) at every turn piled up ~2k tokens per exchange in its history,
+    and small models answered worse for it. The session already holds the earlier
+    copy, so only new or changed pieces are sent.
     """
-    text = last_user_text(messages)
-    directive = speech_directive(messages)
-    return f"[{directive}]\n\n{text}" if directive else text
+
+    def __init__(self) -> None:
+        self._scope: str | None = None
+        self._sent: set[str] = set()
+        self._turns = 0
+
+    def forget(self) -> None:
+        """The next turn sends everything (new session, failed turn, reset)."""
+        self._scope = None
+        self._sent.clear()
+        self._turns = 0
+
+    def adopt(self, scope: str | None) -> None:
+        """The session opened by the first turn is the one that saw the full context."""
+        if scope and self._sent:
+            self._scope = scope
+
+    def bracket(self, messages: list[Message], scope: str | None, prefix: str = "") -> str:
+        """The bracket to put before the user's message: all of it, or only what's new.
+
+        ``scope`` names the session (``None``: none open yet, the next one is new).
+        ``prefix`` is the agent's own fixed rule, sent with the full context.
+        """
+        directive = next((m for m in reversed(messages) if m.role == "system"), None)
+        if directive is None:
+            return f"[{prefix}]" if prefix else ""
+        parts = [p.strip() for p in directive.parts if p.strip()] or [directive.content.strip()]
+        if scope is None or scope != self._scope or self._turns >= FULL_CONTEXT_EVERY:
+            self._scope, self._sent, self._turns = scope, set(), 0
+        self._turns += 1
+        if not self._sent:
+            self._sent = set(parts)
+            return "[" + " ".join(p for p in (prefix, *parts) if p) + "]"
+        fresh = [p for p in parts if p not in self._sent]
+        self._sent.update(fresh)
+        if not fresh:
+            return ""
+        return "[Your earlier instructions still hold. New or updated: " + " ".join(fresh) + "]"
 
 
 def describe_error(exc: BaseException) -> str:
