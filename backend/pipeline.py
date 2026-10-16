@@ -298,6 +298,8 @@ class Companion:
         self.muted = False
         #: Muted for the current turn only: the phone wrote it (see chat()).
         self._silent = False
+        #: Voiced even if muted: a phone asked to hear this turn (its audio goes there only).
+        self._speak_anyway = False
         #: Last error per engine ("llm", "tts"), until a turn goes well.
         self.last_errors: dict[str, str] = {}
         #: Voice catalogue of the active engine, loaded in the background.
@@ -399,6 +401,7 @@ class Companion:
         screen: bool = False,
         brain: LLMClient | None = None,
         silent: bool = False,
+        speak_anyway: bool = False,
     ) -> str:
         """The full cycle: brain in streaming + sentence-by-sentence synthesis.
 
@@ -411,6 +414,9 @@ class Companion:
         mute: no errors on screen, no fallback.
         ``silent``: text-only reply, like mute but for this turn. The phone uses
         it: whoever writes from outside doesn't want her to speak at home.
+        ``speak_anyway``: synthesize even if muted or ``silent``. The phone asks
+        for it to hear her; ``emit`` then sends the audio to the phone alone
+        (``ConnectionHub.broadcast(voice_to=...)``), so the PC stays quiet.
         """
         llm = brain or self.llm
         attachments = prepare(files)
@@ -430,6 +436,7 @@ class Companion:
             self._turn_id += 1
             turn = self._turn_id
             self._silent = silent
+            self._speak_anyway = speak_anyway
             started = time.perf_counter()
             self._tts_failed = False
             self._turn_voiced = False
@@ -582,6 +589,7 @@ class Companion:
             self._turn_id += 1
             turn = self._turn_id
             self._silent = False
+            self._speak_anyway = False
             self._tts_failed = False
             spoken = 0
             for sentence in split_sentences(text, self.settings.max_sentence_chars):
@@ -1025,7 +1033,8 @@ class Companion:
         started = time.perf_counter()
         for delay, event in WORKING_CUES:
             await asyncio.sleep(max(0.0, started + delay - time.perf_counter()))
-            if self._turn_voiced or self.muted or self._silent or self._tts_failed or self._cancel.is_set():
+            quiet = (self.muted or self._silent) and not self._speak_anyway
+            if self._turn_voiced or quiet or self._tts_failed or self._cancel.is_set():
                 return
             try:
                 payload = await self._vocal_payload(event)
@@ -1074,7 +1083,7 @@ class Companion:
         caption = {"type": "caption", "text": text, "mood": detect_mood(sentence), "turn": turn, "index": index}
         self._turn_voiced = True
         self._recent_speech.append((time.monotonic(), text))
-        if ((self.muted or self._silent) and not force) or self._tts_failed:
+        if ((self.muted or self._silent) and not (force or self._speak_anyway)) or self._tts_failed:
             await emit(caption)
             return 1
         try:

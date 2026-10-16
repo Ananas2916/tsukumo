@@ -304,3 +304,77 @@ def test_agent_permissions_only_from_the_menu(client):
         json={"kind": "llm", "provider": "claude_code", "options": {"CLAUDE_CODE_PERMISSION": "bypassPermissions"}},
     )
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# The brain from the phone: the one engine change open to remote clients
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def phone_brain(client, monkeypatch):
+    """The real server seen from the phone through ``tailscale serve``, with a fake switch."""
+    import dataclasses
+
+    from backend import server
+
+    monkeypatch.setattr(server, "DETECTED", {"claude_code": {"found": True}, "ollama": {"found": True}})
+    # Nothing saved: the developer's .env may hold models and keys of its own.
+    monkeypatch.setattr(server, "SETTINGS", dataclasses.replace(server.SETTINGS, provider_options={}))
+    switched = []
+
+    async def fake_switch(request):
+        switched.append(request)
+        return {"ok": True, "kind": request.kind, "provider": request.provider}
+
+    monkeypatch.setattr(server, "set_provider", fake_switch)
+    headers = {
+        "X-Forwarded-For": "100.101.102.103",
+        "Authorization": f"Bearer {server.POLICY.token}",
+    }
+    return client, headers, switched
+
+
+def test_phone_lists_only_brains_set_up_on_the_pc(phone_brain):
+    client, headers, _ = phone_brain
+    assert client.get("/api/brain", headers={"X-Forwarded-For": "100.101.102.103"}).status_code == 401
+    data = client.get("/api/brain", headers=headers).json()
+    ids = {choice["id"] for choice in data["choices"]}
+    assert data["active"] == "mock"
+    assert {"mock", "claude_code", "ollama"} <= ids
+    # Not found on the PC, no key saved: not offered.
+    assert "codex" not in ids and "anthropic" not in ids
+    claude = next(c for c in data["choices"] if c["id"] == "claude_code")
+    assert {"value": "sonnet", "label": "Sonnet — balanced"} in claude["models"]
+    assert not claude["free_model"]
+
+
+def test_phone_switches_brain_and_model(phone_brain):
+    client, headers, switched = phone_brain
+    response = client.post("/api/brain", headers=headers, json={"provider": "claude_code", "model": "sonnet"})
+    assert response.status_code == 200 and response.json()["ok"]
+    assert switched[-1].kind == "llm" and switched[-1].provider == "claude_code"
+    assert switched[-1].options == {"CLAUDE_CODE_MODEL": "sonnet"}
+    response = client.post("/api/brain", headers=headers, json={"provider": "ollama", "model": "llama3.1:8b"})
+    assert response.status_code == 200
+    assert switched[-1].options == {"OLLAMA_MODEL": "llama3.1:8b"}
+
+
+def test_phone_cannot_reach_beyond_the_brain(phone_brain):
+    client, headers, switched = phone_brain
+    refused = [
+        # Not set up on the PC.
+        {"provider": "codex"},
+        # Only the menu's models for a select field: a permission isn't a model.
+        {"provider": "claude_code", "model": "bypassPermissions"},
+        # A free model name can't smuggle anything.
+        {"provider": "ollama", "model": "llama3 --dangerously-skip-permissions"},
+        {"provider": "ollama", "model": "a\nDC_CLAUDE_CODE_COMMAND=calc"},
+    ]
+    for body in refused:
+        assert client.post("/api/brain", headers=headers, json=body).status_code == 400, body
+    # Keys, commands and permissions aren't fields of this request at all.
+    extra = {"provider": "claude_code", "options": {"CLAUDE_CODE_PERMISSION": "bypassPermissions"}}
+    assert client.post("/api/brain", headers=headers, json=extra).status_code == 422
+    assert switched == []
+    # The full engine change stays on the PC.
+    assert client.post("/api/providers", headers=headers, json={}).status_code == 403
+    assert not local_only("POST", "/api/brain")

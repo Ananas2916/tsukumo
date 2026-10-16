@@ -627,6 +627,8 @@ Viseme timeline: `t` start (s), `d` duration, `v` viseme (`a i u e o sil`),
 | `POST` | `/api/providers/check` | test an engine with given values **without** activating it |
 | `POST` | `/api/providers` | activate an engine (saved to `.env`, rolled back on failure) |
 | `POST` | `/api/providers/options` | save an engine's fields without activating it |
+| `GET` | `/api/brain` | the active brain and those already set up on the PC, with their models |
+| `POST` | `/api/brain` | switch to one of those brains (and its model); the only engine change allowed from the phone |
 | `GET` | `/api/voices` · `POST /api/voices/clone` | voices of the active engine; clone one (Chatterbox) |
 | `POST` | `/api/say` · `/api/chat` · `/api/cancel` · `/api/reset` | speak, full turn, interrupt, forget the conversation |
 | `POST` | `/api/transcribe` | speech-to-text only (PCM16 16 kHz body) |

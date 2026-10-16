@@ -82,6 +82,46 @@ def test_websocket_chat_round_trip(client):
         assert "speech" in seen and "reply" in seen
 
 
+
+def _until_idle(ws) -> list[dict]:
+    seen = []
+    for _ in range(300):
+        message = ws.receive_json()
+        seen.append(message)
+        if message["type"] == "state" and message["value"] == "idle":
+            break
+    return seen
+
+
+def test_phone_hears_its_turn_and_the_pc_stays_quiet(client):
+    # The phone asks to hear the reply: the voice goes to it alone, the PC gets captions.
+    with client.websocket_connect("/ws") as pc, client.websocket_connect("/ws?mode=text") as phone:
+        pc.receive_json()
+        hello = phone.receive_json()
+        assert "speak" in hello["features"]
+        phone.send_json({"type": "chat", "text": "ciao", "speak": True})
+        heard = _until_idle(phone)
+        at_home = _until_idle(pc)
+    speech = [m for m in heard if m["type"] == "speech"]
+    assert speech and all(m["audio"] and m["visemes"] for m in speech)
+    assert not [m for m in at_home if m["type"] == "speech"]
+    assert not [m for m in at_home if m["type"] == "state" and m["value"] == "speaking"]
+    captions = [m["text"] for m in at_home if m["type"] == "caption"]
+    assert captions == [m["text"] for m in speech]
+    assert any(m["type"] == "reply" for m in at_home)
+
+
+def test_phone_turn_without_speak_stays_silent(client):
+    with client.websocket_connect("/ws") as pc, client.websocket_connect("/ws?mode=text") as phone:
+        pc.receive_json()
+        phone.receive_json()
+        phone.send_json({"type": "chat", "text": "ciao"})
+        heard = _until_idle(phone)
+        at_home = _until_idle(pc)
+    assert not [m for m in heard + at_home if m["type"] == "speech"]
+    assert [m for m in at_home if m["type"] == "caption"]
+
+
 def test_openclaw_health_does_not_hang_when_the_gateway_is_off():
     client = OpenClawClient("http://127.0.0.1:9", token="x")
     started = time.perf_counter()

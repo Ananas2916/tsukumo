@@ -61,10 +61,12 @@ import base64
 import binascii
 import contextlib
 import dataclasses
+import functools
 import importlib.util
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -80,7 +82,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__
 from .attachments import MAX_UPLOAD_BYTES, store_upload
@@ -106,7 +108,7 @@ from .music import MusicService, SpotifyError
 from .llm import create_llm_client, describe_error
 from .llm.detect import candidates, detect_all
 from .pipeline import Companion
-from .providers import REGISTRIES, ProviderSpec, describe_all
+from .providers import REGISTRIES, ProviderField, ProviderSpec, describe_all
 from .status import EngineMonitor, llm_entry
 from .transcript import Transcript
 from .agents_board import AgentBoard
@@ -196,7 +198,10 @@ class ConnectionHub:
     state and the same Tsukumo speaking.
 
     "Text only" clients (the phone's page, ``/ws?mode=text``) don't receive the
-    audio: on the phone, maybe on 4G, it would only be weight.
+    audio: on the phone, maybe on 4G, it would only be weight. Unless the phone
+    asked to hear a turn (``"speak": true``): then that turn's voice goes to
+    the phone alone and everybody else, the PC included, gets the sentence as
+    a caption, so the house stays quiet (``voice_to``).
 
     The chat lines also go through ``transcript``, which numbers them and keeps
     them for whoever reconnects (see transcript.py).
@@ -243,17 +248,26 @@ class ConnectionHub:
     def count(self) -> int:
         return len(self._clients)
 
-    async def broadcast(self, message: dict[str, Any]) -> None:
+    async def broadcast(self, message: dict[str, Any], voice_to: WebSocket | None = None) -> None:
         message = self.transcript.observe(message)
         agents_changed = self.agents.observe(message)
         async with self._lock:
             targets = list(self._clients)
             text_only = set(self._text_only)
         light = {k: v for k, v in message.items() if k not in self.HEAVY} if text_only and self.HEAVY & message.keys() else message
+        others = self._quiet_copy(message) if voice_to is not None else message
         dead: list[WebSocket] = []
         for client in targets:
+            if client is voice_to:
+                payload: dict[str, Any] | None = message
+            elif others is not message:
+                payload = others
+            else:
+                payload = light if client in text_only else message
+            if payload is None:
+                continue
             try:
-                await client.send_json(light if client in text_only else message)
+                await client.send_json(payload)
             except Exception:
                 dead.append(client)
         if dead:
@@ -264,6 +278,26 @@ class ConnectionHub:
                     self._remote.discard(client)
         if agents_changed:
             await self.broadcast({"type": "agents", "agents": self.agents.public()})
+
+    @classmethod
+    def _quiet_copy(cls, message: dict[str, Any]) -> dict[str, Any] | None:
+        """What the others see of a turn spoken on a phone: the words, no voice.
+
+        A sentence becomes the caption a muted turn would send; "speaking" and
+        the "one moment" cues reach no one else, or the flame on the PC would
+        mouth in silence.
+        """
+        kind = message.get("type")
+        if kind == "speech" and message.get("vocal"):
+            return None
+        if kind == "speech":
+            keep = ("turn", "index", "mood")
+            return {"type": "caption", "text": message.get("text", ""), **{k: message[k] for k in keep if k in message}}
+        if kind == "state" and message.get("value") == "speaking":
+            return None
+        if cls.HEAVY & message.keys():
+            return {k: v for k, v in message.items() if k not in cls.HEAVY}
+        return message
 
 
 hub = ConnectionHub()
@@ -514,6 +548,14 @@ class ProviderRequest(BaseModel):
         default_factory=dict,
         description="Fields declared by the engine; null or empty goes back to the default",
     )
+
+
+class BrainRequest(BaseModel):
+    # From afar: a field it doesn't know (a key, a permission) is an error, not ignored.
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1, max_length=64, description="A brain already set up on the PC")
+    model: str | None = Field(None, max_length=160, description="Its model; omitted keeps the saved one")
 
 
 # ---------------------------------------------------------------------------
@@ -778,6 +820,84 @@ async def save_provider_options(request: ProviderRequest) -> dict[str, Any]:
         instance.settings = dataclasses.replace(instance.settings, provider_options=SETTINGS.provider_options)
         await _announce_providers(request.kind, instance)
     return {"ok": True, "kind": request.kind, "provider": spec.id, "saved": _saved_options(request.kind)[spec.id]}
+
+
+#: A model name as engines spell them: "sonnet", "llama3.1:8b", "nvidia/nemotron-super:free".
+_MODEL_NAME = re.compile(r"[\w.:/@+-]{1,160}")
+
+
+def _model_field(spec: ProviderSpec) -> ProviderField | None:
+    return next((f for f in spec.fields if f.env.endswith("_MODEL")), None)
+
+
+def _brain_ready(spec: ProviderSpec) -> bool:
+    """Set up on the PC: its program or service was found, or its keys are saved."""
+    if (DETECTED.get(spec.id) or {}).get("found"):
+        return True
+    secrets = [f for f in spec.fields if f.secret]
+    return bool(secrets) and all(SETTINGS.provider_options.get(f.env) for f in secrets)
+
+
+def _brain_choices() -> list[dict[str, Any]]:
+    """The brains the phone may switch between, with their saved model."""
+    active = SETTINGS.selected("llm")
+    choices: list[dict[str, Any]] = []
+    for spec in REGISTRIES["llm"].all():
+        if spec.id != active and (spec.category == "test" or not _brain_ready(spec)):
+            continue
+        field = _model_field(spec)
+        choices.append(
+            {
+                "id": spec.id,
+                "label": spec.label,
+                "category": spec.category,
+                "pricing": spec.pricing,
+                "local": spec.local,
+                "active": spec.id == active,
+                "model": SETTINGS.provider_options.get(field.env, field.default) if field else None,
+                "models": list(field.options) if field and field.type == "select" else [],
+                "free_model": bool(field) and field.type != "select",
+            }
+        )
+    return choices
+
+
+@app.get("/api/brain")
+async def brain() -> dict[str, Any]:
+    """The active brain and the ones already set up, for the phone."""
+    return {"active": SETTINGS.selected("llm"), "choices": _brain_choices()}
+
+
+@app.post("/api/brain")
+async def set_brain(request: BrainRequest) -> dict[str, Any]:
+    """Switches the brain among those already set up on the PC, from the phone too.
+
+    It's the only engine change open to remote clients, so it stays narrow: an
+    engine the PC already found or holds the keys for, and at most its model.
+    Keys, commands, folders and permissions are written only from the PC
+    (``POST /api/providers`` is ``LOCAL_ONLY``): the phone can't point a brain
+    at a program or loosen what an agent may do.
+    """
+    choice = next((c for c in _brain_choices() if c["id"] == request.provider), None)
+    if choice is None:
+        raise HTTPException(status_code=400, detail=f"{request.provider!r} isn't set up on the PC")
+    spec = _spec_or_400("llm", request.provider)
+    options: dict[str, str | None] = {}
+    model = (request.model or "").strip() if request.model is not None else None
+    if model is not None and model != (choice["model"] or ""):
+        field = _model_field(spec)
+        if field is None:
+            raise HTTPException(status_code=400, detail=f"{spec.label} has no model to choose")
+        if field.type == "select":
+            if model not in {option["value"] for option in field.options}:
+                raise HTTPException(status_code=400, detail=f"Unknown model for {spec.label}: {model!r}")
+        elif model and not _MODEL_NAME.fullmatch(model):
+            raise HTTPException(status_code=400, detail=f"Not a model name: {model!r}")
+        options[field.env] = model
+    if choice["active"] and not options:
+        return {"ok": True, "kind": "llm", "provider": spec.id, "choices": _brain_choices()}
+    result = await set_provider(ProviderRequest(kind="llm", provider=spec.id, options=options))
+    return {**result, "choices": _brain_choices()}
 
 
 async def _engine_changed(kind: str, instance: Companion, new_settings: Settings, old: object | None) -> None:
@@ -1755,6 +1875,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "park": None if websocket.scope.get("tsukumo.remote") else PARK.public(),
                 # The suspended phone missed the replies: it gets them back from here.
                 "transcript": hub.transcript.recent(),
+                # What a phone client can ask of this backend: the phone voice, the brain switch.
+                "features": ["brain", "speak"],
             }
         )
 
@@ -1775,13 +1897,17 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 if remote:
                     # From outside only the uploaded files (POST /api/attachments), never a path on the PC.
                     files = [item for item in files if within(Path(item), [SETTINGS.state_dir / "uploads"])]
+                # The phone wants to hear her: Kokoro on the PC, the audio to the phone only.
+                speak_here = text_only and message.get("speak") is True
+                emit = functools.partial(hub.broadcast, voice_to=websocket) if speak_here else hub.broadcast
                 _spawn(
                     instance.chat(
                         message.get("text", ""),
-                        hub.broadcast,
+                        emit,
                         files=files,
                         screen=bool(message.get("screen")),
                         silent=text_only,
+                        speak_anyway=speak_here,
                     )
                 )
             elif kind == "capabilities":
