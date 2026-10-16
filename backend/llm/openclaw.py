@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -45,6 +46,14 @@ logger = logging.getLogger(__name__)
 
 #: Terminal states of the "chat" event: the turn is over (well or badly).
 _TERMINAL_STATES = {"final", "done", "complete", "error", "canceled", "cancelled"}
+
+#: A turn is given up only after the agent has said nothing at all (not even its
+#: thinking, which arrives on the "agent" channel) for this long. A flat 120 s
+#: without text dropped the replies of slow local models (Bonsai 27B on LM
+#: Studio thought for minutes, then answered into a turn already failed).
+AGENT_SILENCE = 300.0
+#: How often the wait for the reply checks that silence.
+SILENCE_CHECK = 5.0
 
 
 class OpenClawError(RuntimeError):
@@ -89,6 +98,8 @@ class OpenClawClient(LLMClient):
         self._chat_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
         self._session_key: str | None = None
+        #: When the Gateway last showed the agent alive (chat or agent channel).
+        self._heard_at = time.monotonic()
         #: What of the directive the session has seen: it keeps every message forever.
         self._context = ContextLedger()
         self._session_id: str | None = None
@@ -165,8 +176,11 @@ class OpenClawClient(LLMClient):
                     if future and not future.done():
                         future.set_result(message)
                 elif frame_type == "event" and message.get("event") == "chat":
+                    self._heard_at = time.monotonic()
                     self._chat_events.put_nowait(message.get("payload", {}))
                 elif frame_type == "event" and message.get("event") == "agent":
+                    # Even the thinking says the agent is still at it.
+                    self._heard_at = time.monotonic()
                     # Of the "agent" channel we keep only the start of a tool: the thinking
                     # passing through here is never read.
                     payload = message.get("payload") or {}
@@ -263,29 +277,34 @@ class OpenClawClient(LLMClient):
             if data.get("agentId", "main") != self.agent_id:
                 logger.info("Saved session of another agent (%s): creating one for %s", data.get("agentId", "main"), self.agent_id)
                 return None
-            return data["sessionKey"], data["sessionId"]
+            session = data["sessionKey"], data["sessionId"]
         except (OSError, KeyError, json.JSONDecodeError) as exc:
             logger.warning("OpenClaw session state unreadable (%s): creating a new one", exc)
             return None
+        self._context.restore(data.get("context"))
+        return session
 
     def _save_cached_session(self) -> None:
-        if not self.session_state_path:
+        if not self.session_state_path or not self._session_key:
             return
-        self.session_state_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"agentId": self.agent_id, "sessionKey": self._session_key, "sessionId": self._session_id}
-        self.session_state_path.write_text(json.dumps(payload), encoding="utf-8")
+        payload = {
+            "agentId": self.agent_id,
+            "sessionKey": self._session_key,
+            "sessionId": self._session_id,
+            "context": self._context.state(),
+        }
+        try:
+            self.session_state_path.parent.mkdir(parents=True, exist_ok=True)
+            self.session_state_path.write_text(json.dumps(payload), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("OpenClaw session state not saved (%s)", exc)
 
     # ------------------------------------------------------------------
     # LLMClient
     # ------------------------------------------------------------------
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
-        try:
-            async for piece in self._turn(messages):
-                yield piece
-        except BaseException:
-            # A turn that failed or was cancelled may not have stored the context.
-            self._context.forget()
-            raise
+        async for piece in self._turn(messages):
+            yield piece
 
     async def _turn(self, messages: list[Message]) -> AsyncIterator[str]:
         """Sends only the user's LAST message: the conversation's memory already
@@ -314,15 +333,24 @@ class OpenClawClient(LLMClient):
         while not self._chat_events.empty():
             self._chat_events.get_nowait()
 
-        send_response = await self._request(
-            "chat.send",
-            {
-                "sessionKey": session_key,
-                "agentId": self.agent_id,
-                "message": text,
-                "idempotencyKey": str(uuid.uuid4()),
-            },
-        )
+        try:
+            send_response = await self._request(
+                "chat.send",
+                {
+                    "sessionKey": session_key,
+                    "agentId": self.agent_id,
+                    "message": text,
+                    "idempotencyKey": str(uuid.uuid4()),
+                },
+            )
+        except BaseException:
+            # Maybe never delivered: the next turn sends everything.
+            self._context.forget()
+            raise
+        # Accepted means stored in the session, even if we stop waiting for the reply:
+        # a slow local model timed out on our side, answered anyway, and the next turn
+        # piled the whole bracket on top of the copy it already had.
+        self._save_cached_session()
         run_id = send_response["payload"].get("runId")
         logger.info("OpenClaw turn started (runId=%s)", run_id)
 
@@ -338,8 +366,14 @@ class OpenClawClient(LLMClient):
         # duplicate the reply (verified live: without this check the sentence came
         # out twice, identical).
         got_delta_text = False
+        self._heard_at = time.monotonic()
         while True:
-            payload = await asyncio.wait_for(self._chat_events.get(), 120)
+            try:
+                payload = await asyncio.wait_for(self._chat_events.get(), SILENCE_CHECK)
+            except asyncio.TimeoutError:
+                if time.monotonic() - self._heard_at >= AGENT_SILENCE:
+                    raise
+                continue
 
             # A shared connection may see other sessions' traffic (for example an
             # agent heartbeat): we drop everything that isn't our turn instead of
@@ -372,6 +406,9 @@ class OpenClawClient(LLMClient):
                     yield text
 
             if state == "error":
+                # The agent refused the turn: it may not have kept the message.
+                self._context.forget()
+                self._save_cached_session()
                 reason = payload.get("errorMessage") or "turn failed"
                 raise OpenClawError(f"The OpenClaw agent answered with an error: {reason}")
             if state in _TERMINAL_STATES:

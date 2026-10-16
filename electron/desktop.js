@@ -245,8 +245,8 @@ function keyDown(vk) {
 }
 
 /**
- * Whether any key other than `except` is down: it tells "right Ctrl held to
- * talk" from "right Ctrl + C". Only the state is read, never which key it
+ * Whether any key other than `except` is down: it tells "Ctrl held to talk"
+ * from "Ctrl + C". Only the state is read, never which key it
  * was, and nothing is kept.
  */
 function otherKeyDown(except) {

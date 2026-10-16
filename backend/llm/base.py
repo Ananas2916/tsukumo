@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -149,6 +150,10 @@ class ContextLedger:
     timetable...) at every turn piled up ~2k tokens per exchange in its history,
     and small models answered worse for it. The session already holds the earlier
     copy, so only new or changed pieces are sent.
+
+    The session outlives the backend (it is saved on disk), so the ledger is saved
+    with it (``state``/``restore``): an engine switch or a restart sent the whole
+    bracket again to a session that already had it. Only digests are kept.
     """
 
     def __init__(self) -> None:
@@ -161,6 +166,23 @@ class ContextLedger:
         self._scope = None
         self._sent.clear()
         self._turns = 0
+
+    def state(self) -> dict[str, Any]:
+        """What to save beside the session id."""
+        return {"scope": self._scope, "sent": sorted(self._sent), "turns": self._turns}
+
+    def restore(self, state: Any) -> None:
+        """Takes back a saved ``state``; anything unreadable means "send everything"."""
+        self.forget()
+        if not isinstance(state, dict) or not isinstance(state.get("scope"), str):
+            return
+        sent = state.get("sent")
+        turns = state.get("turns")
+        if not isinstance(sent, list) or not isinstance(turns, int):
+            return
+        self._scope = state["scope"]
+        self._sent = {key for key in sent if isinstance(key, str)}
+        self._turns = turns
 
     def adopt(self, scope: str | None) -> None:
         """The session opened by the first turn is the one that saw the full context."""
@@ -181,13 +203,17 @@ class ContextLedger:
             self._scope, self._sent, self._turns = scope, set(), 0
         self._turns += 1
         if not self._sent:
-            self._sent = set(parts)
+            self._sent = {_digest(p) for p in parts}
             return "[" + " ".join(p for p in (prefix, *parts) if p) + "]"
-        fresh = [p for p in parts if p not in self._sent]
-        self._sent.update(fresh)
+        fresh = [p for p in parts if _digest(p) not in self._sent]
+        self._sent.update(_digest(p) for p in fresh)
         if not fresh:
             return ""
         return "[Your earlier instructions still hold. New or updated: " + " ".join(fresh) + "]"
+
+
+def _digest(piece: str) -> str:
+    return hashlib.sha256(piece.encode("utf-8")).hexdigest()[:16]
 
 
 def describe_error(exc: BaseException) -> str:

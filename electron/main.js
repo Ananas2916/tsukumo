@@ -298,7 +298,7 @@ const settings = {
   updateChecks: true,
   /** The last version already announced with a notification: each one is announced once. */
   updateNotified: null,
-  /** Hold the right Ctrl to talk to her (Windows only). */
+  /** Hold Ctrl to talk to her (Windows only). */
   holdToTalk: true,
 };
 
@@ -1393,7 +1393,7 @@ function updateTrayMenu() {
       ...(desktop.available()
         ? [
             {
-              label: t('Hold right Ctrl to talk'),
+              label: t('Hold Ctrl to talk'),
               type: 'checkbox',
               checked: settings.holdToTalk,
               click: toggleHoldToTalk,
@@ -1688,32 +1688,66 @@ function registerPushToTalk(key) {
 
 handleIpc('voice:set-key', (_event, key) => registerPushToTalk(key));
 
-// Press and hold anywhere: the right Ctrl. Not a keyboard hook (see above):
-// Windows is asked whether that one key is down, about thirty times a
-// second, and only while push-to-talk can listen. If another key goes down
-// with it, it was a shortcut (right Ctrl + C) and what was heard is dropped.
-const HOLD_KEY = 0xa3; // VK_RCONTROL
+// Press and hold anywhere: Ctrl. Not a keyboard hook (see above): Windows is
+// asked whether those keys are down, about thirty times a second, and only
+// while push-to-talk can listen. If another key goes down with it, it was a
+// shortcut (Ctrl + C) and what was heard is dropped.
+//
+// The right Ctrl talks at once. The left one too (people reach for it first,
+// and some laptops have no right one), but only once it has been held alone
+// for a moment: it starts half the shortcuts, and Ctrl + C must never wake the
+// microphone. For the same reason a click counts as a shortcut on the left
+// (Ctrl + click), while clicking as you talk on the right is fine.
+//
+// Two quick taps (as in Coucou's dictation) are hands-free: she listens
+// until you stop talking. Esc drops what she's hearing, however it started.
+const RIGHT_CTRL = 0xa3; // VK_RCONTROL
+const LEFT_CTRL = 0xa2; // VK_LCONTROL
+const ESCAPE = 0x1b;
+const LEFT_CTRL_DELAY_MS = 300;
+/** Shorter than this it's a tap, not a sentence; two taps this close are hands-free. */
+const TAP_MS = 250;
+const DOUBLE_TAP_MS = 400;
 /** Keys that don't make it a shortcut: Ctrl itself, in its three codes. */
-const HOLD_ALONE = [0x11, 0xa2, HOLD_KEY];
+const HOLD_ALONE = [0x11, LEFT_CTRL, RIGHT_CTRL];
+const MOUSE_BUTTONS = [0x01, 0x02, 0x04, 0x05, 0x06];
 const HOLD_POLL_MS = 30;
-const hold = { down: false, shortcut: false };
+const hold = { key: 0, since: 0, started: false, shortcut: false, handsFree: false, tapEnded: 0, escape: false };
 
 function watchHoldToTalk() {
   if (!desktop.available()) return;
   setInterval(() => {
     const wanted = settings.holdToTalk && voiceState.available && voiceState.mode === 'push';
-    const down = wanted && desktop.keyDown(HOLD_KEY);
-    if (down && !hold.down) {
-      hold.down = true;
-      // A key already down (C, then right Ctrl): a shortcut from the start.
-      hold.shortcut = desktop.otherKeyDown(HOLD_ALONE);
-      if (!hold.shortcut) sendToPet('voice:push-to-talk', { action: 'start' });
-    } else if (down && !hold.shortcut && desktop.otherKeyDown(HOLD_ALONE)) {
+    const escape = wanted && voiceState.held && desktop.keyDown(ESCAPE);
+    if (escape && !hold.escape) sendToPet('voice:push-to-talk', { action: 'cancel' });
+    hold.escape = escape;
+    const key = !wanted ? 0 : desktop.keyDown(RIGHT_CTRL) ? RIGHT_CTRL : desktop.keyDown(LEFT_CTRL) ? LEFT_CTRL : 0;
+    if (key && !hold.key) {
+      const now = Date.now();
+      // A key already down (C, then Ctrl): a shortcut from the start.
+      const shortcut = desktop.otherKeyDown(HOLD_ALONE);
+      const handsFree = !shortcut && now - hold.tapEnded < DOUBLE_TAP_MS;
+      Object.assign(hold, { key, since: now, started: handsFree, shortcut, handsFree });
+      if (handsFree) sendToPet('voice:push-to-talk', { action: 'toggle' });
+    }
+    if (!key) {
+      if (hold.key && !hold.shortcut && !hold.handsFree) {
+        // A tap is too short to be a sentence: it may be the first of two.
+        const tap = Date.now() - hold.since < TAP_MS;
+        if (hold.started) sendToPet('voice:push-to-talk', { action: tap ? 'cancel' : 'end' });
+        hold.tapEnded = tap ? Date.now() : 0;
+      }
+      Object.assign(hold, { key: 0, started: false, handsFree: false });
+      return;
+    }
+    if (hold.shortcut || hold.handsFree) return;
+    const clicked = hold.key === LEFT_CTRL && MOUSE_BUTTONS.some((vk) => desktop.keyDown(vk));
+    if (clicked || desktop.otherKeyDown(HOLD_ALONE)) {
       hold.shortcut = true;
-      sendToPet('voice:push-to-talk', { action: 'cancel' });
-    } else if (!down && hold.down) {
-      hold.down = false;
-      if (!hold.shortcut) sendToPet('voice:push-to-talk', { action: 'end' });
+      if (hold.started) sendToPet('voice:push-to-talk', { action: 'cancel' });
+    } else if (!hold.started && Date.now() - hold.since >= (hold.key === LEFT_CTRL ? LEFT_CTRL_DELAY_MS : 0)) {
+      hold.started = true;
+      sendToPet('voice:push-to-talk', { action: 'start' });
     }
   }, HOLD_POLL_MS);
 }

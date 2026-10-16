@@ -146,6 +146,118 @@ def test_openclaw_session_keeps_one_copy_of_the_rules():
     assert sent[2].startswith(f"[{RULES}")
 
 
+def test_the_ledger_survives_a_save_and_holds_no_text():
+    ledger = ContextLedger()
+    ledger.bracket(_turn(RULES, "Local time: 10:00."), "s1")
+    state = ledger.state()
+    assert RULES not in str(state)
+
+    again = ContextLedger()
+    again.restore(state)
+    assert again.bracket(_turn(RULES, "Local time: 10:05."), "s1").endswith("New or updated: Local time: 10:05.]")
+    for broken in (None, "x", {"scope": "s1"}, {"scope": 3, "sent": [], "turns": 0}):
+        again.restore(broken)
+        assert again.bracket(_turn(RULES), "s1") == f"[{RULES}]"
+
+
+def _openclaw(tmp_path):
+    from backend.llm.openclaw import OpenClawClient
+
+    client = OpenClawClient("ws://127.0.0.1:1", "token", session_state_path=tmp_path / "openclaw_session.json")
+    client.replies = True
+    sent = []
+
+    async def nothing():
+        return None
+
+    async def create(label):
+        return {"key": "agent:main:tsukumo", "sessionId": "abc"}
+
+    async def request(method, params):
+        sent.append(params["message"])
+        if client.replies:
+            client._chat_events.put_nowait({"runId": "r", "state": "final", "message": {"content": [{"type": "text", "text": "ok"}]}})
+        return {"payload": {"runId": "r"}}
+
+    client._ensure_connected, client._create_session_with_label, client._request = nothing, create, request
+    return client, sent
+
+
+def _openclaw_turn(client, messages):
+    async def turn():
+        return [p async for p in client.stream(messages)]
+
+    return asyncio.run(turn())
+
+
+def test_openclaw_switched_back_on_does_not_repeat_the_rules(tmp_path):
+    first, sent = _openclaw(tmp_path)
+    _openclaw_turn(first, _turn(RULES, "Local time: 10:00."))
+    # An engine switch or a restart: a new client reusing the session saved on disk.
+    second, sent_later = _openclaw(tmp_path)
+    _openclaw_turn(second, _turn(RULES, "Local time: 10:05."))
+    assert sent[0].startswith(f"[{RULES}")
+    assert sent_later == ["[Your earlier instructions still hold. New or updated: Local time: 10:05.]\n\nciao"]
+
+
+def test_openclaw_timing_out_after_delivery_keeps_the_ledger(tmp_path, monkeypatch):
+    client, sent = _openclaw(tmp_path)
+    client.replies = False
+
+    async def impatient(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr("backend.llm.openclaw.asyncio.wait_for", impatient)
+    monkeypatch.setattr("backend.llm.openclaw.AGENT_SILENCE", 0)
+    try:
+        _openclaw_turn(client, _turn(RULES))
+    except asyncio.TimeoutError:
+        pass
+    monkeypatch.undo()
+    client.replies = True
+    # The gateway took the message, the slow model answered it anyway: no second copy.
+    _openclaw_turn(client, _turn(RULES, text="ancora"))
+    assert sent[1] == "ancora"
+
+
+def test_openclaw_waits_for_a_slow_agent_while_it_shows_signs_of_life(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setattr("backend.llm.openclaw.AGENT_SILENCE", 0.4)
+    monkeypatch.setattr("backend.llm.openclaw.SILENCE_CHECK", 0.05)
+    client, _ = _openclaw(tmp_path)
+    client.replies = False
+
+    async def turns():
+        async def thinking():
+            # The "agent" channel's thinking keeps coming for 1 s, then the reply.
+            for _ in range(10):
+                await asyncio.sleep(0.1)
+                client._heard_at = time.monotonic()
+            client._chat_events.put_nowait({"runId": "r", "state": "final", "message": {"content": [{"type": "text", "text": "eccomi"}]}})
+
+        task = asyncio.create_task(thinking())
+        assert [p async for p in client.stream(_turn(RULES))] == ["eccomi"]
+        await task
+        # Nothing at all from the agent: that one does time out.
+        try:
+            [p async for p in client.stream(_turn(RULES, text="ci sei?"))]
+        except asyncio.TimeoutError:
+            return
+        raise AssertionError("a silent agent must time out")
+
+    asyncio.run(turns())
+
+
+def test_codex_after_a_restart_does_not_repeat_the_rules(tmp_path, monkeypatch):
+    client, sent = _codex(tmp_path, monkeypatch)
+    _run(client, _turn(RULES, TAGS))
+    again, sent_again = _codex(tmp_path, monkeypatch)
+    _run(again, _turn(RULES, TAGS, text="e poi?"))
+    assert RULES in sent[0] and sent_again == ["e poi?"]
+
+
 def test_a_failed_turn_sends_everything_again(tmp_path, monkeypatch):
     client, sent = _codex(tmp_path, monkeypatch, fail_on=(2,))
     _run(client, _turn(RULES, TAGS))

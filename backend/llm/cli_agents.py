@@ -248,6 +248,8 @@ class _SessionFile:
         self.path = path
         #: Changing working folder or model, the conversation starts over.
         self.scope = scope
+        #: The ``ContextLedger`` state saved with the conversation, read by ``load``.
+        self.context: Any = None
 
     def load(self) -> str | None:
         if not self.path or not self.path.is_file():
@@ -258,16 +260,18 @@ class _SessionFile:
             return None
         if data.get("scope") != self.scope:
             return None
+        self.context = data.get("context")
         return data.get("sessionId") or None
 
-    def save(self, session_id: str) -> None:
+    def save(self, session_id: str, context: dict[str, Any] | None = None) -> None:
         if not self.path:
             return
+        payload: dict[str, Any] = {"scope": self.scope, "sessionId": session_id}
+        if context is not None:
+            payload["context"] = context
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps({"scope": self.scope, "sessionId": session_id}), encoding="utf-8"
-            )
+            self.path.write_text(json.dumps(payload), encoding="utf-8")
         except OSError as exc:
             logger.warning("Agent session not saved: %s", exc)
 
@@ -297,6 +301,7 @@ class _CLIAgent(LLMClient):
         self.tasks = TaskList()
         #: What of the directive the session has seen, for the agents that get it in the message.
         self.context = ContextLedger()
+        self.context.restore(self.session.context)
 
     def _require_executable(self) -> str:
         if not self.executable:
@@ -679,6 +684,8 @@ class CodexClient(_CLIAgent):
             self.context.forget()
             raise AgentError(f"Codex: {parser.error}")
         self.context.adopt(self.session_id)
+        if self.session_id:
+            self.session.save(self.session_id, self.context.state())
 
 
 # ---------------------------------------------------------------------------
@@ -866,6 +873,8 @@ class AntigravityClient(_CLIAgent):
             self.context.forget()
             raise AgentError(f"Antigravity: {parser.error}")
         self.context.adopt(self.session_id)
+        if self.session_id:
+            self.session.save(self.session_id, self.context.state())
         if parser.stale_error:
             logger.info("Antigravity answered, but the conversation still reports: %s", parser.stale_error)
         if parser.denied and not produced:

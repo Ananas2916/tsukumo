@@ -92,6 +92,14 @@ const BARGE_FRAMES = 6;
 const GUARD_PREROLL = 0.8;
 
 /**
+ * Push to talk started with a click (no key to release): the sentence ends
+ * after this much silence, and if nothing at all is said it's dropped after
+ * `NO_SPEECH`. Without it the microphone listened until the next click.
+ */
+const AUTO_END_SILENCE = 1;
+const NO_SPEECH = 6;
+
+/**
  * The four bands the flame listens to, in Hz: the chest of the voice, the
  * vowels, the consonants' body and the hiss of "s" and "f". At 16 kHz the
  * spectrum stops at 8 kHz, which is all a voice needs.
@@ -139,6 +147,9 @@ export class VoiceInput {
     this.guarded = false;
     this.guardWindow = [];
     this.capturing = false; // collecting a sentence
+    /** Push to talk with no key to release (`beginPush`), and whether a voice was heard yet. */
+    this.autoEnd = false;
+    this.heard = false;
     this.buffers = [];
     this.preroll = [];
     this.silentFrames = 0;
@@ -299,10 +310,15 @@ export class VoiceInput {
     if (guarded && this.capturing && this.mode !== 'push') this._discard();
   }
 
-  /** `push` mode: I start talking. */
-  beginPush() {
+  /**
+   * `push` mode: I start talking. With `autoEnd` (a click, not a held key) the
+   * sentence ends by itself after a second of silence.
+   */
+  beginPush({ autoEnd = false } = {}) {
     if (!this.running || this.mode !== 'push') return;
     this._reset();
+    this.autoEnd = autoEnd;
+    this.heard = false;
     this.capturing = true;
     this.onActivity(true);
   }
@@ -334,10 +350,16 @@ export class VoiceInput {
     const seconds = input.length / SAMPLE_RATE;
 
     if (this.mode === 'push') {
-      if (this.capturing) {
-        this.buffers.push(frame);
-        this.capturedFrames += input.length;
-      }
+      if (!this.capturing) return;
+      this.buffers.push(frame);
+      this.capturedFrames += input.length;
+      if (!this.autoEnd) return;
+      const loud = level >= this.threshold;
+      this.heard ||= loud;
+      this.silentFrames = loud ? 0 : this.silentFrames + seconds;
+      const captured = this.capturedFrames / SAMPLE_RATE;
+      if (!this.heard && captured >= NO_SPEECH) this._discard();
+      else if ((this.heard && this.silentFrames >= AUTO_END_SILENCE) || captured >= MAX_UTTERANCE) this._flush();
       return;
     }
 

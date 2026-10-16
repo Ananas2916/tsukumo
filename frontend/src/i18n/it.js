@@ -973,7 +973,7 @@ export const IT = {
   "{name} is thinking…": "{name} sta pensando…",
   "{name} is waiting for you": "{name} ti aspetta",
   "{name} — click to talk to her": "{name} — clic per parlarle",
-  "{name} — click, or hold right Ctrl, to talk to her": "{name} — clic, o tieni premuto Ctrl destro, per parlarle",
+  "{name} — click or hold Ctrl to talk to her, tap Ctrl twice for hands-free": "{name} — clic o tieni premuto Ctrl per parlarle, due tocchi di Ctrl per le mani libere",
   "{n} days": "{n} giorni",
   "{n} h ago": "da {n} h",
   "{n} hours": "{n} ore",
@@ -1144,4 +1144,9 @@ export const IT = {
   "in {folder}": "in {folder}",
   "{n} helpers with them": "{n} aiutanti al seguito",
   "in the pond": "nello stagno",
+  // dashboard/layout.js
+  "Drag to move it, or use the arrow keys": "Trascinala per spostarla, o usa le frecce",
+  "Whole row or half": "Tutta la riga o metà",
+  "Reset layout": "Ripristina disposizione",
+  "Put the tiles back where they were": "Rimetti i riquadri dov’erano",
 };

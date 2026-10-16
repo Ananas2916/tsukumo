@@ -14,6 +14,7 @@ import { apiUrl, wsUrl } from './config.js';
 import { el, iconButton, readSetting } from './dom.js';
 import { parseExtras, resolveOutfit } from './flame/wardrobe.js';
 import { AgentsWidget, TodayWidget, TodoWidget, WeatherWidget, WeekWidget } from './dashboard/widgets.js';
+import { TileLayout } from './dashboard/layout.js';
 import { ParkWidget } from './dashboard/park.js';
 import { clock } from './dashboard/time.js';
 import { LOCALE, t, translateDom, tx, watchLanguage } from './i18n.js';
@@ -75,7 +76,15 @@ const widgets = {
   todo: new TodoWidget(app),
   park: new ParkWidget(),
 };
-$('dash-grid').append(widgets.week.node, widgets.today.node, widgets.todo.node, widgets.weather.node, widgets.agents.node, widgets.park.node);
+
+// The tiles can be dragged around and widened (dashboard/layout.js); this is the default.
+const resetLayout = el('button', { class: 'ghost-btn hidden', type: 'button', title: t('Put the tiles back where they were') }, t('Reset layout'));
+const layout = new TileLayout(
+  $('dash-grid'),
+  { week: widgets.week.node, today: widgets.today.node, todo: widgets.todo.node, weather: widgets.weather.node, agents: widgets.agents.node, park: widgets.park.node },
+  { wide: ['week', 'agents', 'park'], onChange: (custom) => resetLayout.classList.toggle('hidden', !custom) },
+);
+resetLayout.addEventListener('click', () => layout.reset());
 
 const DEPENDS = {
   reminders: ['week', 'today'],
@@ -134,7 +143,7 @@ window.addEventListener('storage', (event) => {
 const actions = $('dash-actions');
 const startChip = el('button', { class: 'ghost-btn start-chip', type: 'button', role: 'switch', title: t('When you turn on the PC: the dashboard, or just her on the desktop') });
 const settingsButton = el('button', { class: 'ghost-btn', type: 'button', onClick: () => app.showTab('engines') }, icon('engines', 15), el('span', {}, t('Settings')));
-actions.append(startChip, settingsButton);
+actions.append(resetLayout, startChip, settingsButton);
 if (companion?.minimizeDashboard) {
   actions.append(
     iconButton('maximize', { title: t('Maximize'), className: 'icon-btn', onClick: () => companion.toggleMaximizeDashboard() }),

@@ -282,7 +282,7 @@ export class Sfx {
   }
 
   /**
-   * She starts listening (right Ctrl held): a soft breath in and one glass
+   * She starts listening (Ctrl held): a soft breath in and one glass
    * note. Quiet and short, since the microphone is already open.
    */
   ear() {

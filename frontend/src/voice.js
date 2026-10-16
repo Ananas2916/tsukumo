@@ -35,6 +35,13 @@ export const BARGE_IN_SETTING = 'dc:barge-in';
 /** The available modes, in the order they appear in the panel. */
 export const MODES = ['push', 'vad', 'wake'];
 
+/**
+ * Push to talk closes the microphone this long after a sentence ends: kept
+ * open, Windows showed it in use forever. A second is enough for a quick
+ * follow-up without reopening it.
+ */
+const PUSH_CLOSE_AFTER_MS = 1000;
+
 /** Live transcription: how often to ask, from how much audio, and up to how much. */
 const PARTIAL_EVERY = 0.7;
 const PARTIAL_FROM = 0.6;
@@ -160,12 +167,13 @@ export class VoiceController {
     this.mic.setMuted(this.paused || (handsFree && !this.bargeIn));
   }
 
-  /** Push-to-talk key pressed. */
-  pushStart() {
+  /** Push-to-talk key pressed; `autoEnd` when there's no key to release (a click). */
+  pushStart({ autoEnd = false } = {}) {
     if (!this.listening || this.mode !== 'push') return;
+    clearTimeout(this._closeTimer);
     // Talking over the companion means wanting to interrupt it.
     if (this.speaking && this.interruptOnSpeech) this.socket.cancel();
-    this.mic.beginPush();
+    this.mic.beginPush({ autoEnd });
   }
 
   /** Push-to-talk key released. */
@@ -217,8 +225,19 @@ export class VoiceController {
       // if the previous engine said no (it may have been changed from the panel).
       this._sentence += 1;
       this._partial = { busy: false, askedAt: performance.now() / 1000, off: false };
+    } else {
+      this.closeSoon();
     }
     this.onEvent({ type: 'activity', speaking });
+  }
+
+  /** Push to talk: the microphone closes in a moment, unless a new sentence starts. */
+  closeSoon() {
+    if (this.mode !== 'push') return;
+    clearTimeout(this._closeTimer);
+    this._closeTimer = setTimeout(() => {
+      if (this.mode === 'push' && !this.mic.capturing && this.listening) this.disable();
+    }, PUSH_CLOSE_AFTER_MS);
   }
 
   /** Someone talked over her (guarded listening): she stops and listens. */

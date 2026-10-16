@@ -122,6 +122,11 @@ const voice = new VoiceController({
     if (event.type === 'activity') {
       document.body.classList.toggle('listening', event.speaking);
       stage.setListening(event.speaking);
+      // A sentence started with a click ended by itself, after a silence.
+      if (!event.speaking && pushHeld) {
+        pushHeld = false;
+        reportVoice();
+      }
     }
     if (event.type === 'level') state.micLevel = event.level;
     // Your words so far, while you're still talking (live transcription).
@@ -893,9 +898,10 @@ function setDancing(value) {
 // ---------------------------------------------------------------------------
 // Voice: push-to-talk
 // ---------------------------------------------------------------------------
-// Three ways. Holding the right Ctrl anywhere (Electron watches the key, see
+// Three ways. Holding Ctrl anywhere (Electron watches the key, see
 // watchHoldToTalk in electron/main.js) is press-and-hold. The global
-// shortcut is a toggle, because Electron can't tell when it's *released*.
+// shortcut and the mic button are a toggle, because Electron can't tell when
+// a shortcut is *released*: those end by themselves after a silence.
 // Inside the window we use real keydown/keyup.
 let pushHeld = false;
 
@@ -921,15 +927,20 @@ async function pushToggle() {
     return;
   }
   pushHeld = !pushHeld;
-  if (pushHeld) voice.pushStart();
-  else voice.pushEnd();
+  // No key to release: it ends by itself after a second of silence.
+  if (pushHeld) {
+    sfx.play('ear');
+    voice.pushStart({ autoEnd: true });
+  } else {
+    voice.pushEnd();
+  }
   reportVoice();
 }
 
 /** Right Ctrl held down: talk while it's down. */
 async function pushHold(action) {
   if (action === 'cancel') {
-    // It was a shortcut (right Ctrl + C...): nothing was meant for her.
+    // It was a shortcut (Ctrl + C...): nothing was meant for her.
     if (!pushHeld) return;
     pushHeld = false;
     voice.pushCancel();
@@ -950,8 +961,11 @@ async function pushHold(action) {
     pushHeld = false;
     return;
   }
-  // Released while the microphone was still opening: nothing to record.
-  if (!pushHeld) return;
+  // Released while the microphone was still opening: nothing to record, and it closes again.
+  if (!pushHeld) {
+    voice.closeSoon();
+    return;
+  }
   sfx.play('ear');
   voice.pushStart();
   reportVoice();
