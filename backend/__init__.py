@@ -5,4 +5,4 @@ voices, viseme extraction for the lip-sync, engine status and the WebSocket
 server.
 """
 
-__version__ = "3.1.2"
+__version__ = "3.1.3"
