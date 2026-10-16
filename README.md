@@ -642,6 +642,7 @@ Viseme timeline: `t` start (s), `d` duration, `v` viseme (`a i u e o sil`),
 | `GET/POST/DELETE` | `/api/vault` · `/api/vault/{id}` | PC only: the vault (the value only to the PC) |
 | `POST` · `GET` | `/api/agent/say` · `/show` · `/presence` · `/agenda` · `/search` | PC only: what the MCP server calls |
 | `GET/POST` | `/api/approvals` · `/api/approvals/{id}` | PC only: Claude Code's permission questions and their answers |
+| `POST` | `/api/phone/approvals/{id}` | from the phone: `allow` or `deny` one waiting request, with the command it showed (`summary`); never "always" |
 | `GET` | `/api/usage` | Claude Code / Codex / Antigravity limits and today's tokens |
 | `GET/POST` | `/api/preferences` | how chatty, about what, weather city |
 | `GET` · `POST` | `/api/music` · `/api/music/control` | Spotify status and taste; PC only: the player's `pause`, `resume`, `next`, `previous` |

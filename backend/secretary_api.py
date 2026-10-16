@@ -4,19 +4,21 @@ and the permission requests.
 
 Which of these are local-only is decided in security.py (``LOCAL_ONLY``):
 the settings, the vault, the agents' endpoints and the approvals never
-answer a remote client.
+answer a remote client. The one exception is ``/api/phone/approvals/{id}``:
+allow or deny, from the phone, for the exact request it was shown.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -30,7 +32,9 @@ from .preferences import TRAVEL_MODES, Preferences
 from .secretary import Secretary
 from .vault import Vault
 
-Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
+logger = logging.getLogger(__name__)
+
+Broadcast =Callable[[dict[str, Any]], Awaitable[None]]
 
 _HOST = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
 
@@ -123,6 +127,13 @@ class ApprovalRequest(BaseModel):
 
 class ApprovalDecision(BaseModel):
     decision: str
+
+
+class PhoneApprovalDecision(BaseModel):
+    """The phone's answer: no "always", and the command it showed, to bind the answer to it."""
+
+    decision: Literal["allow", "deny"]
+    summary: str = Field(..., max_length=400)
 
 
 def _by(value: str | None) -> float | None:
@@ -361,6 +372,16 @@ def create_router(services: Services) -> APIRouter:
     async def decide_approval(approval_id: str, request: ApprovalDecision) -> dict[str, Any]:
         if not services.approvals.decide(approval_id, request.decision):
             raise HTTPException(status_code=404, detail="Request expired or already answered")
+        return {"ok": True}
+
+    @router.post("/api/phone/approvals/{approval_id}")
+    async def decide_from_phone(approval_id: str, request: PhoneApprovalDecision) -> dict[str, Any]:
+        outcome = services.approvals.decide_remote(approval_id, request.decision, request.summary)
+        if outcome == "gone":
+            raise HTTPException(status_code=404, detail="Request expired or already answered")
+        if outcome != "ok":
+            raise HTTPException(status_code=409, detail="This answer is for another request")
+        logger.info("Permission %s answered from the phone: %s", approval_id, request.decision)
         return {"ok": True}
 
     return router

@@ -7,8 +7,11 @@ Coucou's notch, and the hook gets the answer. If nobody answers in time, or
 Tsukumo is off, the hook says nothing and Claude Code asks in its own window
 as always (fail-open: a missed click never blocks or approves anything).
 
-Only the PC answers: the endpoints are ``LOCAL_ONLY`` (security.py), the
-phone can't approve a command.
+The PC answers everything: the endpoints are ``LOCAL_ONLY`` (security.py).
+The phone gets one narrow way in (``decide_remote``): allow or deny, never
+"always", only for the request still waiting and only if it names the exact
+command it was shown. Face ID happens on the phone; the PC still only trusts
+the token, so "always" (which outlives the request) stays on the PC.
 """
 
 from __future__ import annotations
@@ -23,6 +26,8 @@ from typing import Any
 Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
 
 DECISIONS = ("allow", "always", "deny")
+#: What the phone may answer: one request at a time, nothing that lasts.
+REMOTE_DECISIONS = ("allow", "deny")
 #: How long the island waits for a click (the hook's own timeout is a little longer).
 WAIT = 110.0
 
@@ -43,6 +48,8 @@ class Approvals:
         self.broadcast = broadcast
         self.pending: dict[str, dict[str, Any]] = {}
         self._futures: dict[str, asyncio.Future[str]] = {}
+        #: Requests the phone answered (the others were the PC).
+        self._by: dict[str, str] = {}
 
     def public(self) -> list[dict[str, Any]]:
         return list(self.pending.values())
@@ -64,14 +71,18 @@ class Approvals:
         self.pending[approval_id] = item
         self._futures[approval_id] = future
         await self.broadcast({"type": "approval", "event": "ask", "approval": item})
+        decision: str | None = None
         try:
-            return await asyncio.wait_for(future, wait)
+            decision = await asyncio.wait_for(future, wait)
+            return decision
         except asyncio.TimeoutError:
             return None
         finally:
             self.pending.pop(approval_id, None)
             self._futures.pop(approval_id, None)
-            await self.broadcast({"type": "approval", "event": "closed", "id": approval_id})
+            # Who answered and how: the phone shows "allowed from the PC" and drops its notification.
+            by = self._by.pop(approval_id, "pc")
+            await self.broadcast({"type": "approval", "event": "closed", "id": approval_id, "decision": decision, "by": by if decision else None})
 
     def decide(self, approval_id: str, decision: str) -> bool:
         future = self._futures.get(approval_id)
@@ -79,3 +90,21 @@ class Approvals:
             return False
         future.set_result(decision)
         return True
+
+    def decide_remote(self, approval_id: str, decision: str, shown: str) -> str:
+        """The phone's answer: "ok", "gone" (expired or answered) or "mismatch".
+
+        ``shown`` is the command the phone displayed: a decision only counts
+        for the request it was meant for, never for one that came after.
+        """
+        item = self.pending.get(approval_id)
+        future = self._futures.get(approval_id)
+        if decision not in REMOTE_DECISIONS:
+            return "mismatch"
+        if item is None or future is None or future.done():
+            return "gone"
+        if " ".join(str(shown or "").split()) != " ".join(item["summary"].split()):
+            return "mismatch"
+        self._by[approval_id] = "phone"
+        future.set_result(decision)
+        return "ok"

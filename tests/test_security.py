@@ -378,3 +378,86 @@ def test_phone_cannot_reach_beyond_the_brain(phone_brain):
     # The full engine change stays on the PC.
     assert client.post("/api/providers", headers=headers, json={}).status_code == 403
     assert not local_only("POST", "/api/brain")
+
+
+# ---------------------------------------------------------------------------
+# Permission requests from the phone: allow or deny, the exact request only
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def waiting_request(client, monkeypatch):
+    """A Claude Code permission request waiting on the PC, and what was broadcast."""
+    import threading
+
+    from backend import server
+
+    sent = []
+
+    async def record(message, voice_to=None):
+        sent.append(message)
+
+    monkeypatch.setattr(server.hub, "broadcast", record)
+    answers = {}
+
+    def ask():
+        answers["reply"] = client.post("/api/approvals", json={"tool": "Bash", "input": {"command": "npm  run deploy"}}).json()
+
+    thread = threading.Thread(target=ask)
+    thread.start()
+    pending = []
+    for _ in range(100):
+        pending = client.get("/api/approvals").json()["approvals"]
+        if pending:
+            break
+        threading.Event().wait(0.02)
+    assert pending
+    phone = {"X-Forwarded-For": "100.101.102.103", "Authorization": f"Bearer {server.POLICY.token}"}
+    yield pending[0], phone, answers, sent
+    # Whatever the test did, nobody stays waiting.
+    server.APPROVALS.decide(pending[0]["id"], "deny")
+    thread.join(5)
+
+
+def test_phone_allows_the_request_it_was_shown(client, waiting_request):
+    item, phone, answers, sent = waiting_request
+    path = f"/api/phone/approvals/{item['id']}"
+    # The phone saw it come by: the "ask" broadcast reaches every client.
+    assert any(m.get("event") == "ask" and m["approval"]["id"] == item["id"] for m in sent)
+    assert client.post(path, json={"decision": "allow", "summary": "npm run deploy"}, headers={"X-Forwarded-For": "100.101.102.103"}).status_code == 401
+    assert client.post(path, headers=phone, json={"decision": "allow", "summary": "npm run deploy"}).status_code == 200
+    for _ in range(100):
+        if "reply" in answers:
+            break
+        threading_wait(0.02)
+    assert answers["reply"] == {"decision": "allow"}
+    closed = [m for m in sent if m.get("event") == "closed"]
+    assert closed[-1]["by"] == "phone" and closed[-1]["decision"] == "allow"
+    # Answered: a second answer finds nothing.
+    assert client.post(path, headers=phone, json={"decision": "deny", "summary": "npm run deploy"}).status_code == 404
+
+
+def test_phone_cannot_say_always_or_answer_another_command(client, waiting_request):
+    item, phone, answers, _ = waiting_request
+    path = f"/api/phone/approvals/{item['id']}"
+    # "Always" outlives the request: PC only.
+    assert client.post(path, headers=phone, json={"decision": "always", "summary": item["summary"]}).status_code == 422
+    # An answer bound to another command (a newer request with the same id can't take it).
+    assert client.post(path, headers=phone, json={"decision": "allow", "summary": "rm -rf /"}).status_code == 409
+    assert client.post(path, headers=phone, json={"decision": "allow"}).status_code == 422
+    # The PC's own endpoints stay closed to the phone.
+    assert client.post(f"/api/approvals/{item['id']}", headers=phone, json={"decision": "allow"}).status_code == 403
+    assert client.get("/api/approvals", headers=phone).status_code == 403
+    assert client.post("/api/phone/approvals/nope", headers=phone, json={"decision": "allow", "summary": "x"}).status_code == 404
+    assert "reply" not in answers
+
+
+def test_only_the_phone_answer_path_is_open_from_afar():
+    assert not local_only("POST", "/api/phone/approvals/abc")
+    assert local_only("POST", "/api/approvals/abc")
+    assert local_only("POST", "/api/approvals")
+    assert local_only("GET", "/api/approvals")
+
+
+def threading_wait(seconds: float) -> None:
+    import threading
+
+    threading.Event().wait(seconds)

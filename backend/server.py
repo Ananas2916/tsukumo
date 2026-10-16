@@ -1870,13 +1870,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "usage": USAGE.latest,
                 "agents": hub.agents.public(),
                 "secretary": SECRETARY.status(),
-                "approvals": [] if websocket.scope.get("tsukumo.remote") else APPROVALS.public(),
+                # The phone gets the "ask" broadcasts too: after a reconnect it catches up here.
+                "approvals": APPROVALS.public(),
                 # The other programs' sessions and messages: not for afar.
                 "park": None if websocket.scope.get("tsukumo.remote") else PARK.public(),
                 # The suspended phone missed the replies: it gets them back from here.
                 "transcript": hub.transcript.recent(),
-                # What a phone client can ask of this backend: the phone voice, the brain switch.
-                "features": ["brain", "speak"],
+                # What a phone client can ask of this backend: the phone voice, the brain
+                # switch, allow/deny of a permission request.
+                "features": ["brain", "speak", "approve"],
             }
         )
 

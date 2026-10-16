@@ -97,8 +97,9 @@ LOCAL_ONLY: tuple[tuple[str, str], ...] = (
     ("GET", "/api/vault/"),
     ("POST", "/api/vault"),
     ("DELETE", "/api/vault/"),
-    # What the local agents send to her body (MCP) and the permission requests:
-    # a phone never approves a command.
+    # What the local agents send to her body (MCP) and the permission requests.
+    # The phone answers one request only through /api/phone/approvals/{id}
+    # (allow or deny, the exact command it showed): never "always", never these.
     ("GET", "/api/agent/"),
     ("POST", "/api/agent/"),
     ("GET", "/api/approvals"),

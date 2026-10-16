@@ -98,9 +98,12 @@ The backend can drive agents that run commands, so:
    page's HTML and `/assets/*`) loads without the token: don't widen it.
 2. Any new endpoint that changes configuration, installs something, launches
    programs or touches files outside `state/uploads` must be added to
-   `LOCAL_ONLY`. The one exception is `POST /api/brain`: the phone may switch
-   among brains already set up on the PC and pick their model, nothing else.
-   Keep it that narrow.
+   `LOCAL_ONLY`. There are two exceptions, and both stay this narrow:
+   - `POST /api/brain`: the phone may switch among brains already set up on
+     the PC and pick their model, nothing else.
+   - `POST /api/phone/approvals/{id}`: the phone may allow or deny one
+     waiting permission request, never "always", and only by naming the exact
+     command it was shown (`Approvals.decide_remote`).
 3. Write `.env` only through `config.save_dotenv` (it rejects newlines and
    invalid keys). Validate select-type permission fields against their options.
 4. Secrets never reach the frontend: use `Settings.provider_public` /
