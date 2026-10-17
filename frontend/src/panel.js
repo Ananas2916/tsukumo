@@ -1,45 +1,29 @@
 /**
- * Tsukumo's panel: chat, character, agenda, work (the agents' usage) and
- * engines, detached from the character.
+ * Tsukumo's panel: the chat, beside her on the desktop.
  *
- * It's a separate window with its own WebSocket connection to the backend:
- * the backend sends everything to everyone, so the same messages as the
- * character's arrive here. The panel uses them for the chat and the
- * engines' state and ignores the audio, which plays only in the character's
- * window.
+ * It holds only the chat, so it stays light. Character, agenda, work and
+ * engines live in the dashboard: asking the panel for one of them
+ * (a link in the chat, the brain chip) opens the dashboard on that section.
  *
- * Settings go to three different places:
- *  - voice, reply language, mute -> to the backend (`settings` message);
- *  - size, always on top, ghost mode, windows -> to the Electron process;
- *  - mouth, spontaneous gestures, dances, debug -> to the character, via Electron.
- * Preferences are saved in localStorage, which the character shares (same
- * origin) and reads again at startup.
+ * It's a separate window with its own WebSocket connection to the backend
+ * (hub.js): the backend sends everything to everyone, so the same messages
+ * as the character's arrive here. The audio plays only in her window.
+ *
+ * It's also the window that is always loaded: the first-run introduction
+ * starts here, and so does putting back the voice chosen in Character after
+ * a backend restart (`restorePreferences`).
  */
 
-import { wsUrl } from './config.js';
-import { el, iconButton, readSetting, writeSetting } from './dom.js';
-import { EnginesView } from './engines.js';
+import { el, iconButton } from './dom.js';
+import { createHub, restorePreferences } from './hub.js';
 import { t, translateDom, tx, watchLanguage } from './i18n.js';
-import { icon } from './icons.js';
-import { AgendaView } from './panel/agenda.js';
-import { CharacterView } from './panel/character.js';
 import { ChatView } from './panel/chat.js';
 import { Welcome } from './panel/welcome.js';
-import { WorkView } from './panel/work.js';
-import { CompanionSocket } from './ws.js';
 
 const companion = window.companion ?? null;
 translateDom();
 watchLanguage();
 const $ = (id) => document.getElementById(id);
-
-const TABS = [
-  { id: 'chat', label: t('Chat'), icon: 'chat' },
-  { id: 'character', label: t('Character'), icon: 'character' },
-  { id: 'agenda', label: t('Agenda'), icon: 'clock' },
-  { id: 'work', label: t('Work'), icon: 'briefcase' },
-  { id: 'engines', label: t('Engines'), icon: 'engines' },
-];
 
 const STATE_TEXT = {
   online: t('ready'),
@@ -50,63 +34,21 @@ const STATE_TEXT = {
   speaking: t('speaking'),
 };
 
-/** State shared by the tabs, plus a small event bus. */
-const app = {
-  socket: new CompanionSocket(wsUrl),
-  companion,
-  engines: null,
-  settings: {},
-  voices: [],
-  busy: 'idle',
-  tab: 'chat',
-  _listeners: new Map(),
-  on(type, handler) {
-    if (!this._listeners.has(type)) this._listeners.set(type, new Set());
-    this._listeners.get(type).add(handler);
-  },
-  emit(type, payload) {
-    this._listeners.get(type)?.forEach((handler) => handler(payload));
-  },
-  showTab(name, options = {}) {
-    showTab(name, options);
-  },
-  toast(text, kind = 'info') {
-    showToast(text, kind);
-  },
-};
+const app = createHub({ companion, showTab, toast: showToast });
+const chat = new ChatView(app, $('view-chat'));
 
-// -------------------------------------------------------------------- tabs
-const tabButtons = new Map();
-for (const tab of TABS) {
-  const button = el(
-    'button',
-    { class: 'tab', type: 'button', role: 'tab', dataset: { tab: tab.id }, onClick: () => showTab(tab.id) },
-    icon(tab.icon, 16),
-    el('span', {}, tab.label),
-  );
-  tabButtons.set(tab.id, button);
-  $('tabs').append(button);
+/** The chat is here; any other section opens the dashboard on it. */
+function showTab(name, options = {}) {
+  if (!name || name === 'chat') {
+    chat.shown(options);
+    return;
+  }
+  openDashboard({ ...options, tab: name });
 }
 
-const views = {
-  chat: new ChatView(app, $('view-chat')),
-  character: new CharacterView(app, $('view-character')),
-  agenda: new AgendaView(app, $('view-agenda')),
-  work: new WorkView(app, $('view-work')),
-  engines: new EnginesView(app, $('view-engines')),
-};
-
-function showTab(name, options = {}) {
-  if (!views[name]) name = 'chat';
-  app.tab = name;
-  for (const [id, button] of tabButtons) {
-    button.classList.toggle('active', id === name);
-    button.setAttribute('aria-selected', String(id === name));
-  }
-  for (const id of Object.keys(views)) $(`view-${id}`).classList.toggle('hidden', id !== name);
-  writeSetting('dc:panel-tab', name);
-  companion?.setPanelTab?.(name);
-  views[name].shown?.(options);
+function openDashboard(focus = {}) {
+  if (companion?.openDashboard) companion.openDashboard(focus);
+  else window.open(`./dashboard.html${focus.tab ? `#${focus.tab}` : ''}`, 'tsukumo-dashboard');
 }
 
 // ------------------------------------------------------------------ header
@@ -134,10 +76,11 @@ app.on('busy', renderHeader);
 // ------------------------------------------------------------------ window
 if (companion) {
   const actions = $('window-actions');
+  const dashboard = iconButton('dashboard', { title: t('Open the dashboard: agenda, character, engines…'), className: 'icon-btn', onClick: () => openDashboard() });
   const dock = iconButton('dock', { title: t('Attach to the character'), className: 'icon-btn' });
   const pin = iconButton('pin', { title: t('Keep the panel on top'), className: 'icon-btn' });
   const close = iconButton('close', { title: t('Close the panel (Esc)'), className: 'icon-btn' });
-  actions.append(dock, pin, close);
+  actions.append(dashboard, dock, pin, close);
 
   let docked = true;
   let panelPinned = false;
@@ -162,8 +105,8 @@ if (companion) {
   companion.onVoiceCommand?.((command) => {
     if (command?.type === 'state') app.emit('mic', command);
   });
-  // The character asks to show a tab (double click or starting to type =
-  // chat, with the first key already inside; the menu = the others).
+  // The character asks for the chat (double click or starting to type, with
+  // the first key already inside).
   companion.onFocus((focus = {}) => {
     showTab(focus.tab ?? 'chat', focus);
     // Electron knows whether it's the first start (no saved settings): then the introduction.
@@ -197,51 +140,13 @@ function showToast(text, kind = 'info') {
 const { socket } = app;
 
 socket.on('open', renderHeader);
-socket.on('close', () => {
-  app.busy = 'idle';
-  app.emit('busy', app.busy);
-  renderHeader();
-});
+socket.on('close', renderHeader);
 
 socket.on('hello', (message) => {
   showIdentity(message.memory?.persona);
+  restorePreferences(socket, message.config ?? {});
   // In the browser (without Electron) the first start is detected from localStorage.
   if (!companion) welcome.maybeStart();
-  app.settings = { ...(message.config ?? {}) };
-  app.voices = message.voices ?? [];
-  app.engines = message.engines ?? null;
-  app.emit('hello', message);
-  app.emit('voices', app.voices);
-  app.emit('settings', app.settings);
-  app.emit('engines', app.engines);
-});
-
-socket.on('engines', (message) => {
-  app.engines = message;
-  app.emit('engines', message);
-});
-
-socket.on('voices', (message) => {
-  app.voices = message.voices ?? [];
-  Object.assign(app.settings, pickSettings(message));
-  app.emit('voices', app.voices);
-  app.emit('settings', app.settings);
-});
-
-socket.on('settings', (message) => {
-  Object.assign(app.settings, pickSettings(message));
-  app.emit('settings', app.settings);
-});
-
-socket.on('providers', (message) => {
-  Object.assign(app.settings, pickSettings(message.settings ?? {}));
-  app.emit('providers', message);
-  app.emit('settings', app.settings);
-});
-
-socket.on('state', (message) => {
-  app.busy = message.value === 'idle' ? 'idle' : message.value;
-  app.emit('busy', app.busy);
 });
 
 // The name chosen for her (Character -> Who she is and what she knows about you) in the title bar too.
@@ -255,16 +160,11 @@ function showIdentity(persona) {
   document.title = t('{name} - panel', { name });
 }
 
-function pickSettings(message) {
-  const keys = ['voice', 'ttsEngine', 'replyLanguage', 'replyLanguageResolved', 'voiceLanguage', 'canClone', 'muted'];
-  return Object.fromEntries(keys.filter((key) => key in message).map((key) => [key, message[key]]));
-}
-
 // ----------------------------------------------------------------- startup
 const welcome = new Welcome(app, document.querySelector('.app'));
 app.welcome = welcome;
-const initialTab = (location.hash || '').replace('#', '') || readSetting('dc:panel-tab', 'chat');
-showTab(initialTab);
+companion?.setPanelTab?.('chat');
+chat.shown();
 renderHeader();
 socket.connect();
 

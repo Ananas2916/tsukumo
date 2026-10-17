@@ -567,9 +567,11 @@ hud.onAction = async (id, detail) => {
   }
 };
 
+/** The chat opens the panel; every other section is in the dashboard (Electron routes it there). */
 function openPanel(focus) {
   if (pet) pet.openPanel(focus);
-  else window.open(`./panel.html#${focus.tab}`, 'tsukumo-panel', 'width=420,height=640');
+  else if (focus.tab === 'chat') window.open('./panel.html', 'tsukumo-panel', 'width=420,height=640');
+  else window.open(`./dashboard.html#${focus.tab}`, 'tsukumo-dashboard');
 }
 
 // ---------------------------------------------------------------------------

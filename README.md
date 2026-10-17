@@ -356,13 +356,17 @@ shape of the vowel: round on "o" and "u", wide on "i" and "e".
 
 ## The dashboard
 
-Open it from her island or the tray icon: one window for your day,
-with her docked in its corner above the chat (no menu there: the dashboard
-has its own controls).
+Open it from her island or the tray icon: the centre of the app, with her
+docked in its corner above the chat (no menu there: the dashboard has its own
+controls). On the left, under her name and what she's doing, the sections:
+**Home** with the tiles below, then **Agenda**, **Work**, **Character** and
+**Engines**. Every setting lives here; the panel beside her
+on the desktop is only the chat, and asking it (or her menu, or the tray) for
+a section opens the dashboard on it.
 
 - **Week and Today**: your reminders and timers, laid out by day.
 - **Weather**: now and the next days, from [Open-Meteo](https://open-meteo.com)
-  (no key), for the city set in the panel or your approximate location.
+  (no key), for the city set in Character or your approximate location.
 - **Agents at work**: Tsukumo's own agent and the Claude Code and Codex sessions
   running in your terminals, with their task lists, from the same hooks that
   notify you.
@@ -374,7 +378,7 @@ has its own controls).
   it walks over and says what about. Only who, to whom and a one-line label are
   read from the transcripts, never the messages, and none of it reaches the
   phone. `DC_PARK=0` turns it off.
-- **Chat**: the same conversation as the panel.
+- **Chat**: the same conversation as the panel, always on the right.
 
 "−" closes it and sends her back to the desktop; *Open at startup* makes it the
 first thing you see.

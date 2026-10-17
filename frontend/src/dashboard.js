@@ -1,27 +1,41 @@
 /**
- * The dashboard: the week (reminders and timers), today, the weather, the
- * agents at work, the park (every agent on this PC) and the chat. She sits in the
- * corner above the text field: it's the real companion, docked by Electron
- * onto the window (see `setPetStage` in electron/main.js). "−" closes the
- * dashboard and sends her back to the desktop.
+ * The dashboard: the centre of the app. On the left her name and every
+ * section (Home, Agenda, Work, Character, Engines); in the
+ * middle the section; on the right the chat, with her in the corner above
+ * the text field.
  *
- * Like the panel, it has its own connection to the backend and receives
- * every message; the chat is the same (panel/chat.js). Settings stay in the
- * panel: "Settings" opens it over the dashboard.
+ * Home is the grid of tiles: the week (reminders and timers), today, the
+ * to-do list, the weather, the agents at work and the park (every agent on
+ * this PC). The other sections are
+ * the views that used to sit in the panel (panel/*.js, engines.js): the
+ * panel is now only the chat, and asking it for a section opens this window
+ * on it (Electron sends `panel:focus` here).
+ *
+ * She is the real companion, docked by Electron onto the window (see
+ * `setPetStage` in electron/main.js). "−" closes the dashboard and sends her
+ * back to the desktop.
+ *
+ * Like the panel, it has its own connection to the backend (hub.js) and
+ * receives every message; the chat is the same (panel/chat.js).
  */
 
-import { apiUrl, wsUrl } from './config.js';
+import { apiUrl } from './config.js';
 import { el, iconButton, readSetting } from './dom.js';
+import { EnginesView } from './engines.js';
 import { parseExtras, resolveOutfit } from './flame/wardrobe.js';
 import { AgentsWidget, TodayWidget, TodoWidget, WeatherWidget, WeekWidget } from './dashboard/widgets.js';
 import { TileLayout } from './dashboard/layout.js';
 import { ParkWidget } from './dashboard/park.js';
 import { clock } from './dashboard/time.js';
+import { createHub } from './hub.js';
 import { LOCALE, t, translateDom, tx, watchLanguage } from './i18n.js';
 import { icon } from './icons.js';
+import { AgendaView } from './panel/agenda.js';
+import { CharacterView } from './panel/character.js';
 import { ChatView } from './panel/chat.js';
 import { outfitPreview } from './panel/wardrobe-art.js';
-import { CompanionSocket } from './ws.js';
+import { Welcome } from './panel/welcome.js';
+import { WorkView } from './panel/work.js';
 
 const companion = window.companion ?? null;
 translateDom();
@@ -40,32 +54,29 @@ const store = {
   persona: '',
 };
 
-const app = {
-  socket: new CompanionSocket(wsUrl),
-  companion,
-  engines: null,
-  settings: {},
-  _listeners: new Map(),
-  on(type, handler) {
-    if (!this._listeners.has(type)) this._listeners.set(type, new Set());
-    this._listeners.get(type).add(handler);
-  },
-  emit(type, payload) {
-    this._listeners.get(type)?.forEach((handler) => handler(payload));
-  },
-  /** The chat is here; the other tabs are in the panel, which opens on top. */
-  showTab(name, options = {}) {
-    if (name === 'chat') {
-      chat.shown(options);
-      return;
-    }
-    if (companion) companion.openPanel({ tab: name, ...options });
-    else window.open(`./panel.html#${name}`, '_blank');
-  },
-  toast(text, kind = 'info') {
-    showToast(text, kind);
-  },
+/**
+ * The sections, in the rail's order. The second group is about her (how she
+ * looks and sounds, which engines she runs on), the first about your day.
+ */
+const SECTIONS = [
+  { id: 'home', label: t('Home'), icon: 'dashboard' },
+  { id: 'agenda', label: t('Agenda'), icon: 'clock', sub: t('Timers, reminders, to-dos and her secretary') },
+  { id: 'work', label: t('Work'), icon: 'briefcase', sub: t("Your agents' limits, hooks and notifications") },
+  { id: 'character', label: t('Character'), icon: 'character', sub: t('Her look, her voice and what she knows about you'), group: 'her' },
+  { id: 'engines', label: t('Engines'), icon: 'engines', sub: t('The brain, the voice and the hearing she runs on'), group: 'her' },
+];
+
+const STATE_TEXT = {
+  online: t('ready'),
+  degraded: t('having some trouble'),
+  offline: t('unreachable'),
+  unknown: t('checking…'),
+  thinking: t('thinking…'),
+  speaking: t('speaking'),
 };
+
+const app = createHub({ companion, showTab, toast: showToast });
+app.tab = 'home';
 
 // ------------------------------------------------------------------- tiles
 const widgets = {
@@ -78,13 +89,24 @@ const widgets = {
 };
 
 // The tiles can be dragged around and widened (dashboard/layout.js); this is the default.
+let customLayout = false;
 const resetLayout = el('button', { class: 'ghost-btn hidden', type: 'button', title: t('Put the tiles back where they were') }, t('Reset layout'));
 const layout = new TileLayout(
   $('dash-grid'),
   { week: widgets.week.node, today: widgets.today.node, todo: widgets.todo.node, weather: widgets.weather.node, agents: widgets.agents.node, park: widgets.park.node },
-  { wide: ['week', 'agents', 'park'], onChange: (custom) => resetLayout.classList.toggle('hidden', !custom) },
+  {
+    wide: ['week', 'park'],
+    onChange: (custom) => {
+      customLayout = custom;
+      renderResetLayout();
+    },
+  },
 );
 resetLayout.addEventListener('click', () => layout.reset());
+
+function renderResetLayout() {
+  resetLayout.classList.toggle('hidden', !customLayout || app.tab !== 'home');
+}
 
 const DEPENDS = {
   reminders: ['week', 'today'],
@@ -115,20 +137,64 @@ function changed(...parts) {
   }
 }
 
-// -------------------------------------------------------------------- chat
+// -------------------------------------------------------- chat and sections
 const chat = new ChatView(app, $('view-chat'));
+const views = {
+  agenda: new AgendaView(app, $('view-agenda')),
+  work: new WorkView(app, $('view-work')),
+  character: new CharacterView(app, $('view-character')),
+  engines: new EnginesView(app, $('view-engines')),
+};
+
+const navButtons = new Map();
+for (const [index, section] of SECTIONS.entries()) {
+  if (section.group && section.group !== SECTIONS[index - 1]?.group) $('rail-nav').append(el('span', { class: 'rail-divider', 'aria-hidden': 'true' }));
+  const button = el(
+    'button',
+    { class: 'rail-item', type: 'button', role: 'tab', title: section.label, dataset: { section: section.id }, onClick: () => showTab(section.id) },
+    icon(section.icon, 18),
+    el('span', {}, section.label),
+  );
+  navButtons.set(section.id, button);
+  $('rail-nav').append(button);
+}
+
+/** Home, a section, or the chat (which is always on the right: it gets the focus). */
+function showTab(name, options = {}) {
+  if (name === 'chat') {
+    chat.shown(options);
+    return;
+  }
+  if (name !== 'home' && !views[name]) name = 'home';
+  app.tab = name;
+  for (const [id, button] of navButtons) {
+    button.classList.toggle('active', id === name);
+    button.setAttribute('aria-selected', String(id === name));
+  }
+  $('dash-grid').classList.toggle('hidden', name !== 'home');
+  for (const id of Object.keys(views)) $(`view-${id}`).classList.toggle('hidden', id !== name);
+  renderResetLayout();
+  renderHeader();
+  history.replaceState(null, '', name === 'home' ? location.pathname : `#${name}`);
+  views[name]?.shown?.(options);
+}
 
 // ------------------------------------------------------------------ header
 function renderHeader() {
+  const section = SECTIONS.find((item) => item.id === app.tab) ?? SECTIONS[0];
+  if (section.id !== 'home') {
+    $('page-title').textContent = section.label;
+    $('page-sub').textContent = section.sub;
+    return;
+  }
   const now = new Date();
   const hour = now.getHours();
-  const hello = hour < 5 ? t('Good night') : hour < 13 ? t('Good morning') : hour < 18 ? t('Good afternoon') : t('Good evening');
-  $('greeting').textContent = hello;
+  $('page-title').textContent = hour < 5 ? t('Good night') : hour < 13 ? t('Good morning') : hour < 18 ? t('Good afternoon') : t('Good evening');
   const day = now.toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
-  $('today-line').textContent = `${day[0].toUpperCase()}${day.slice(1)} · ${clock(now.getTime() / 1000)}`;
+  $('page-sub').textContent = `${day[0].toUpperCase()}${day.slice(1)} · ${clock(now.getTime() / 1000)}`;
 }
 
-/** Top left there's her: the flame in her colour, with what she's wearing. */
+/** Top of the rail there's her: the flame in her colour, with what she's wearing. */
 function renderLogo() {
   // SVG made in wardrobe-art.js with already validated colours: no text from outside.
   document.querySelector('.dash-logo').innerHTML = outfitPreview(resolveOutfit(readSetting('dc:flame-outfit', 'auto')), readSetting('dc:flame-color', 'lilac'), {
@@ -140,16 +206,37 @@ window.addEventListener('storage', (event) => {
   if (event.key === 'dc:flame-outfit' || event.key === 'dc:flame-color' || event.key === 'dc:flame-extras') renderLogo();
 });
 
+/** Under her name, what she's doing: ready, thinking, speaking. */
+function renderState() {
+  const llm = app.engines?.llm;
+  const connected = app.socket.connected;
+  const busy = store.busy !== 'idle' ? store.busy : null;
+  const state = !connected ? 'offline' : busy ?? llm?.state ?? 'unknown';
+  const line = $('her-state');
+  line.dataset.state = state;
+  line.textContent = STATE_TEXT[state] ?? state;
+  line.title = llm ? `${llm.label} · ${line.textContent}${llm.detail && llm.state !== 'online' ? ` — ${tx(llm.detail)}` : ''}` : line.textContent;
+}
+app.on('engines', renderState);
+
+function showIdentity(persona) {
+  const name = persona?.name?.trim();
+  if (!name) return;
+  store.persona = name;
+  $('her-name').textContent = name;
+}
+
 const actions = $('dash-actions');
-const startChip = el('button', { class: 'ghost-btn start-chip', type: 'button', role: 'switch', title: t('When you turn on the PC: the dashboard, or just her on the desktop') });
-const settingsButton = el('button', { class: 'ghost-btn', type: 'button', onClick: () => app.showTab('engines') }, icon('engines', 15), el('span', {}, t('Settings')));
-actions.append(resetLayout, startChip, settingsButton);
+actions.append(resetLayout);
 if (companion?.minimizeDashboard) {
   actions.append(
     iconButton('maximize', { title: t('Maximize'), className: 'icon-btn', onClick: () => companion.toggleMaximizeDashboard() }),
     iconButton('minimize', { title: t('Minimize: she goes back to the desktop'), className: 'icon-btn dash-min', onClick: () => companion.minimizeDashboard() }),
   );
 }
+
+const startChip = el('button', { class: 'start-chip', type: 'button', role: 'switch', title: t('When you turn on the PC: the dashboard, or just her on the desktop') });
+$('rail-foot').append(startChip);
 
 let startWith = 'dashboard';
 function renderStartChip() {
@@ -167,7 +254,10 @@ startChip.addEventListener('click', async () => {
 function setMusic(music) {
   const playing = Boolean(music?.playing);
   $('now-playing').classList.toggle('hidden', !playing);
-  if (playing) $('now-playing-text').textContent = `${music.title} — ${music.artist}`;
+  if (playing) {
+    $('now-playing-text').textContent = `${music.title} — ${music.artist}`;
+    $('now-playing').title = $('now-playing-text').textContent;
+  }
 }
 
 if (companion) {
@@ -176,6 +266,7 @@ if (companion) {
     startWith = state.startWith ?? startWith;
     renderStartChip();
     setMusic(state.music);
+    app.emit('window-state', state);
     if (state.voice) app.emit('mic', state.voice);
   };
   companion.getState().then(applyState);
@@ -183,6 +274,12 @@ if (companion) {
   companion.onMusic(setMusic);
   companion.onVoiceCommand?.((command) => {
     if (command?.type === 'state') app.emit('mic', command);
+  });
+  // Her menu, the tray or the chat window ask for a section (or the chat,
+  // with some text). Without one, the dashboard stays where you left it.
+  companion.onFocus((focus = {}) => {
+    if (focus.tab) showTab(focus.tab, focus);
+    if (focus.welcome) app.welcome.maybeStart();
   });
 }
 renderStartChip();
@@ -226,33 +323,27 @@ function showToast(text, kind = 'info') {
 // ------------------------------------------------------------------ backend
 const { socket } = app;
 
+socket.on('open', renderState);
+socket.on('close', () => {
+  store.busy = 'idle';
+  renderState();
+});
 socket.on('hello', (message) => {
-  app.settings = { ...(message.config ?? {}) };
-  app.engines = message.engines ?? null;
   store.reminders = message.reminders ?? [];
   store.agents = message.agents ?? [];
   store.usage = message.usage ?? null;
-  store.persona = message.memory?.persona?.name ?? '';
   store.secretary = message.secretary ?? null;
   store.park = message.park ?? null;
-  app.emit('hello', message);
-  app.emit('settings', app.settings);
-  app.emit('engines', app.engines);
+  showIdentity(message.memory?.persona);
   changed('reminders', 'agents', 'usage', 'secretary', 'park');
   renderBubble();
+  renderState();
 });
-socket.on('engines', (message) => {
-  app.engines = message;
-  app.emit('engines', message);
-});
-socket.on('settings', (message) => {
-  Object.assign(app.settings, message);
-  app.emit('settings', app.settings);
-});
+socket.on('memory', (message) => showIdentity(message.persona));
 socket.on('state', (message) => {
   store.busy = message.value === 'idle' ? 'idle' : message.value;
-  app.emit('busy', store.busy);
   renderBubble();
+  renderState();
 });
 socket.on('reminders', (message) => {
   store.reminders = message.reminders ?? [];
@@ -289,7 +380,10 @@ async function loadWeather() {
 }
 
 // ------------------------------------------------------------------ startup
-renderHeader();
+// "Redo the introduction" (Character) runs here, over the whole dashboard.
+app.welcome = new Welcome(app, document.querySelector('.dash'));
+showTab((location.hash || '').replace('#', '') || 'home');
+renderState();
 setInterval(() => {
   renderHeader();
   // Hours go by: "in 20 min", today's date.
@@ -301,4 +395,4 @@ changed('reminders', 'agents', 'weather');
 socket.connect();
 reportStage();
 
-window.tsukumoDashboard = { app, store, widgets };
+window.tsukumoDashboard = { app, store, widgets, views, showTab };

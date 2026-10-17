@@ -1059,15 +1059,16 @@ function dockPanel() {
 }
 
 function showPanel(focus) {
+  // The panel is only the chat: every other section lives in the dashboard,
+  // and while she's docked there the dashboard's own chat answers.
+  const tab = focus?.tab ?? 'chat';
+  if (tab !== 'chat' || (petDock && alive(dashboardWindow) && dashboardWindow.isVisible())) {
+    showDashboard(focus);
+    return;
+  }
   if (!alive(panelWindow)) createPanelWindow();
   const reveal = () => {
     dockPanel();
-    // From the dashboard (settings): in the middle of the dashboard, above it.
-    if (petDock && alive(dashboardWindow)) {
-      const area = dashboardWindow.getBounds();
-      const panel = panelWindow.getBounds();
-      panelWindow.setPosition(Math.round(area.x + (area.width - panel.width) / 2), Math.round(area.y + (area.height - panel.height) / 2));
-    }
     panelWindow.show();
     panelWindow.focus();
     dockPanel();
@@ -1188,7 +1189,8 @@ function createDashboardWindow() {
   });
 }
 
-function showDashboard() {
+/** `focus` (optional): the section to show, `{tab, section?, text?}`, as for the panel. */
+function showDashboard(focus) {
   if (!backendUp) return;
   if (!alive(dashboardWindow)) createDashboardWindow();
   const reveal = () => {
@@ -1197,10 +1199,11 @@ function showDashboard() {
     if (settings.dashboardMaximized && !dashboardWindow.isMaximized()) dashboardWindow.maximize();
     dashboardWindow.show();
     dashboardWindow.focus();
-    // The panel stays for the settings: the chat is here now.
+    // The dashboard has its own chat: the panel isn't needed beside it.
     if (alive(panelWindow) && panelWindow.isVisible()) panelWindow.hide();
     if (dashboardStage) setPetStage(dashboardStage);
     broadcastState();
+    if (focus) dashboardWindow.webContents.send('panel:focus', focus);
   };
   if (dashboardWindow.webContents.isLoading()) dashboardWindow.webContents.once('did-finish-load', reveal);
   else reveal();
@@ -1272,7 +1275,7 @@ function undockPet() {
   petWindow.showInactive();
 }
 
-handleIpc('dashboard:open', () => showDashboard());
+handleIpc('dashboard:open', (_event, focus) => showDashboard(focus));
 handleIpc('dashboard:minimize', () => toCompanion());
 handleIpc('dashboard:toggle-maximize', () => {
   if (!alive(dashboardWindow)) return false;

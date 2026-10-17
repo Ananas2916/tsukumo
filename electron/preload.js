@@ -125,7 +125,8 @@ contextBridge.exposeInMainWorld('companion', {
   setPanelPinned: (value) => ipcRenderer.invoke('panel:set-pinned', value),
 
   // --- dashboard -------------------------------------------------------------
-  openDashboard: () => ipcRenderer.invoke('dashboard:open'),
+  /** `focus` (optional): the section to open it on, `{tab, section?}`, as for the panel. */
+  openDashboard: (focus) => ipcRenderer.invoke('dashboard:open', focus),
   /** "−": the dashboard closes and she goes back to the desktop. */
   minimizeDashboard: () => ipcRenderer.invoke('dashboard:minimize'),
   toggleMaximizeDashboard: () => ipcRenderer.invoke('dashboard:toggle-maximize'),

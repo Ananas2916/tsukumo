@@ -23,16 +23,14 @@
         <div class="window-actions" id="window-actions"></div>
       </header>
 
-      <nav class="tabs" role="tablist" id="tabs"></nav>
-
       <div id="now-playing" class="now-playing hidden" title="Playing on Spotify" data-i18n-attrs="title">
         <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
         <span id="now-playing-text" class="now-playing-text"></span>
       </div>
 
       <main class="views">
-        <!-- Chat ------------------------------------------------------------>
-        <section id="view-chat" class="view chat-view" role="tabpanel">
+        <!-- Only the chat: every other section lives in the dashboard. -->
+        <section id="view-chat" class="view chat-view">
           <div class="chat-toolbar">
             <button id="engine-chip" class="engine-chip" type="button" title="Change brain" data-i18n-attrs="title">
               <span class="dot" data-state="unknown"></span>
@@ -56,19 +54,6 @@
             </form>
           </div>
         </section>
-
-        <!-- Character -------------------------------------------------------->
-        <section id="view-character" class="view scroll" role="tabpanel"></section>
-
-        <!-- Agenda: timers, reminders, alarms, scheduled actions -------------->
-        <section id="view-agenda" class="view scroll" role="tabpanel"></section>
-
-
-        <!-- Work: usage and notifications of the agents you use on your own --->
-        <section id="view-work" class="view scroll" role="tabpanel"></section>
-
-        <!-- Engines: drawn by reading GET /api/providers --------------------->
-        <section id="view-engines" class="view scroll" role="tabpanel"></section>
       </main>
     </div>
 

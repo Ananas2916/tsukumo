@@ -871,7 +871,6 @@ export class CharacterView {
     app.on('voices', () => this._renderVoices());
     app.on('settings', (settings) => this._applySettings(settings));
     app.on('engines', () => this._renderEngineLine());
-    app.on('hello', (message) => this._restorePreferences(message.config ?? {}));
     app.on('providers', (message) => {
       if (message.kind === 'tts') this.filter.language = null;
     });
@@ -882,21 +881,6 @@ export class CharacterView {
       this.windows.input.disabled = !state.windowsAvailable;
       this.scale.set(state.scale);
     });
-  }
-
-  /**
-   * The choices made here hold after a backend restart too: if it started
-   * again with the defaults, we send them back. The voice is saved per engine:
-   * `af_heart` is a Kokoro voice and means nothing on ElevenLabs.
-   */
-  _restorePreferences(config) {
-    const wanted = {};
-    const engine = config.ttsEngine;
-    const voice = engine ? readSetting(`dc:voice:${engine}`, null) : null;
-    if (voice && voice !== config.voice) wanted.voice = voice;
-    const replyLanguage = readSetting('dc:reply-language', null);
-    if (replyLanguage && replyLanguage !== config.replyLanguage) wanted.replyLanguage = replyLanguage;
-    if (Object.keys(wanted).length) this.socket.send({ type: 'settings', ...wanted });
   }
 
   _applySettings(settings) {
@@ -911,7 +895,7 @@ export class CharacterView {
     const tts = this.app.engines?.tts;
     this.engineLine.replaceChildren(
       el('span', {}, t('Engine: {name}', { name: tx(tts?.label) ?? this.app.settings.ttsEngine ?? '…' })),
-      el('button', { class: 'link-btn', type: 'button', onClick: () => this.app.showTab('engines', { section: 'tts' }) }, 'cambia', icon('chevronRight', 13)),
+      el('button', { class: 'link-btn', type: 'button', onClick: () => this.app.showTab('engines', { section: 'tts' }) }, t('change'), icon('chevronRight', 13)),
     );
     if (tts?.state === 'degraded' && tts.detail) this.engineLine.append(el('span', { class: 'warn-text' }, tx(tts.detail)));
   }

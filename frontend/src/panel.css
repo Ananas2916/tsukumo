@@ -1,5 +1,5 @@
-/* Tsukumo - the panel: chat, character, engines. The same dark glass as the
-   menus beside the character, pill-shaped tabs, a lilac accent. */
+/* Tsukumo - the panel (the chat) and the sections the dashboard shows:
+   the same dark glass as the menus beside the character, a lilac accent. */
 
 @import './theme.css';
 
@@ -221,56 +221,6 @@ body:not(:has(#window-actions:not(:empty))) .app {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-}
-
-/* ---------------------------------------------------------------- tabs --- */
-.tabs {
-  /* Six tabs in 400 px: each as wide as its label, plus its share of the space. */
-  display: flex;
-  gap: 3px;
-  margin: 0 12px 10px;
-  padding: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  border-radius: 13px;
-}
-
-/* Six tabs in 400 px: icon above, label below. */
-.tab {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 6px 3px 5px;
-  font-size: 11px;
-  border: none;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--muted);
-  font-weight: 500;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-
-.tab span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tab:hover {
-  color: var(--text);
-}
-
-.tab.active {
-  background: var(--surface-3);
-  color: var(--text);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, var(--shadow-s);
 }
 
 .views {
