@@ -370,12 +370,18 @@ a section opens the dashboard on it.
 - **Agents at work**: Tsukumo's own agent and the Claude Code and Codex sessions
   running in your terminals, with their task lists, from the same hooks that
   notify you.
-- **The park**: every agent online on this PC hanging out on a lawn. Claude
-  Code sessions (read from Claude Code's own list of running sessions), Codex,
-  OpenClaw in the pond, LM Studio's kiosk with the model it serves, and Tsukumo
-  on the fountain. Who works runs around with a laptop, who's idle dozes on the
-  bench, who waits for you jumps and waves; when one session messages another
-  it walks over and says what about. Only who, to whom and a one-line label are
+- **The park**: every agent online on this PC hanging out in a Japanese scene
+  you pick from the tile's title: a shrine, a zen garden, a summer festival, a
+  hot spring under Mount Fuji, a country station or a Tokyo alley. The light
+  follows the hour and the scenery the season (blossom, fireflies, red leaves,
+  snow). Claude Code sessions (read from Claude Code's own list of running
+  sessions), Codex, OpenClaw's lobster in the scene's water, LM Studio's stall
+  with the model it serves, and Tsukumo floating at the heart of it. Who works
+  runs around with a laptop, who's idle sits down and dozes (or soaks, at the
+  hot spring), who waits for you jumps and waves; when one session messages
+  another it walks over, says what about, and a paper crane flies; some scenes
+  add their own sign (the bamboo knocks, a firework goes up, the train goes
+  by). Only who, to whom and a one-line label are
   read from the transcripts, never the messages, and none of it reaches the
   phone. `DC_PARK=0` turns it off.
 - **Chat**: the same conversation as the panel, always on the right.

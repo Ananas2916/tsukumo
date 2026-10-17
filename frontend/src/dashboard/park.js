@@ -1,30 +1,34 @@
 /**
- * The park: every agent on this PC hanging out in a small garden (backend/park.py).
+ * The park: every agent on this PC hanging out in a Japanese scene of your
+ * choice (backend/park.py for who's there, dashboard/scenes.js for where).
  *
  * Claude Code sessions are soft terracotta blobs (a blue beanie in VS Code, a
- * dark one in a terminal), Codex a teal cube, OpenClaw a lobster in the pond,
- * LM Studio the stall with the model it serves, and Tsukumo floats over the
- * fountain. Who works runs around with a glowing laptop, who's idle sits on
- * the bench and dozes, who waits for you hops at the front with a "!". A
- * message sent: the sender walks over, says what about, and an envelope flies.
+ * dark one in a terminal), Codex a teal cube, OpenClaw a lobster in the
+ * scene's water, LM Studio its stall with the model it serves, and Tsukumo
+ * floats at the scene's heart. Who works runs around with a glowing laptop,
+ * who's idle sits down (or soaks, at the hot spring) and dozes, who waits for
+ * you hops at the front with a "!". A message sent: the sender walks over,
+ * says what about, and a paper crane flies; some scenes add their own sign
+ * (the bamboo knocks, a firework goes up, the train goes by).
  *
- * The light follows the clock: dawn, day, dusk and night, with the lanterns
- * and the fireflies coming out at dusk. What doesn't move (sky, hills, lawn,
- * path) is painted once into a backdrop and copied at every frame. The canvas
- * runs only while the tile is on screen and the window visible; with "reduce
- * motion" it's a still picture, redrawn when the data changes. Below it, one
- * chip per agent. All the text drawn comes from the backend as data
- * (fillText, textContent: nothing to inject).
+ * The light follows the clock (dawn, day, dusk, night, lanterns lit after
+ * dark) and the scenery the season (blossom, fireflies, red leaves, snow).
+ * What doesn't move is painted once a minute into a backdrop and copied at
+ * every frame. The canvas runs only while the tile is on screen and the
+ * window visible; with "reduce motion" it's a still picture, redrawn when the
+ * data changes. Below it, one chip per agent. All the text drawn comes from
+ * the backend as data (fillText, textContent: nothing to inject).
  */
 
-import { el, readSetting } from '../dom.js';
+import { el, readSetting, writeSetting } from '../dom.js';
 import { palette } from '../flame/palettes.js';
 import { t } from '../i18n.js';
+import { SCENES, SCENE_IDS } from './scenes.js';
+import { HEIGHT, TAU, along, alpha, crane, mix, seeded, shade } from './scenery.js';
 import { nowSeconds, sinceText } from './time.js';
 import { card } from './widgets.js';
 
-const HEIGHT = 270;
-const HORIZON = 96;
+const SCENE_SETTING = 'dc:park-scene';
 const FRAME = 1000 / 30;
 const REDUCED = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 /** A link newer than this (s) is walked over; older ones are just a thread. */
@@ -53,14 +57,30 @@ const STATE_DOT = { working: '#7cc7ff', waiting: '#f5c451', done: '#4fdc9f', idl
 const SPEED = { working: 52, waiting: 64, done: 30, idle: 24, visit: 74, leave: 60 };
 
 /**
- * The garden's light at four moments of the day; the hours in between blend
- * them. Muted on purpose: it lives in a dark-glass dashboard, not a game.
+ * The light at four moments of the day; the hours in between blend them.
+ * `tint` multiplies the painted scenery (white by day, blue at night): one
+ * light for every scene. Muted on purpose: it lives in a dark-glass
+ * dashboard, not a game.
  */
 const SKIES = {
-  night: { top: '#090b1c', low: '#2a2152', far: '#231d44', mid: '#1b2442', near: '#152a2f', grass: '#183331', grassLow: '#0c1b1b', path: '#454a69', light: 0.5, lamps: 1, flies: 1, stars: 1 },
-  dawn: { top: '#2d3270', low: '#f0a383', far: '#62578a', mid: '#46526f', near: '#2e4d49', grass: '#2f5b4d', grassLow: '#1a3430', path: '#8c86a0', light: 0.85, lamps: 0.3, flies: 0.1, stars: 0.15 },
-  day: { top: '#3c69c2', low: '#bdd5f0', far: '#8ea4cf', mid: '#5f8396', near: '#3e6f60', grass: '#3d785d', grassLow: '#244e3d', path: '#c9c3d8', light: 1, lamps: 0, flies: 0, stars: 0 },
-  dusk: { top: '#2a2360', low: '#e57d8e', far: '#5e4376', mid: '#3d3d62', near: '#2a4248', grass: '#294b43', grassLow: '#152a27', path: '#7a7192', light: 0.7, lamps: 0.85, flies: 0.6, stars: 0.4 },
+  night: { top: '#090b1c', low: '#2a2152', tint: '#56599c', light: 0.5, lamps: 1, stars: 1 },
+  dawn: { top: '#2d3270', low: '#f0a383', tint: '#e8bcc2', light: 0.85, lamps: 0.3, stars: 0.15 },
+  day: { top: '#3c69c2', low: '#bdd5f0', tint: '#ffffff', light: 1, lamps: 0, stars: 0 },
+  dusk: { top: '#2a2360', low: '#e57d8e', tint: '#c48ca8', light: 0.7, lamps: 0.85, stars: 0.4 },
+};
+/** What the trees wear and what falls from the sky, month by month. */
+const SEASONS = {
+  spring: { name: 'spring', leaf: '#f4b8cc', snow: 0, particle: 'petal' },
+  summer: { name: 'summer', leaf: '#4c8c4a', snow: 0, particle: 'firefly' },
+  autumn: { name: 'autumn', leaf: '#d8552e', snow: 0, particle: 'leaf' },
+  winter: { name: 'winter', leaf: null, snow: 1, particle: 'snow' },
+};
+const seasonAt = (date = new Date()) => {
+  const month = date.getMonth();
+  if (month >= 2 && month <= 4) return SEASONS.spring;
+  if (month >= 5 && month <= 7) return SEASONS.summer;
+  if (month >= 8 && month <= 10) return SEASONS.autumn;
+  return SEASONS.winter;
 };
 const DAY = [
   [0, 'night'],
@@ -73,33 +93,30 @@ const DAY = [
   [24, 'night'],
 ];
 
-/** Always the same trees and flowers for the same width: a seeded random. */
-function seeded(seed) {
-  let value = seed >>> 0;
-  return () => {
-    value = (value + 0x6d2b79f5) >>> 0;
-    let x = Math.imul(value ^ (value >>> 15), 1 | value);
-    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 const rand = (min, max) => min + Math.random() * (max - min);
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const hex = (value) => `#${value.toString(16).padStart(6, '0')}`;
-const rgb = (color) => {
-  const value = parseInt(color.slice(1), 16);
-  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+
+/** The scene saved in the settings, or the first one. */
+const savedScene = () => {
+  const id = readSetting(SCENE_SETTING, SCENE_IDS[0]);
+  return SCENES[id] ? id : SCENE_IDS[0];
 };
-const toHex = (channels) => `#${channels.map((c) => Math.round(Math.max(0, Math.min(255, c))).toString(16).padStart(2, '0')).join('')}`;
-const mix = (a, b, amount) => {
-  const from = rgb(a);
-  const to = rgb(b);
-  return toHex(from.map((c, i) => c + (to[i] - c) * amount));
-};
-const alpha = (color, value) => `rgba(${rgb(color).join(', ')}, ${value})`;
-/** Lighter (amount > 0) or darker (< 0). */
-const shade = (color, amount) => mix(color, amount > 0 ? '#ffffff' : '#000000', Math.abs(amount));
+
+/** The scenery painted on its own layer, then multiplied by the hour's light (shapes kept). */
+function underLight(layer, tint) {
+  const lit = document.createElement('canvas');
+  lit.width = layer.width;
+  lit.height = layer.height;
+  const ctx = lit.getContext('2d');
+  ctx.drawImage(layer, 0, 0);
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = tint;
+  ctx.fillRect(0, 0, lit.width, lit.height);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(layer, 0, 0);
+  return lit;
+}
 
 function skyAt(date = new Date()) {
   const hour = date.getHours() + date.getMinutes() / 60;
@@ -122,13 +139,25 @@ function skyAt(date = new Date()) {
 
 export class ParkWidget {
   constructor() {
-    ({ node: this.node, body: this.body } = card('w-park', 'tree', t('The park')));
+    this.settingId = savedScene();
+    this.setting = SCENES[this.settingId];
+    /** What the scene remembers between frames (the train's departure, the fireworks…). */
+    this.sceneState = {};
+    // The tile's title is the scene's name, and picks the scene.
+    this.picker = el(
+      'select',
+      { class: 'w-park-pick', 'aria-label': t('Scene'), title: t('Change the scene'), onChange: () => this.setScene(this.picker.value, true) },
+      ...SCENE_IDS.map((id) => el('option', { value: id }, t(SCENES[id].name))),
+    );
+    this.picker.value = this.settingId;
+    ({ node: this.node, body: this.body } = card('w-park', 'tree', ''));
+    this.node.querySelector('h3')?.replaceChildren(this.picker);
     this.canvas = el('canvas', { class: 'w-park-canvas', role: 'img' });
     this.tip = el('div', { class: 'w-park-tip hidden', role: 'tooltip' });
-    this.scene = el('div', { class: 'w-park-scene' }, this.canvas, this.tip);
+    this.stage = el('div', { class: 'w-park-scene' }, this.canvas, this.tip);
     this.roster = el('ul', { class: 'w-park-roster' });
     this.legend = el('p', { class: 'w-park-legend' });
-    this.body.append(this.scene, el('div', { class: 'w-park-foot' }, this.roster, this.legend));
+    this.body.append(this.stage, el('div', { class: 'w-park-foot' }, this.roster, this.legend));
     this.context = this.canvas.getContext('2d');
     this.entities = new Map();
     this.seenLinks = new Set();
@@ -142,18 +171,20 @@ export class ParkWidget {
     this.clock = 0;
     this.backdrop = null;
     this.backdropAt = 0;
+    this.backdropKey = '';
     /** The agent under the pointer, in the scene or on its chip. */
     this.focus = null;
     this.flame = palette(readSetting('dc:flame-color', 'lilac'));
 
-    new ResizeObserver(() => this.resize()).observe(this.scene);
+    new ResizeObserver(() => this.resize()).observe(this.stage);
     new IntersectionObserver((entries) => {
       this.visible = entries.some((entry) => entry.isIntersecting);
       this.loop();
-    }).observe(this.scene);
+    }).observe(this.stage);
     document.addEventListener('visibilitychange', () => this.loop());
     window.addEventListener('storage', (event) => {
       if (event.key === 'dc:flame-color') this.flame = palette(readSetting('dc:flame-color', 'lilac'));
+      if (event.key === SCENE_SETTING) this.setScene(savedScene(), false);
     });
     this.canvas.addEventListener('pointermove', (event) => this.hover(event));
     this.canvas.addEventListener('pointerleave', () => {
@@ -175,7 +206,10 @@ export class ParkWidget {
         entity = this.spawn(agent);
         this.entities.set(agent.id, entity);
       }
-      if (entity.data && entity.data.state !== 'done' && agent.state === 'done') entity.party = 1.6;
+      if (entity.data && entity.data.state !== 'done' && agent.state === 'done') {
+        entity.party = 1.6;
+        this.setting.party?.(this.sceneState, this.clock, this.width);
+      }
       entity.data = agent;
       entity.leaving = false;
     }
@@ -239,7 +273,7 @@ export class ParkWidget {
     }
     const text = parts.join(' · ');
     this.legend.textContent = text;
-    this.canvas.setAttribute('aria-label', `${t('The park')}: ${text}`);
+    this.canvas.setAttribute('aria-label', `${t(this.setting.name)}: ${text}`);
   }
 
   setFocus(id) {
@@ -268,11 +302,11 @@ export class ParkWidget {
       rest: 0,
       blink: rand(1, 5),
     };
-    if (this.ready && agent.kind !== 'tsukumo' && agent.kind !== 'openclaw') {
-      // Someone new arrives through the gate.
+    if (this.ready && this.places && agent.kind !== 'tsukumo' && agent.kind !== 'openclaw') {
+      // Someone new arrives through the way in.
       [entity.x, entity.y] = this.gate();
     } else {
-      [entity.x, entity.y] = this.width ? this.wander() : [0, 0];
+      [entity.x, entity.y] = this.places ? this.wander() : [0, 0];
     }
     [entity.tx, entity.ty] = [entity.x, entity.y];
     return entity;
@@ -280,28 +314,25 @@ export class ParkWidget {
 
   // ---------------------------------------------------------------- layout
   resize() {
-    const width = Math.round(this.scene.clientWidth);
+    const width = Math.round(this.stage.clientWidth);
     if (!width || width === this.width) return;
-    const first = !this.width;
     this.width = width;
     const ratio = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(width * ratio);
     this.canvas.height = Math.round(HEIGHT * ratio);
     this.canvas.style.height = `${HEIGHT}px`;
     this.context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const W = width;
-    this.places = {
-      fountain: { x: W * 0.5, y: 158 },
-      bench: { x: Math.min(W - 72, W * 0.8), y: 124 },
-      pond: { x: Math.max(84, W * 0.16), y: 226 },
-      kiosk: { x: Math.max(54, W * 0.085), y: 120 },
-      front: { x: W * 0.5, y: HEIGHT - 26 },
-    };
-    this.makeScenery();
+    this.layout();
+  }
+
+  /** The scene's places for this width; whoever stood where a prop now is moves. */
+  layout() {
+    const first = !this.places;
+    this.places = this.setting.layout(this.width);
+    this.lights = this.setting.lights?.(this.places) ?? [];
     this.backdrop = null;
     for (const entity of this.entities.values()) {
-      // The props moved with the width: nobody stays standing on the stall.
-      if (first || entity.x > W || this.blocked(entity.x, entity.y)) [entity.x, entity.y] = this.wander();
+      if (first || entity.x > this.width || this.blocked(entity.x, entity.y)) [entity.x, entity.y] = this.wander();
       [entity.tx, entity.ty] = [entity.x, entity.y];
     }
     this.ready = Boolean(this.data);
@@ -309,47 +340,41 @@ export class ParkWidget {
     this.loop();
   }
 
-  makeScenery() {
-    const W = this.width;
-    const random = seeded(W);
-    this.ridges = [0, 1, 2].map(() => ({ phase: random() * 6, phase2: random() * 6 }));
-    this.trees = [];
-    for (let x = -6; x < W + 20; x += 18 + random() * 30) this.trees.push({ x, layer: random() > 0.55 ? 2 : 1, h: 12 + random() * 14, round: random() > 0.45, tone: random() });
-    this.stars = Array.from({ length: Math.round(W / 16) }, () => ({ x: random() * W, y: 4 + random() * (HORIZON - 58), r: 0.4 + random() * 0.9, tw: random() * 6 }));
-    this.tufts = Array.from({ length: Math.round(W / 11) }, () => ({ x: random() * W, y: HORIZON + 16 + random() * (HEIGHT - HORIZON - 20), tone: random() }));
-    this.flowers = Array.from({ length: Math.round(W / 28) }, () => ({
-      x: random() * W,
-      y: HORIZON + 22 + random() * (HEIGHT - HORIZON - 30),
-      color: ['#f4a6c9', '#c9b6ff', '#ffe08a', '#a8e1ff'][Math.floor(random() * 4)],
-    }));
-    this.clouds = Array.from({ length: 3 }, (_, i) => ({ x: random() * W, y: 14 + i * 9 + random() * 6, w: 50 + random() * 50, speed: 3 + random() * 4 }));
-    this.flies = Array.from({ length: Math.max(8, Math.round(W / 60)) }, () => ({ x: random() * W, y: HORIZON + 10 + random() * (HEIGHT - HORIZON - 30), phase: random() * 6, speed: 0.4 + random() * 0.6 }));
-    this.lamps = [W * 0.31, W * 0.69];
+  /** Another scene: everyone finds a spot in it; `save` when it's the user's choice here. */
+  setScene(id, save) {
+    if (!SCENES[id] || id === this.settingId) return;
+    this.settingId = id;
+    this.setting = SCENES[id];
+    this.sceneState = {};
+    this.picker.value = id;
+    if (save) writeSetting(SCENE_SETTING, id);
+    this.envelopes = [];
+    for (const entity of this.entities.values()) entity.visit = null;
+    this.places = null;
+    if (this.width) this.layout();
+    if (this.data) this.renderLegend(nowSeconds());
   }
 
   gate() {
-    return [-14, HEIGHT - 64];
+    return [...this.places.gate];
   }
 
   blocked(x, y) {
-    const { fountain, pond, kiosk, bench } = this.places;
-    const inside = (place, rx, ry) => ((x - place.x) / rx) ** 2 + ((y - place.y) / ry) ** 2 < 1;
-    return (
-      inside(fountain, 84, 32) ||
-      inside(pond, 76, 30) ||
-      (this.data?.lmstudio && Math.abs(x - kiosk.x) < 46 && Math.abs(y - kiosk.y) < 32) ||
-      (Math.abs(x - bench.x) < 58 && Math.abs(y - bench.y) < 14) ||
-      this.lamps.some((lamp) => Math.abs(x - lamp) < 10 && Math.abs(y - (HORIZON + 46)) < 8)
-    );
+    return (this.places.blocked ?? []).some(([x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1);
   }
 
+  /** A free spot on the scene's ground: its zones are rectangles or paths, picked by size. */
   wander() {
+    const zones = this.places.zones;
+    const sizes = zones.map((zone) => (zone.rect ? Math.max(20, zone.rect[2] - zone.rect[0]) : Math.hypot(zone.path.b[0] - zone.path.a[0], zone.path.b[1] - zone.path.a[1])));
+    const total = sizes.reduce((sum, size) => sum + size, 0);
     for (let tries = 0; tries < 20; tries += 1) {
-      const x = rand(28, this.width - 28);
-      const y = rand(HORIZON + 40, HEIGHT - 32);
+      let pick = Math.random() * total;
+      const zone = zones.find((_, i) => (pick -= sizes[i]) <= 0) ?? zones[0];
+      const [x, y] = zone.rect ? [rand(zone.rect[0], zone.rect[2]), rand(zone.rect[1], zone.rect[3])] : along(zone.path, Math.random());
       if (!this.blocked(x, y)) return [x, y];
     }
-    return [this.width * 0.5, HEIGHT - 42];
+    return [this.places.front.x, this.places.front.y];
   }
 
   // ------------------------------------------------------------- animation
@@ -377,12 +402,15 @@ export class ParkWidget {
 
   update(dt) {
     this.clock += dt;
+    if (!this.places) return;
     const all = [...this.entities.values()];
     const walkers = all.filter((entity) => entity.data && !['tsukumo', 'openclaw'].includes(entity.data.kind));
-    // Seats on the bench for the idle ones, places at the front for who's waiting.
+    // The scene's seats for the idle ones, places at the front for who's waiting.
     const idle = walkers.filter((entity) => entity.data.state === 'idle' && !entity.visit && !entity.leaving);
     const waiting = walkers.filter((entity) => entity.data.state === 'waiting' && !entity.visit && !entity.leaving);
-    idle.forEach((entity, index) => (entity.seat = index < 3 ? index : -1));
+    const seats = this.places.seats.length;
+    for (const entity of walkers) if (!idle.includes(entity)) entity.seat = -1;
+    idle.forEach((entity, index) => (entity.seat = index < seats ? index : -1));
     waiting.forEach((entity, index) => (entity.slot = index - (waiting.length - 1) / 2));
     for (const entity of walkers) this.step(entity, dt);
     for (const entity of all) {
@@ -396,13 +424,9 @@ export class ParkWidget {
       const { pond } = this.places;
       const speed = lobster.data.state === 'working' ? 1.4 : 0.35;
       lobster.phase += dt * speed;
-      lobster.x = pond.x + Math.cos(lobster.phase) * 36;
-      lobster.y = pond.y + Math.sin(lobster.phase) * 9;
+      lobster.x = pond.x + Math.cos(lobster.phase) * pond.rx;
+      lobster.y = pond.y + Math.sin(lobster.phase) * pond.ry;
       lobster.face = -Math.sin(lobster.phase) >= 0 ? 1 : -1;
-    }
-    for (const cloud of this.clouds ?? []) {
-      cloud.x += cloud.speed * dt;
-      if (cloud.x - cloud.w > this.width) cloud.x = -cloud.w;
     }
     this.envelopes = this.envelopes.filter((item) => {
       item.t += dt / 0.8;
@@ -438,20 +462,22 @@ export class ParkWidget {
         if (visit.talk <= 0) entity.visit = null;
       } else {
         const side = entity.x <= other.x ? -1 : 1;
-        const { fountain } = this.places;
-        [entity.tx, entity.ty] = visit.to === 'tsukumo' ? [fountain.x + side * 70, fountain.y + 24] : [other.x + side * 28, other.y + 2];
+        // To talk to her, one of the two spots the scene keeps beside her.
+        const [ax, ay] = this.places.ask[entity.x <= this.places.tsukumo.x ? 0 : 1];
+        [entity.tx, entity.ty] = visit.to === 'tsukumo' ? [ax, ay] : [other.x + side * 28, other.y + 2];
         speed = SPEED.visit;
         if (Math.hypot(entity.tx - entity.x, entity.ty - entity.y) < 3) {
           visit.talk = TALK;
           this.envelopes.push({ from: entity.id, to: visit.to, t: 0 });
+          this.setting.message?.(this.sceneState, this.clock, this.width);
         }
       }
     } else if (state === 'waiting') {
       const { front } = this.places;
       [entity.tx, entity.ty] = [front.x + (entity.slot ?? 0) * 46, front.y];
     } else if (state === 'idle' && entity.seat >= 0) {
-      const { bench } = this.places;
-      [entity.tx, entity.ty] = [bench.x + (entity.seat - 1) * 33, bench.y + 4];
+      const seat = this.places.seats[entity.seat];
+      [entity.tx, entity.ty] = [seat.x, seat.y];
     } else {
       const arrived = Math.hypot(entity.tx - entity.x, entity.ty - entity.y) < 2;
       if (arrived) {
@@ -479,114 +505,51 @@ export class ParkWidget {
   }
 
   // -------------------------------------------------------------- backdrop
-  /** Sky, hills, trees, lawn, path and flowers: painted once a minute, not at every frame. */
-  paintBackdrop() {
-    const sky = (this.sky = skyAt());
-    this.flame = palette(readSetting('dc:flame-color', 'lilac'));
-    const ratio = window.devicePixelRatio || 1;
-    const canvas = this.backdrop ?? document.createElement('canvas');
-    canvas.width = Math.round(this.width * ratio);
-    canvas.height = Math.round(HEIGHT * ratio);
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const W = this.width;
+  /** LM Studio as the scene shows it: its model's short name, or null when it isn't running. */
+  lmStudio() {
+    const lm = this.data?.lmstudio;
+    if (!lm) return null;
+    return { model: lm.model ? clip(lm.model.split('/').pop(), 18) : '' };
+  }
 
-    const air = ctx.createLinearGradient(0, 0, 0, HORIZON + 6);
+  /**
+   * Sky, then the scene's scenery under the hour's light, then what stands in
+   * front of the things that move behind it (`near`): painted once a minute,
+   * or when the scene, the season or LM Studio change, not at every frame.
+   */
+  paintBackdrop(key) {
+    const setting = this.setting;
+    this.flame = palette(readSetting('dc:flame-color', 'lilac'));
+    const now = new Date();
+    const sky = setting.night ? { ...skyAt(new Date(2000, 0, 1, 23)), ...setting.sky } : skyAt(now);
+    this.sky = sky;
+    this.season = seasonAt(now);
+    const lm = this.lmStudio();
+    const ratio = window.devicePixelRatio || 1;
+    const W = this.width;
+    const layer = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(W * ratio);
+      canvas.height = Math.round(HEIGHT * ratio);
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      return [canvas, ctx];
+    };
+    const [back, ctx] = layer();
+    const air = ctx.createLinearGradient(0, 0, 0, 150);
     air.addColorStop(0, sky.top);
     air.addColorStop(1, sky.low);
     ctx.fillStyle = air;
-    ctx.fillRect(0, 0, W, HORIZON + 6);
+    ctx.fillRect(0, 0, W, HEIGHT);
+    this.paintStars(ctx, sky);
     this.paintCelestial(ctx, sky);
-
-    // Three ridges, paler the farther away (the air between you and them).
-    const ridge = (layer, base, amp, freq, color) => {
-      const { phase, phase2 } = this.ridges[layer];
-      const y = (x) => base + Math.sin(x * freq + phase) * amp + Math.sin(x * freq * 2.7 + phase2) * amp * 0.35;
-      ctx.beginPath();
-      ctx.moveTo(0, HEIGHT);
-      for (let x = 0; x <= W + 8; x += 8) ctx.lineTo(x, y(x));
-      ctx.lineTo(W, HEIGHT);
-      ctx.closePath();
-      const fill = ctx.createLinearGradient(0, base - amp, 0, base + 30);
-      fill.addColorStop(0, shade(color, 0.04));
-      fill.addColorStop(1, shade(color, -0.12));
-      ctx.fillStyle = fill;
-      ctx.fill();
-      return y;
-    };
-    ridge(0, HORIZON - 34, 10, 0.011, mix(sky.far, sky.low, 0.25));
-    const mid = ridge(1, HORIZON - 17, 7, 0.017, sky.mid);
-    for (const tree of this.trees.filter((item) => item.layer === 1)) this.paintTree(ctx, tree.x, mid(tree.x) + 3, tree.h * 0.75, tree.round, shade(sky.mid, -0.18 - tree.tone * 0.1));
-    const near = ridge(2, HORIZON - 4, 4, 0.023, sky.near);
-    for (const tree of this.trees.filter((item) => item.layer === 2)) this.paintTree(ctx, tree.x, near(tree.x) + 4, tree.h, tree.round, shade(sky.near, -0.2 - tree.tone * 0.12));
-
-    // The lawn, a little lighter in the middle where the plaza's lights fall.
-    const lawn = ctx.createLinearGradient(0, HORIZON, 0, HEIGHT);
-    lawn.addColorStop(0, sky.grass);
-    lawn.addColorStop(1, sky.grassLow);
-    ctx.fillStyle = lawn;
-    ctx.fillRect(0, HORIZON, W, HEIGHT - HORIZON);
-    const { fountain } = this.places;
-    const pool = ctx.createRadialGradient(fountain.x, fountain.y, 10, fountain.x, fountain.y, W * 0.45);
-    pool.addColorStop(0, alpha(shade(sky.grass, 0.25), 0.35));
-    pool.addColorStop(1, alpha(sky.grass, 0));
-    ctx.fillStyle = pool;
-    ctx.fillRect(0, HORIZON, W, HEIGHT - HORIZON);
-    // A soft line of haze where the lawn meets the hills.
-    const haze = ctx.createLinearGradient(0, HORIZON - 8, 0, HORIZON + 14);
-    haze.addColorStop(0, alpha(sky.low, 0));
-    haze.addColorStop(0.5, alpha(sky.low, 0.16));
-    haze.addColorStop(1, alpha(sky.low, 0));
-    ctx.fillStyle = haze;
-    ctx.fillRect(0, HORIZON - 8, W, 22);
-
-    for (const tuft of this.tufts) {
-      ctx.strokeStyle = alpha(shade(sky.grass, tuft.tone > 0.5 ? 0.22 : -0.25), 0.55);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(tuft.x - 2, tuft.y);
-      ctx.quadraticCurveTo(tuft.x - 2, tuft.y - 3, tuft.x - 4, tuft.y - 5);
-      ctx.moveTo(tuft.x, tuft.y);
-      ctx.lineTo(tuft.x, tuft.y - 6);
-      ctx.moveTo(tuft.x + 2, tuft.y);
-      ctx.quadraticCurveTo(tuft.x + 2, tuft.y - 3, tuft.x + 4, tuft.y - 5);
-      ctx.stroke();
-    }
-
-    // The path from the gate to the plaza and on to the right: pale stone, soft edges.
-    const path = new Path2D();
-    path.moveTo(-20, HEIGHT - 64);
-    path.quadraticCurveTo(W * 0.25, HEIGHT - 44, fountain.x, fountain.y + 10);
-    path.quadraticCurveTo(W * 0.75, HEIGHT - 22, W + 20, HEIGHT - 76);
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = alpha(sky.path, 0.22);
-    ctx.lineWidth = 26;
-    ctx.stroke(path);
-    ctx.strokeStyle = alpha(sky.path, 0.42);
-    ctx.lineWidth = 17;
-    ctx.stroke(path);
-    ctx.setLineDash([2, 11]);
-    ctx.strokeStyle = alpha(shade(sky.path, 0.3), 0.35);
-    ctx.lineWidth = 5;
-    ctx.stroke(path);
-    ctx.setLineDash([]);
-    const plaza = ctx.createRadialGradient(fountain.x, fountain.y + 4, 20, fountain.x, fountain.y + 4, 92);
-    plaza.addColorStop(0, alpha(shade(sky.path, 0.08), 0.6));
-    plaza.addColorStop(0.75, alpha(sky.path, 0.42));
-    plaza.addColorStop(1, alpha(sky.path, 0));
-    ctx.fillStyle = plaza;
-    ctx.beginPath();
-    ctx.ellipse(fountain.x, fountain.y + 4, 96, 34, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    for (const flower of this.flowers) {
-      if (this.blocked(flower.x, flower.y)) continue;
-      ctx.fillStyle = alpha(flower.color, 0.45 + sky.light * 0.45);
-      ctx.beginPath();
-      ctx.arc(flower.x, flower.y, 1.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
+    this.paintClouds(ctx, sky);
+    const [far, farCtx] = layer();
+    setting.far(farCtx, this.places, this.season, lm);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // The alley lights itself: its colours are already the night's.
+    ctx.drawImage(setting.night ? far : underLight(far, sky.tint), 0, 0);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     // The edges fall into shadow: the scene sits in the tile, it doesn't end on a cut.
     const edge = ctx.createLinearGradient(0, 0, W, 0);
     edge.addColorStop(0, 'rgba(6, 6, 16, 0.32)');
@@ -595,14 +558,55 @@ export class ParkWidget {
     edge.addColorStop(1, 'rgba(6, 6, 16, 0.32)');
     ctx.fillStyle = edge;
     ctx.fillRect(0, 0, W, HEIGHT);
-    const floor = ctx.createLinearGradient(0, HEIGHT - 40, 0, HEIGHT);
-    floor.addColorStop(0, 'rgba(6, 6, 16, 0)');
-    floor.addColorStop(1, 'rgba(6, 6, 16, 0.3)');
-    ctx.fillStyle = floor;
-    ctx.fillRect(0, HEIGHT - 40, W, 40);
-
-    this.backdrop = canvas;
+    this.nearLayer = null;
+    if (setting.near) {
+      const [near, nearCtx] = layer();
+      setting.near(nearCtx, this.places, this.season, lm);
+      this.nearLayer = setting.night ? near : underLight(near, sky.tint);
+    }
+    this.backdrop = back;
     this.backdropAt = Date.now();
+    this.backdropKey = key;
+  }
+
+  paintStars(ctx, sky) {
+    if (sky.stars < 0.05) return;
+    const random = seeded(this.width);
+    for (let i = 0; i < this.width / 12; i += 1) {
+      const x = random() * this.width;
+      const y = 4 + random() * 100;
+      const size = random();
+      ctx.fillStyle = `rgba(255, 255, 255, ${sky.stars * (0.25 + size * 0.6)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, 0.4 + size * 0.9, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  /** Soft clouds, white by day and slate at night. */
+  paintClouds(ctx, sky) {
+    const random = seeded(this.width + 9);
+    const tone = mix('#3a3560', '#ffffff', sky.light);
+    for (let i = 0; i < 4; i += 1) {
+      const cx = random() * this.width;
+      const cy = 18 + random() * 40;
+      const w = 40 + random() * 60;
+      for (const [dx, dy, r] of [
+        [0, 0, 0.32],
+        [0.28, -0.12, 0.26],
+        [-0.3, 0.04, 0.24],
+        [0.55, 0.05, 0.2],
+      ]) {
+        const x = cx + dx * w;
+        const y = cy + dy * w;
+        const radius = r * w;
+        const puff = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        puff.addColorStop(0, alpha(tone, 0.16 + sky.light * 0.14));
+        puff.addColorStop(1, alpha(tone, 0));
+        ctx.fillStyle = puff;
+        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      }
+    }
   }
 
   /** The sun on its arc by day, low and warm at dawn and dusk; the moon at night. */
@@ -612,7 +616,7 @@ export class ParkWidget {
     if (hour >= 6 && hour < 20) {
       const progress = (hour - 6) / 14;
       const x = W * (0.12 + progress * 0.76);
-      const y = HORIZON - 22 - Math.sin(progress * Math.PI) * (HORIZON - 40);
+      const y = 74 - Math.sin(progress * Math.PI) * 56;
       const warm = 1 - Math.sin(progress * Math.PI);
       const core = mix('#fff4cf', '#ffb27a', warm);
       const halo = ctx.createRadialGradient(x, y, 2, x, y, 46 + warm * 20);
@@ -623,7 +627,7 @@ export class ParkWidget {
       ctx.fillRect(x - 70, y - 70, 140, 140);
       ctx.fillStyle = core;
       ctx.beginPath();
-      ctx.arc(x, y, 8 + warm * 3, 0, Math.PI * 2);
+      ctx.arc(x, y, 8 + warm * 3, 0, TAU);
       ctx.fill();
     } else {
       const x = W - 58;
@@ -638,7 +642,7 @@ export class ParkWidget {
       disc.addColorStop(1, '#d9d3c4');
       ctx.fillStyle = disc;
       ctx.beginPath();
-      ctx.arc(x, y, 9.5, 0, Math.PI * 2);
+      ctx.arc(x, y, 9.5, 0, TAU);
       ctx.fill();
       ctx.fillStyle = 'rgba(160, 150, 140, 0.25)';
       for (const [dx, dy, r] of [
@@ -647,51 +651,47 @@ export class ParkWidget {
         [2, 4, 1.1],
       ]) {
         ctx.beginPath();
-        ctx.arc(x + dx, y + dy, r, 0, Math.PI * 2);
+        ctx.arc(x + dx, y + dy, r, 0, TAU);
         ctx.fill();
       }
     }
   }
 
-  paintTree(ctx, x, ground, height, round, color) {
-    ctx.fillStyle = shade(color, -0.25);
-    ctx.fillRect(x - 1, ground - height * 0.35, 2, height * 0.35);
-    const crown = ctx.createLinearGradient(x - height * 0.4, ground - height, x + height * 0.4, ground);
-    crown.addColorStop(0, shade(color, 0.12));
-    crown.addColorStop(1, shade(color, -0.1));
-    ctx.fillStyle = crown;
-    ctx.beginPath();
-    if (round) {
-      ctx.arc(x, ground - height * 0.62, height * 0.38, 0, Math.PI * 2);
-    } else {
-      ctx.moveTo(x, ground - height);
-      ctx.quadraticCurveTo(x + height * 0.34, ground - height * 0.45, x + height * 0.22, ground - height * 0.22);
-      ctx.lineTo(x - height * 0.22, ground - height * 0.22);
-      ctx.quadraticCurveTo(x - height * 0.34, ground - height * 0.45, x, ground - height);
-    }
-    ctx.fill();
-  }
-
   // ------------------------------------------------------------------ draw
   draw() {
     if (!this.width || !this.places) return;
-    if (!this.backdrop || Date.now() - this.backdropAt > BACKDROP_EVERY) this.paintBackdrop();
+    const lm = this.lmStudio();
+    const key = `${this.settingId}|${this.width}|${seasonAt().name}|${lm ? lm.model : '-'}`;
+    if (!this.backdrop || key !== this.backdropKey || Date.now() - this.backdropAt > BACKDROP_EVERY) this.paintBackdrop(key);
     const ctx = this.context;
     const sky = this.sky;
-    ctx.clearRect(0, 0, this.width, HEIGHT);
-    ctx.drawImage(this.backdrop, 0, 0, this.width, HEIGHT);
+    const ratio = window.devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.drawImage(this.backdrop, 0, 0);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     this.taken = [];
     this.labels = [];
-    this.drawSky(ctx, sky);
+    const view = {
+      P: this.places,
+      W: this.width,
+      sky,
+      season: this.season,
+      clock: this.clock,
+      state: this.sceneState,
+      waiting: [...this.entities.values()].some((entity) => entity.data?.state === 'waiting'),
+    };
+    this.setting.mid?.(ctx, view);
+    if (this.nearLayer) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(this.nearLayer, 0, 0);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+    this.drawGlows(ctx, sky);
+    this.setting.props?.(ctx, view);
     this.drawThreads(ctx);
-    const lmstudio = this.data?.lmstudio;
-    if (lmstudio) this.drawKiosk(ctx, lmstudio, sky);
-    this.drawPond(ctx, sky);
-    this.drawBench(ctx, sky);
-    for (const x of this.lamps) this.drawLamp(ctx, x, sky);
-    this.drawFountain(ctx, sky);
     this.drawBrainLinks(ctx);
-    // Back to front: who's lower on the lawn is closer.
+    // Back to front: who's lower in the scene is closer.
     const sorted = [...this.entities.values()].filter((entity) => entity.data).sort((a, b) => a.y - b.y);
     for (const entity of sorted) {
       if (entity.id === this.focus) this.drawFocus(ctx, entity);
@@ -699,58 +699,98 @@ export class ParkWidget {
       else if (entity.data.kind === 'openclaw') this.drawLobster(ctx, entity, sky);
       else this.drawAgent(ctx, entity, sky);
     }
+    this.setting.front?.(ctx, view);
     for (const label of this.labels) this.pill(ctx, ...label);
     for (const envelope of this.envelopes) this.drawEnvelope(ctx, envelope);
-    this.drawFlies(ctx, sky);
+    this.drawWeather(ctx, sky);
     for (const entity of sorted) this.drawBubble(ctx, entity);
-    if (!this.data) this.pill(ctx, t('Looking around the park…'), this.width / 2, HEIGHT / 2 + 40, null, 12);
+    if (!this.data) this.pill(ctx, t('Looking around…'), this.width / 2, HEIGHT / 2 + 40, null, 12);
   }
 
-  /** What moves up there: twinkling stars at night, slow clouds. */
-  drawSky(ctx, sky) {
-    if (sky.stars > 0.05) {
-      for (const star of this.stars) {
-        ctx.globalAlpha = sky.stars * (0.4 + 0.4 * Math.sin(this.clock * 1.6 + star.tw));
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
-        ctx.fill();
+  /** Lanterns, windows and signs lighting up as the day goes. */
+  drawGlows(ctx, sky) {
+    if (sky.lamps < 0.03) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const light of this.lights) {
+      let on = sky.lamps * (light.a ?? 1) * (light.flicker ? 0.85 + 0.15 * Math.sin(this.clock * light.flicker + light.x) : 1);
+      // A tired neon tube goes out for a moment now and then.
+      if (light.blink && (this.clock * 3.7) % 7 < 0.35) on *= 0.15;
+      if (light.w) {
+        ctx.fillStyle = alpha(light.color, 0.5 * on);
+        ctx.fillRect(light.x, light.y, light.w, light.h);
+        continue;
       }
-      ctx.globalAlpha = 1;
-    }
-    const tone = mix('#3a3560', '#ffffff', sky.light);
-    for (const cloud of this.clouds) {
-      for (const [dx, dy, r] of [
-        [0, 0, 0.32],
-        [0.28, -0.12, 0.26],
-        [-0.3, 0.04, 0.24],
-        [0.55, 0.05, 0.2],
-      ]) {
-        const x = cloud.x + dx * cloud.w;
-        const y = cloud.y + dy * cloud.w;
-        const radius = r * cloud.w;
-        const puff = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        puff.addColorStop(0, alpha(tone, 0.16 + sky.light * 0.14));
-        puff.addColorStop(1, alpha(tone, 0));
-        ctx.fillStyle = puff;
-        ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-      }
-    }
-  }
-
-  /** Fireflies at dusk and at night: little lights drifting over the lawn. */
-  drawFlies(ctx, sky) {
-    if (sky.flies < 0.05) return;
-    for (const fly of this.flies) {
-      const x = fly.x + Math.sin(this.clock * fly.speed + fly.phase) * 18;
-      const y = fly.y + Math.cos(this.clock * fly.speed * 1.3 + fly.phase) * 8;
-      const on = sky.flies * Math.max(0, Math.sin(this.clock * 1.7 + fly.phase * 3));
-      if (on < 0.05) continue;
-      const glow = ctx.createRadialGradient(x, y, 0, x, y, 7);
-      glow.addColorStop(0, `rgba(255, 238, 150, ${0.75 * on})`);
-      glow.addColorStop(1, 'rgba(255, 238, 150, 0)');
+      const glow = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, light.r);
+      glow.addColorStop(0, alpha(light.color, 0.55 * on));
+      glow.addColorStop(0.35, alpha(light.color, 0.18 * on));
+      glow.addColorStop(1, alpha(light.color, 0));
       ctx.fillStyle = glow;
-      ctx.fillRect(x - 7, y - 7, 14, 14);
+      ctx.fillRect(light.x - light.r, light.y - light.r, light.r * 2, light.r * 2);
+    }
+    ctx.restore();
+  }
+
+  /** The season in the air: petals, fireflies after dusk, red leaves, snow; rain in the alley. */
+  drawWeather(ctx, sky) {
+    const kind = this.setting.particles?.[this.season.name] ?? this.season.particle;
+    const W = this.width;
+    const clock = this.clock;
+    const random = seeded(99);
+    if (kind === 'firefly') {
+      if (sky.lamps < 0.1) return;
+      for (let i = 0; i < Math.max(8, W / 50); i += 1) {
+        const sx = random();
+        const sy = random();
+        const phase = random() * TAU;
+        const x = sx * W + Math.sin(clock * 0.5 + phase) * 30;
+        const y = 130 + sy * (HEIGHT - 145) + Math.sin(clock * 0.7 + phase * 2) * 12;
+        const on = Math.max(0, Math.sin(clock * 1.7 + phase * 3)) * sky.lamps;
+        if (on < 0.05) continue;
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, 7);
+        glow.addColorStop(0, `rgba(214, 255, 140, ${0.8 * on})`);
+        glow.addColorStop(1, 'rgba(214, 255, 140, 0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - 7, y - 7, 14, 14);
+      }
+      return;
+    }
+    const count = kind === 'rain' ? W / 10 : W / 30;
+    for (let i = 0; i < count; i += 1) {
+      const sx = random();
+      const sy = random();
+      const speed = random();
+      const phase = random() * TAU;
+      if (kind === 'rain') {
+        const y = ((sy * HEIGHT + clock * 380) % (HEIGHT + 20)) - 10;
+        const x = ((((sx * (W + 40) - clock * 60) % (W + 40)) + W + 40) % (W + 40)) - 20;
+        ctx.strokeStyle = 'rgba(170, 190, 225, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 2, y + 9);
+        ctx.stroke();
+        continue;
+      }
+      const vy = kind === 'snow' ? 14 + speed * 16 : 12 + speed * 10;
+      const vx = kind === 'snow' ? 4 : 14 + speed * 8;
+      const y = ((sy * HEIGHT + clock * vy) % (HEIGHT + 20)) - 10;
+      const x = ((sx * (W + 40) + clock * vx + Math.sin(clock * 1.3 + phase) * 12) % (W + 40)) - 20;
+      if (kind === 'snow') {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.beginPath();
+        ctx.arc(x, y, 1 + speed * 1.6, 0, TAU);
+        ctx.fill();
+        continue;
+      }
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(clock * (kind === 'leaf' ? 3 : 2) + phase);
+      ctx.fillStyle = kind === 'petal' ? 'rgba(255, 201, 220, 0.9)' : ['#e0603a', '#f0a040', '#c9402a'][i % 3];
+      ctx.beginPath();
+      ctx.ellipse(0, 0, kind === 'leaf' ? 3.2 : 2.6, kind === 'leaf' ? 2 : 1.5, 0, 0, TAU);
+      ctx.fill();
+      ctx.restore();
     }
   }
 
@@ -775,7 +815,7 @@ export class ParkWidget {
     ctx.strokeStyle = `rgba(190, 170, 255, ${pulse})`;
     ctx.lineWidth = 1.6;
     ctx.beginPath();
-    ctx.ellipse(entity.x, y, 18, 6, 0, 0, Math.PI * 2);
+    ctx.ellipse(entity.x, y, 18, 6, 0, 0, TAU);
     ctx.stroke();
   }
 
@@ -802,205 +842,9 @@ export class ParkWidget {
       const y = (1 - p) ** 2 * (a.y - 14) + 2 * (1 - p) * p * my + p ** 2 * (b.y - 14);
       ctx.fillStyle = `rgba(230, 220, 255, ${0.8 * fade})`;
       ctx.beginPath();
-      ctx.arc(x, y, 1.8, 0, Math.PI * 2);
+      ctx.arc(x, y, 1.8, 0, TAU);
       ctx.fill();
     }
-  }
-
-  drawFountain(ctx, sky) {
-    const { fountain: f } = this.places;
-    this.shadow(ctx, f.x, f.y + 8, 60);
-    const rim = ctx.createLinearGradient(f.x, f.y - 14, f.x, f.y + 14);
-    rim.addColorStop(0, mix('#b9b6cc', sky.path, 0.3));
-    rim.addColorStop(1, mix('#5d5a74', sky.grassLow, 0.3));
-    ctx.fillStyle = rim;
-    ctx.beginPath();
-    ctx.ellipse(f.x, f.y, 50, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-    const water = ctx.createLinearGradient(f.x, f.y - 10, f.x, f.y + 10);
-    water.addColorStop(0, mix('#5a8fd0', sky.low, 0.35));
-    water.addColorStop(1, '#264a7c');
-    ctx.fillStyle = water;
-    ctx.beginPath();
-    ctx.ellipse(f.x, f.y - 1, 43, 11.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Her light on the water.
-    const glow = ctx.createRadialGradient(f.x, f.y - 2, 0, f.x, f.y - 2, 34);
-    glow.addColorStop(0, `${hex(this.flame.glow)}66`);
-    glow.addColorStop(1, `${hex(this.flame.glow)}00`);
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.ellipse(f.x, f.y - 1, 43, 11.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(210, 230, 255, 0.35)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 2; i += 1) {
-      const p = (this.clock * 0.4 + i * 0.5) % 1;
-      ctx.globalAlpha = 1 - p;
-      ctx.beginPath();
-      ctx.ellipse(f.x, f.y - 1, 10 + p * 30, 2.5 + p * 7, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-    // The pedestal and its jets.
-    const stone = ctx.createLinearGradient(f.x - 5, 0, f.x + 5, 0);
-    stone.addColorStop(0, '#a8a5bb');
-    stone.addColorStop(1, '#6e6b84');
-    ctx.fillStyle = stone;
-    ctx.beginPath();
-    ctx.roundRect(f.x - 4.5, f.y - 17, 9, 15, 3);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(190, 225, 255, 0.65)';
-    ctx.lineWidth = 1.3;
-    for (let i = 0; i < 4; i += 1) {
-      const spread = (i - 1.5) * 10;
-      const lift = 11 + Math.sin(this.clock * 3 + i) * 2;
-      ctx.beginPath();
-      ctx.moveTo(f.x, f.y - 17);
-      ctx.quadraticCurveTo(f.x + spread * 0.6, f.y - 17 - lift, f.x + spread * 1.9, f.y - 4);
-      ctx.stroke();
-      const p = (this.clock * 1.2 + i * 0.25) % 1;
-      ctx.fillStyle = `rgba(210, 235, 255, ${0.8 * (1 - p)})`;
-      ctx.beginPath();
-      ctx.arc(f.x + spread * 1.9 * p, f.y - 17 - lift * Math.sin(p * Math.PI) * 0.7 + p * 13, 1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  drawPond(ctx, sky) {
-    const { pond: p } = this.places;
-    const bank = ctx.createRadialGradient(p.x, p.y, 40, p.x, p.y, 70);
-    bank.addColorStop(0, alpha(shade(sky.grassLow, -0.2), 0.7));
-    bank.addColorStop(1, alpha(sky.grassLow, 0));
-    ctx.fillStyle = bank;
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y + 2, 68, 25, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // The water mirrors the sky.
-    const water = ctx.createLinearGradient(p.x, p.y - 20, p.x, p.y + 20);
-    water.addColorStop(0, mix(sky.low, '#2b5d8a', 0.55));
-    water.addColorStop(1, mix(sky.top, '#173556', 0.5));
-    ctx.fillStyle = water;
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y, 60, 20, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(220, 235, 255, 0.18)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y, 60, 20, 0, Math.PI * 1.05, Math.PI * 1.95);
-    ctx.stroke();
-    for (let i = 0; i < 3; i += 1) {
-      const wave = (this.clock * 5 + i * 13) % 36;
-      ctx.strokeStyle = `rgba(200, 225, 255, ${0.3 * (1 - wave / 36)})`;
-      ctx.beginPath();
-      ctx.ellipse(p.x - 22 + i * 20, p.y + 5 - i * 3, 5 + wave * 0.18, 1.4 + wave * 0.04, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    // Two lily pads, one with a flower.
-    for (const [dx, dy, r, bloom] of [
-      [28, -6, 6, true],
-      [-34, 7, 5, false],
-    ]) {
-      ctx.fillStyle = mix('#3f8a5a', sky.grass, 0.3);
-      ctx.beginPath();
-      ctx.ellipse(p.x + dx, p.y + dy, r, r * 0.42, 0, 0.35, Math.PI * 2 - 0.2);
-      ctx.lineTo(p.x + dx, p.y + dy);
-      ctx.fill();
-      if (bloom) {
-        ctx.fillStyle = '#f4b6d2';
-        ctx.beginPath();
-        ctx.arc(p.x + dx - 1, p.y + dy - 1.5, 1.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-
-  drawBench(ctx, sky) {
-    const { bench: b } = this.places;
-    this.shadow(ctx, b.x, b.y + 9, 56);
-    const wood = mix('#9a6a46', sky.grassLow, 0.25);
-    const legs = shade(wood, -0.45);
-    ctx.fillStyle = legs;
-    ctx.fillRect(b.x - 45, b.y - 2, 3, 11);
-    ctx.fillRect(b.x + 42, b.y - 2, 3, 11);
-    for (const [y, h] of [
-      [-16, 4],
-      [-10, 4],
-      [-3, 5],
-    ]) {
-      const slat = ctx.createLinearGradient(0, b.y + y, 0, b.y + y + h);
-      slat.addColorStop(0, shade(wood, 0.18));
-      slat.addColorStop(1, shade(wood, -0.15));
-      ctx.fillStyle = slat;
-      ctx.beginPath();
-      ctx.roundRect(b.x - 50, b.y + y, 100, h, 2);
-      ctx.fill();
-    }
-  }
-
-  drawLamp(ctx, x, sky) {
-    const ground = HORIZON + 46;
-    this.shadow(ctx, x, ground + 1, 8);
-    ctx.strokeStyle = '#22222c';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x, ground);
-    ctx.lineTo(x, ground - 30);
-    ctx.stroke();
-    const lit = sky.lamps * (0.92 + Math.sin(this.clock * 7 + x) * 0.04);
-    if (lit > 0.05) {
-      const glow = ctx.createRadialGradient(x, ground - 33, 1, x, ground - 33, 34);
-      glow.addColorStop(0, `rgba(255, 214, 140, ${0.55 * lit})`);
-      glow.addColorStop(1, 'rgba(255, 214, 140, 0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(x - 34, ground - 67, 68, 68);
-      const pool = ctx.createRadialGradient(x, ground + 2, 1, x, ground + 2, 30);
-      pool.addColorStop(0, `rgba(255, 214, 140, ${0.18 * lit})`);
-      pool.addColorStop(1, 'rgba(255, 214, 140, 0)');
-      ctx.fillStyle = pool;
-      ctx.fillRect(x - 30, ground - 8, 60, 20);
-    }
-    ctx.fillStyle = '#2b2b36';
-    ctx.beginPath();
-    ctx.roundRect(x - 4.5, ground - 38, 9, 3, 1.5);
-    ctx.fill();
-    ctx.fillStyle = lit > 0.05 ? mix('#d8d2c2', '#ffe4a6', lit) : '#cfcab9';
-    ctx.beginPath();
-    ctx.roundRect(x - 3.5, ground - 35, 7, 6, 2);
-    ctx.fill();
-  }
-
-  drawKiosk(ctx, lmstudio, sky) {
-    const { kiosk: k } = this.places;
-    this.shadow(ctx, k.x, k.y + 22, 40);
-    const wall = ctx.createLinearGradient(0, k.y - 8, 0, k.y + 22);
-    wall.addColorStop(0, '#f1ece2');
-    wall.addColorStop(1, mix('#cfc8bb', sky.grassLow, 0.15));
-    ctx.fillStyle = wall;
-    ctx.beginPath();
-    ctx.roundRect(k.x - 30, k.y - 8, 60, 30, 4);
-    ctx.fill();
-    ctx.fillStyle = '#2e2944';
-    ctx.beginPath();
-    ctx.roundRect(k.x - 24, k.y - 3, 48, 13, 3);
-    ctx.fill();
-    ctx.fillStyle = '#b8a8ff';
-    ctx.font = `700 8.5px ${FONT}`;
-    ctx.textAlign = 'center';
-    ctx.fillText('LM Studio', k.x, k.y + 6.5);
-    // The striped awning, scalloped.
-    for (let i = 0; i < 6; i += 1) {
-      ctx.fillStyle = i % 2 ? '#f6f2ff' : '#8f7bff';
-      ctx.beginPath();
-      ctx.moveTo(k.x - 35 + i * 11.7, k.y - 22);
-      ctx.lineTo(k.x - 23.3 + i * 11.7, k.y - 22);
-      ctx.lineTo(k.x - 23.3 + i * 11.7, k.y - 13);
-      ctx.arc(k.x - 29.15 + i * 11.7, k.y - 13, 5.85, 0, Math.PI);
-      ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
-    ctx.fillRect(k.x - 30, k.y - 8, 60, 3);
-    if (lmstudio.model) this.labels.push([clip(lmstudio.model.split('/').pop(), 22), k.x, k.y + 36, null]);
   }
 
   drawBrainLinks(ctx) {
@@ -1027,11 +871,24 @@ export class ParkWidget {
   }
 
   drawTsukumo(ctx, entity) {
-    const { fountain: f } = this.places;
+    const f = this.places.tsukumo;
     entity.x = f.x;
     entity.y = f.y - 2;
     const colors = this.flame;
     const working = entity.data.state === 'working';
+    if (f.pool) {
+      // Her light on whatever is under her: water, stone, the platform.
+      const pool = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 36);
+      pool.addColorStop(0, `${hex(colors.glow)}55`);
+      pool.addColorStop(1, `${hex(colors.glow)}00`);
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.scale(1, 0.3);
+      ctx.translate(-f.x, -f.y);
+      ctx.fillStyle = pool;
+      ctx.fillRect(f.x - 36, f.y - 36, 72, 72);
+      ctx.restore();
+    }
     ctx.save();
     ctx.translate(f.x, f.y);
     ctx.scale(SCALE * 0.9, SCALE * 0.9);
@@ -1095,7 +952,7 @@ export class ParkWidget {
     ctx.scale(face, 1);
     const shell = ctx.createLinearGradient(0, -12, 0, 2);
     shell.addColorStop(0, '#ff7a63');
-    shell.addColorStop(1, mix('#c4362c', sky.grassLow, 0.15));
+    shell.addColorStop(1, mix('#c4362c', sky.tint, 0.15));
     ctx.fillStyle = shell;
     ctx.strokeStyle = '#d9483b';
     ctx.lineWidth = 2;
@@ -1142,6 +999,9 @@ export class ParkWidget {
     const look = KINDS[data.kind] ?? OTHER;
     const state = data.state;
     const seated = state === 'idle' && entity.seat >= 0 && !entity.walking && !entity.visit;
+    // A seat may be a crate or a stool (no shadow under them) or the hot water (only the head shows).
+    const seat = seated ? this.places.seats[entity.seat] : null;
+    const soak = seat?.pose === 'soak';
     const asleep = state === 'idle' && !entity.walking && entity.rest > 8;
     let hop = 0;
     if (entity.walking) hop = Math.abs(Math.sin(entity.phase)) * (state === 'working' ? 3.5 : 2.5);
@@ -1159,11 +1019,18 @@ export class ParkWidget {
     ctx.translate(x, ground);
     ctx.scale(SCALE, SCALE);
     ctx.translate(-x, -ground);
-    const base = ground - 2 - hop - (seated ? 7 : 0);
+    const base = soak ? ground + 8 : ground - 2 - hop - (seated ? 7 : 0);
     const rx = 12 * sx;
     const ry = 11 * sy;
     const y = base - ry;
-    this.shadow(ctx, x, ground, 14, hop);
+    if (soak) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x - 60, ground - 90, 120, 90);
+      ctx.clip();
+    } else if (!seat?.perch) {
+      this.shadow(ctx, x, ground, 14, hop);
+    }
     // Feet.
     if (!seated) {
       ctx.fillStyle = shade(look.body, -0.4);
@@ -1199,7 +1066,16 @@ export class ParkWidget {
       else ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    const cap = CAPS[data.where];
+    const cap = soak ? null : CAPS[data.where];
+    if (soak) {
+      // In the bath the beanie gives way to a folded towel.
+      ctx.fillStyle = '#f7f3ea';
+      ctx.beginPath();
+      ctx.roundRect(x - 8, y - ry - 3, 16, 5, 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(120, 120, 140, 0.35)';
+      ctx.fillRect(x - 6, y - ry - 1, 12, 0.8);
+    }
     if (cap) {
       // A little beanie with a highlight and a brim on the side they face.
       const top = y - ry * 0.55;
@@ -1320,7 +1196,15 @@ export class ParkWidget {
       ctx.fillStyle = '#2a1712';
       ctx.fillRect(hx + entity.face * 1.5 - 0.6, hy - 1.5, 1.2, 1.6);
     });
+    if (soak) ctx.restore();
     ctx.restore();
+    if (soak) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(x, ground, 19 + Math.sin(this.clock * 2 + entity.phase) * 1.5, 3.5, 0, 0, TAU);
+      ctx.stroke();
+    }
     this.labels.push([clip(data.name, 20), x, ground + 14 * SCALE, STATE_DOT[state]]);
   }
 
@@ -1336,21 +1220,8 @@ export class ParkWidget {
     trail.addColorStop(1, 'rgba(200, 182, 255, 0)');
     ctx.fillStyle = trail;
     ctx.fillRect(x - 12, y - 12, 24, 24);
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(Math.sin(p * 8) * 0.2);
-    ctx.fillStyle = '#f6f4ff';
-    ctx.beginPath();
-    ctx.roundRect(-6.5, -4.5, 13, 9, 1.5);
-    ctx.fill();
-    ctx.strokeStyle = '#8f7bff';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-6, -4);
-    ctx.lineTo(0, 1);
-    ctx.lineTo(6, -4);
-    ctx.stroke();
-    ctx.restore();
+    // The message flies as a folded paper crane.
+    crane(ctx, x, y, this.clock, to.x >= from.x ? 1 : -1);
   }
 
   drawBubble(ctx, entity) {
@@ -1458,7 +1329,7 @@ export class ParkWidget {
       if (distance < bestDistance) [best, bestDistance] = [entity, distance];
     }
     const kiosk = this.places?.kiosk;
-    const onKiosk = this.data?.lmstudio && kiosk && Math.abs(x - kiosk.x) < 34 && Math.abs(y - kiosk.y) < 28;
+    const onKiosk = this.data?.lmstudio && kiosk && Math.abs(x - kiosk.x) < kiosk.w / 2 && Math.abs(y - kiosk.y) < kiosk.h / 2;
     this.setFocus(best?.id ?? null);
     if (!best && !onKiosk) {
       this.tip.classList.add('hidden');
@@ -1474,7 +1345,7 @@ export class ParkWidget {
 
   describe(agent) {
     if (agent.kind === 'tsukumo') return [['Tsukumo', agent.brain && agent.brain !== 'Tsukumo' ? t('brain: {name}', { name: agent.brain }) : ''], [STATE_TEXT[agent.state] ?? agent.state]];
-    if (agent.kind === 'openclaw') return [[agent.name, t('in the pond')], [STATE_TEXT[agent.state] ?? agent.state]];
+    if (agent.kind === 'openclaw') return [[agent.name, t(this.setting.pondText)], [STATE_TEXT[agent.state] ?? agent.state]];
     const look = KINDS[agent.kind] ?? OTHER;
     const lines = [[agent.name, [look.label || agent.kind, WHERE[agent.where]].filter(Boolean).join(' · ')]];
     if (agent.project) lines.push([t('in {folder}', { folder: agent.project })]);

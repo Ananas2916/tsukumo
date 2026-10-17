@@ -814,7 +814,7 @@ body.dashboard {
   color: var(--accent);
 }
 
-/* The park (dashboard/park.js): a garden of fixed height, then one chip per agent. */
+/* The park (dashboard/park.js): a Japanese scene of fixed height, then one chip per agent. */
 .w-park-scene {
   position: relative;
   height: 270px;
@@ -974,6 +974,30 @@ body.dashboard {
   margin: 0 0 0 auto;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* The scene's name is the tile's title, and picks the scene. */
+.w-park-pick {
+  margin: 0;
+  padding: 0 18px 0 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23a7a2bd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E") no-repeat right 2px center;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+  field-sizing: content;
+}
+
+.w-park-pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.w-park-pick option {
+  background: var(--bg);
+  color: var(--text);
 }
 
 .w-limits {
