@@ -3,7 +3,8 @@
  *
  * With contextIsolation on the pages see neither Node nor Electron: we
  * expose only the commands they need. The same preload serves every window;
- * `role` says which one is running ('pet', 'panel' or 'dashboard').
+ * `role` says which one is running ('pet', 'panel', 'dashboard' or 'guide',
+ * the arrow's window).
  */
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
@@ -34,6 +35,20 @@ contextBridge.exposeInMainWorld('companion', {
   captureScreen: () => ipcRenderer.invoke('pet:capture-screen'),
   /** A vault item to the clipboard: the main process reads it and copies it (the page never sees it). */
   copySecret: (id) => ipcRenderer.invoke('pet:copy-secret', id),
+
+  // --- showing where (backend/guide.py) ---------------------------------------
+  /** Screenshot of the display being worked on, with where it sits: `{file, display, image, window}`. */
+  glance: () => ipcRenderer.invoke('pet:glance'),
+  /** A step from the backend (`{state: 'show' | 'looking' | 'lost' | 'clear', ...}`): main draws the arrow. */
+  showGuide: (message) => ipcRenderer.send('guide:show', message),
+  /** Where she is in her window, as fractions `{cx, cy, half}`: the arrow starts there. */
+  setGuideAnchor: (frame) => ipcRenderer.send('guide:anchor', frame),
+  /** `{action: 'hit' | 'relocate'}`: the spot was clicked, or its window changed. */
+  onGuideEvent: (callback) => listen('guide:event', callback),
+  /** Where she should look while she points (window pixels), or null. */
+  onGaze: (callback) => listen('pet:gaze', callback),
+  /** The arrow's window: what to draw. */
+  onGuideDraw: (callback) => listen('guide:draw', callback),
 
   // --- Tsukumo ---------------------------------------------------------------
   /**

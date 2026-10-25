@@ -170,6 +170,33 @@ function windowRect(hwnd) {
   }
 }
 
+/**
+ * The rectangle in physical pixels, the screenshot's unit: the guide sends
+ * it to the backend with the screenshot (backend/guide.py).
+ */
+function physicalWindowRect(hwnd) {
+  if (!load()) return null;
+  try {
+    if (!api.IsWindow(hwnd) || !api.IsWindowVisible(hwnd) || api.IsIconic(hwnd) || isCloaked(hwnd)) return null;
+    const rect = physicalRect(hwnd);
+    return rect ? { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Title and program of a window, for the brain: "the window in front is «...» (Deeds.exe)". */
+function windowInfo(hwnd) {
+  if (!load()) return { title: '', exe: '' };
+  try {
+    const pid = [0];
+    api.GetWindowThreadProcessId(hwnd, pid);
+    return { title: windowTitle(hwnd), exe: processName(pid[0]) };
+  } catch {
+    return { title: '', exe: '' };
+  }
+}
+
 function windowTitle(hwnd) {
   const length = api.GetWindowTextLengthW(hwnd);
   if (length <= 0) return '';
@@ -264,4 +291,15 @@ function handleOf(browserWindow) {
   return buffer.length >= 8 ? Number(buffer.readBigUInt64LE(0)) : buffer.readUInt32LE(0);
 }
 
-module.exports = { available: () => Boolean(load()), listWindows, windowRect, keepOnTop, handleOf, foregroundWindow, keyDown, otherKeyDown };
+module.exports = {
+  available: () => Boolean(load()),
+  listWindows,
+  windowRect,
+  physicalWindowRect,
+  windowInfo,
+  keepOnTop,
+  handleOf,
+  foregroundWindow,
+  keyDown,
+  otherKeyDown,
+};

@@ -424,6 +424,16 @@ first thing you see.
   the panel.
 - **Files and screen.** Drag a file onto her; say "look at my screen" for a
   screenshot of the current display, taken only when you ask.
+- **Show me where.** Ask "where's the 2-input AND?", "where do I connect this
+  wire?" or "how do I change the password?" and she draws a block-diagram
+  arrow from herself to the spot, in any program. Several steps come one at a
+  time: a click on the spot (or "done") moves on, "back" and "stop" too. She
+  looks at the screen only for questions like these (*Character → Show me
+  where* turns it off), and she only points: she never clicks or types for you.
+  The brain says *what* to show; buttons, menus and fields that Windows can
+  describe are found exactly from its accessibility tree, everything else
+  (a circuit's pins, a canvas, a game) by the *eye*: any cloud or local model
+  that sees images, chosen in the same card.
 - **Agent notifications.** One click adds `Stop`/`Notification` hooks to
   `~/.claude/settings.json` and a `notify` line to `~/.codex/config.toml`,
   backing up both files first.
@@ -614,6 +624,15 @@ Server → client (broadcast to every connected client):
 { "type": "error", "message": "...", "source": "llm" | "tts" | "stt", "hint": "...", "action": "engines" }
 ```
 
+Showing where (local clients only, see `backend/guide.py`): the server asks
+her window for `{ "type": "capture", "guide": true }` or `{ "type": "glance",
+"id": "..." }`, and her window answers with the screenshot and where it sits
+(`file`, `display`, `image`, `window`, in physical pixels). The steps go out as
+`{ "type": "guide", "state": "show" | "looking" | "lost" | "clear", "step": 1,
+"total": 3, "label": "AND", "target": {x, y, width, height}, "to": {...} }`, and
+`{ "type": "guide", "action": "hit" | "relocate" | "stop" }` comes back when the
+spot is clicked or its window changes.
+
 A text-only client (the phone page) connects to `/ws?mode=text`: it never
 receives `audio` or `visemes`, and its `chat` turns get a text reply without
 being spoken.
@@ -744,10 +763,11 @@ backend/            FastAPI app (python -m backend)
   tts/  stt/        voice and listening engines
   reminders.py proactive.py context.py memory.py usage.py notify.py music.py
   transcript.py     the last chat lines, for clients that reconnect
-frontend/           Vite: index.html (Tsukumo), panel.html, dashboard.html, mobile.html
+  guide.py eye.py uia.py  showing where on the screen: steps, the eye (any model that sees), Windows' accessibility tree
+frontend/           Vite: index.html (Tsukumo), panel.html, dashboard.html, mobile.html, guide.html (the arrow)
   src/flame.js flame/ stage.js island.js hud.js sfx.js lipsync.js panel/ dashboard/ ...
   src/i18n.js i18n/ interface text: English source, Italian catalog (i18n/it.js)
-electron/           main.js (windows, backend, IPC, hardening), pet-physics.js, desktop.js, i18n.js
+electron/           main.js (windows, backend, IPC, hardening), pet-physics.js, desktop.js, guide.js, i18n.js
 scripts/            build_installer.ps1, package_audit.py, download_models.py, tsukumo_notify.py
 tests/              pytest suite: no network, no models, no user .env
 docs/screenshots/   images for this page

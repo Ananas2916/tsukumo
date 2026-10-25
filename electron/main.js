@@ -41,6 +41,7 @@ const http = require('node:http');
 const zlib = require('node:zlib');
 
 const desktop = require('./desktop');
+const guide = require('./guide');
 const i18n = require('./i18n');
 const { PetPhysics } = require('./pet-physics');
 const spotify = require('./spotify');
@@ -1578,6 +1579,60 @@ handleIpc('pet:island-drag-end', () => {
 /** Where feet, seat and body axis are in the window (fractions). */
 onIpc('pet:anchors', (_event, anchors) => physics.setAnchors(anchors));
 
+// ---------------------------------------------------------------------------
+// Showing where: the arrow from her to the spot (guide.js, backend/guide.py)
+// ---------------------------------------------------------------------------
+/** Where she is in her window, as fractions: centre of the bulb and half width (Stage.hudFrame). */
+let guideFrame = { cx: 0.5, cy: 0.62, half: 0.14 };
+
+/** Her centre on the screen (DIP), where the arrow starts. */
+function flameAnchor() {
+  if (!alive(petWindow) || !petWindow.isVisible() || petWindow.isMinimized()) return null;
+  const bounds = petWindow.getBounds();
+  return {
+    x: bounds.x + bounds.width * guideFrame.cx,
+    y: bounds.y + bounds.height * guideFrame.cy,
+    radius: bounds.width * guideFrame.half,
+  };
+}
+
+const guideOverlay = new guide.GuideOverlay({
+  url: `${BACKEND_URL}/guide.html`,
+  preload: path.join(__dirname, 'preload.js'),
+  anchor: flameAnchor,
+  onEvent: (event) => sendToPet('guide:event', event),
+  // She looks at the spot she's pointing at (window pixels, like the cursor).
+  onGaze: (point) => {
+    const bounds = alive(petWindow) ? petWindow.getBounds() : null;
+    sendToPet('pet:gaze', point && bounds ? { x: point.x - bounds.x, y: point.y - bounds.y } : null);
+  },
+  // Her above her own arrow, when she's always on top (otherwise the arrow wins).
+  raise: () => {
+    if (settings.pinned && !petDock && petHandle && alive(petWindow) && petWindow.isVisible()) desktop.keepOnTop(petHandle);
+  },
+});
+
+/** Her windows: never "the window in front", never in the guide's screenshots. */
+function guideOwnWindows() {
+  return [petWindow, panelWindow, dashboardWindow, ...guideOverlay.allWindows()].filter(alive);
+}
+
+handleIpc('pet:glance', () => {
+  const windows = guideOwnWindows();
+  const own = new Set(windows.map((win) => desktop.handleOf(win)));
+  return guide.glance(own, windows, path.join(app.getPath('temp'), 'tsukumo'));
+});
+onIpc('guide:show', (_event, message) => {
+  if (message && typeof message === 'object') guideOverlay.handle(message);
+});
+onIpc('guide:anchor', (_event, frame) => {
+  const value = (key, low, high) => {
+    const number = Number(frame?.[key]);
+    return Number.isFinite(number) && number >= low && number <= high ? number : guideFrame[key];
+  };
+  guideFrame = { cx: value('cx', -0.5, 1.5), cy: value('cy', -0.5, 1.5), half: value('half', 0, 1) };
+});
+
 /** The interface's language (frontend/src/i18n.js): the tray menu follows it. */
 onIpc('app:language', (_event, value) => {
   const language = i18n.setLanguage(value);
@@ -1795,6 +1850,7 @@ if (!app.requestSingleInstanceLock()) {
     scheduleUpdateChecks();
     setInterval(tick, TICK_MS);
     setInterval(keepOnTop, ON_TOP_MS);
+    setInterval(() => guideOverlay.keepOnTop(), ON_TOP_MS);
     setInterval(pollMusic, MUSIC_POLL_MS);
     watchPresence();
 

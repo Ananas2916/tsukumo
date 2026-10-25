@@ -609,10 +609,62 @@ async function lookAtScreen(text = '') {
   }
 }
 
+/**
+ * "Where's the AND?": the screenshot and where it sits on the screen, so the
+ * answer can point at the spot (backend/guide.py). If the screen can't be
+ * seen the question goes back without it (`blind`), never in a loop.
+ */
+async function glanceForChat(text = '', again = false) {
+  try {
+    const shot = await pet.glance();
+    stage.play('look');
+    socket.send({ type: 'chat', text, files: [shot.file], screen: true, glance: shot, again });
+  } catch (error) {
+    ui.toast(t("I can't see the screen: {error}", { error: error.message }), true, 4000);
+    socket.send({ type: 'chat', text, again, blind: true });
+  }
+}
+
 // The backend understood "look at the screen": we take the screenshot here.
-socket.on('capture', (message) => lookAtScreen(message.text ?? ''));
+socket.on('capture', (message) => {
+  if (message.guide && pet?.glance) glanceForChat(message.text ?? '', Boolean(message.again));
+  else lookAtScreen(message.text ?? '');
+});
+
+// The guide's next step needs a fresh look (no chat message).
+socket.on('glance', async (message) => {
+  if (!pet?.glance) return;
+  try {
+    socket.send({ type: 'glance', id: message.id, ...(await pet.glance()) });
+  } catch {
+    // Nothing comes back: the backend gives up after a few seconds.
+  }
+});
+
+// The arrow from her to the spot: drawn by the main process (electron/guide.js).
+let guideAnchorTimer = null;
+function reportGuideAnchor() {
+  const frame = stage.hudFrame();
+  if (!window.innerWidth || !window.innerHeight) return;
+  pet.setGuideAnchor({ cx: frame.cx / window.innerWidth, cy: frame.cy / window.innerHeight, half: frame.half / window.innerWidth });
+}
+socket.on('guide', (message) => {
+  if (!pet?.showGuide) return;
+  pet.showGuide(message);
+  const on = message.state !== 'clear';
+  if (on && !guideAnchorTimer) {
+    reportGuideAnchor();
+    guideAnchorTimer = setInterval(reportGuideAnchor, 400);
+  } else if (!on) {
+    clearInterval(guideAnchorTimer);
+    guideAnchorTimer = null;
+  }
+  if (message.state === 'show' && message.step === 1) stage.play('look');
+});
 
 socket.on('close', () => {
+  // Without the backend nobody moves the guide on: the arrow goes.
+  pet?.showGuide?.({ state: 'clear' });
   state.backendState = 'idle';
   stage.setThinking(false);
   refreshStatus();
@@ -1191,6 +1243,10 @@ if (pet) {
     stage.setPointer(x, y, inside);
     trackSpin(x, y);
   });
+
+  // The guide: she looks at the spot she points at, and the click on it moves the steps on.
+  pet.onGaze?.((point) => stage.setGazeTarget(point));
+  pet.onGuideEvent?.((event) => socket.send({ type: 'guide', action: event.action }));
 
   // How long the PC has been idle, screen lock and unlock: sleep and waking up.
   pet.onPresence?.((message) => {

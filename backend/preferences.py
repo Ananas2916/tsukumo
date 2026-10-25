@@ -43,6 +43,13 @@ DEFAULTS: dict[str, Any] = {
     #: Where you leave from for the calendar's events, and how.
     "home": "",
     "travel": "car",
+    #: "Where's the AND?": she looks at the screen by herself and points at the spot (guide.py).
+    "guide": True,
+    #: Who finds the spot on the screenshot: a cloud or local model that sees
+    #: (``gemini``, ``openrouter``, ``ollama``...), empty = the main brain if it's one.
+    "eye": "",
+    #: That engine's model, if not the one saved for it (e.g. a vision model on OpenRouter).
+    "eyeModel": "",
 }
 
 _ENGINE_ID = re.compile(r"^[a-z0-9_]{0,40}$")
@@ -74,6 +81,18 @@ class Preferences:
     def brain_models(self) -> str:
         return self.data["brainModels"]
 
+    @property
+    def guide(self) -> bool:
+        return bool(self.data["guide"])
+
+    @property
+    def eye(self) -> str:
+        return self.data["eye"]
+
+    @property
+    def eye_model(self) -> str:
+        return self.data["eyeModel"]
+
     def topic(self, name: str) -> bool:
         return bool(self.data["topics"].get(name, True))
 
@@ -89,6 +108,12 @@ class Preferences:
             self.data["home"] = " ".join(changes["home"].split())[:160]
         if changes.get("travel") in TRAVEL_MODES:
             self.data["travel"] = changes["travel"]
+        if isinstance(changes.get("guide"), bool):
+            self.data["guide"] = changes["guide"]
+        if isinstance(changes.get("eye"), str) and _ENGINE_ID.match(changes["eye"].strip()):
+            self.data["eye"] = changes["eye"].strip()
+        if isinstance(changes.get("eyeModel"), str):
+            self.data["eyeModel"] = " ".join(changes["eyeModel"].split())[:120]
         if isinstance(changes.get("brainModels"), str):
             names = [name.strip() for name in changes["brainModels"].split(",") if name.strip()]
             self.data["brainModels"] = ", ".join(names)[:400]

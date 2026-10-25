@@ -410,6 +410,11 @@ export class Stage {
     this.pointerPx.y = inside ? y : -1;
   }
 
+  /** Where to look instead of the cursor (the spot she's pointing at, window pixels), or null. */
+  setGazeTarget(point) {
+    this._gazeTarget = point && Number.isFinite(point.x) && Number.isFinite(point.y) ? { x: point.x, y: point.y } : null;
+  }
+
   /** Audio playing, its volume and the vowel being spoken (lipsync.js weights). */
   setSpeech(playing, level, vowels = null) {
     this._speech.playing = playing;
@@ -640,6 +645,12 @@ export class Stage {
   _flameLook() {
     this._flameCenter ??= new THREE.Vector3();
     const center = this._toScreen(this.flame.centerWorld(this._flameCenter));
+    if (this._gazeTarget) {
+      return {
+        x: THREE.MathUtils.clamp((this._gazeTarget.x - center.x) / (window.innerWidth * 0.9), -1, 1),
+        y: THREE.MathUtils.clamp(-(this._gazeTarget.y - center.y) / (window.innerHeight * 0.6), -1, 1),
+      };
+    }
     if (this.elapsed - this._pointerMovedAt < GAZE_ATTENTION) {
       return {
         x: THREE.MathUtils.clamp((this.gazePx.x - center.x) / (window.innerWidth * 0.9), -1, 1),

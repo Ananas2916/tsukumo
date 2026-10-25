@@ -67,6 +67,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -91,6 +92,8 @@ from .context import PCContext
 from .news import NewsService
 from . import notify as agent_notify
 from . import phone
+from .eye import Eye
+from .guide import Glance, Guide
 from .preferences import Preferences
 from .proactive import Proactive
 from .reminders import (
@@ -370,6 +373,25 @@ SECRETARY = Secretary(
 )
 
 
+async def _guide_say(text: str) -> None:
+    instance = _current()
+    if instance is not None and text:
+        await instance.announce(text, hub.broadcast)
+
+
+#: Showing where on the screen (guide.py): the eye finds the spot, the shell draws the arrow.
+EYE = Eye(SETTINGS, PREFERENCES)
+GUIDE = Guide(
+    broadcast=lambda message: hub.broadcast_local(message),
+    glance=lambda: _glance(),
+    eye=EYE,
+    say=_guide_say,
+    language=lambda: _current().voice_language if _current() else SETTINGS.system_language,
+    enabled=lambda: PREFERENCES.guide,
+    can_glance=lambda: bool(SCREEN_CLIENTS),
+)
+
+
 # ---------------------------------------------------------------------------
 # Application lifecycle
 # ---------------------------------------------------------------------------
@@ -436,6 +458,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await PROACTIVE.stop()
         await SECRETARY.stop()
         await MUSIC.stop()
+        await EYE.close()
         _running_marker().unlink(missing_ok=True)
         await monitor.stop()
         await app.state.companion.close()
@@ -1102,6 +1125,7 @@ def _attach(instance: Companion) -> None:
     instance.memory = MEMORY
     instance.on_memory_changed = _memory_changed
     instance.screen_capture = _request_screen
+    instance.guide = GUIDE
     instance.music = MUSIC
     instance.proactive = PROACTIVE
     instance.secretary = SECRETARY
@@ -1183,17 +1207,45 @@ async def _park_services(http: httpx.AsyncClient) -> tuple[bool, dict[str, Any] 
     return openclaw, lmstudio
 
 
-async def _request_screen(text: str) -> bool:
-    """Asks whoever can for a screenshot; the message will come back with the file attached."""
+async def _request_screen(text: str, guide: bool = False, again: bool = False) -> bool:
+    """Asks whoever can for a screenshot; the message will come back with the file attached.
+
+    ``guide``: with where it sits on the screen, to point at things (guide.py).
+    ``again``: the brain asked for it ([[look]]): the message is already in the chat.
+    """
     targets = list(SCREEN_CLIENTS)
     if not targets:
         return False
     try:
-        await targets[0].send_json({"type": "capture", "text": text})
+        await targets[0].send_json({"type": "capture", "text": text, "guide": guide, "again": again})
     except Exception:
         SCREEN_CLIENTS.discard(targets[0])
         return False
     return True
+
+
+#: Screenshots asked for by the guide, waiting for the shell: id -> future.
+_GLANCES: dict[str, asyncio.Future[dict[str, Any]]] = {}
+GLANCE_TIMEOUT = 8.0
+
+
+async def _glance() -> Glance | None:
+    """A screenshot for the guide's next step, without a chat message."""
+    targets = list(SCREEN_CLIENTS)
+    if not targets:
+        return None
+    ident = secrets.token_hex(8)
+    future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+    _GLANCES[ident] = future
+    try:
+        await targets[0].send_json({"type": "glance", "id": ident})
+        data = await asyncio.wait_for(future, GLANCE_TIMEOUT)
+    except Exception as exc:
+        logger.info("No screenshot for the guide: %s", describe_error(exc) if not isinstance(exc, asyncio.TimeoutError) else "timeout")
+        return None
+    finally:
+        _GLANCES.pop(ident, None)
+    return Glance.from_message(data, time.time())
 
 
 async def _reminders_changed() -> None:
@@ -1565,8 +1617,10 @@ async def _enable_listening() -> None:
 # ---------------------------------------------------------------------------
 @app.get("/api/preferences")
 async def get_preferences() -> dict[str, Any]:
-    # brainError: why the chatter brain is quiet (key, saturated models).
-    return {**PREFERENCES.as_dict(), "brainError": PROACTIVE.status()["brainError"]}
+    # brainError: why the chatter brain is quiet (key, saturated models). eyeEngine: who
+    # finds the spots on the screen (the main brain when none is chosen), eyeError: why it can't.
+    EYE.client()
+    return {**PREFERENCES.as_dict(), "brainError": PROACTIVE.status()["brainError"], "eyeEngine": EYE.engine(), "eyeError": EYE.error}
 
 
 @app.post("/api/preferences")
@@ -1910,8 +1964,22 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         screen=bool(message.get("screen")),
                         silent=text_only,
                         speak_anyway=speak_here,
+                        # Where the screenshot sits on the screen: only her window on this PC sends it.
+                        glance=message.get("glance") if not remote and isinstance(message.get("glance"), dict) else None,
+                        again=bool(message.get("again")) and not remote,
+                        blind=bool(message.get("blind")),
                     )
                 )
+            elif kind == "glance":
+                # The screenshot the guide asked for (``_glance``).
+                future = _GLANCES.get(str(message.get("id", "")))
+                if future is not None and not future.done() and not remote and websocket in SCREEN_CLIENTS:
+                    future.set_result(message)
+            elif kind == "guide":
+                # From her window: the spot was clicked, its window changed, Esc.
+                action = str(message.get("action", ""))
+                if not remote and action in ("hit", "relocate", "stop"):
+                    _spawn(GUIDE.shell_event(action), report=False)
             elif kind == "capabilities":
                 # The character's window in Electron can take screenshots.
                 if message.get("screen") and not remote:

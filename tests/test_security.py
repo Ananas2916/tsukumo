@@ -457,6 +457,75 @@ def test_only_the_phone_answer_path_is_open_from_afar():
     assert local_only("GET", "/api/approvals")
 
 
+
+# ---------------------------------------------------------------------------
+# Showing where on the screen (guide.py)
+# ---------------------------------------------------------------------------
+def _until_pong(ws) -> None:
+    ws.send_json({"type": "ping"})
+    while ws.receive_json()["type"] != "pong":
+        pass
+
+
+def test_the_guide_listens_only_to_her_window_on_this_pc(client, monkeypatch):
+    # From afar nobody moves the steps on, answers for the screenshot, or says
+    # where a screenshot sits: those rectangles become clicks the PC watches for.
+    from backend import server
+
+    events, chats = [], []
+
+    async def event(action):
+        events.append(action)
+
+    async def chat(text, emit, **kwargs):
+        chats.append(kwargs)
+
+    monkeypatch.setattr(server.GUIDE, "shell_event", event)
+    monkeypatch.setattr(server.app.state.companion, "chat", chat)
+    remote = {"X-Forwarded-For": "100.64.0.7"}
+    with client.websocket_connect(f"/ws?tsukumo_token={server.POLICY.token}", headers=remote) as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "capabilities", "screen": True})
+        ws.send_json({"type": "guide", "action": "hit"})
+        ws.send_json({"type": "chat", "text": "x", "screen": True, "again": True, "glance": {"file": "C:/x.png"}})
+        _until_pong(ws)
+    assert events == [] and not server.SCREEN_CLIENTS
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "guide", "action": "hit"})
+        ws.send_json({"type": "guide", "action": "click-somewhere"})
+        _until_pong(ws)
+    for _ in range(50):
+        if events and len(chats) == 1:
+            break
+        threading_wait(0.02)
+    assert events == ["hit"]
+    assert chats[0]["glance"] is None and chats[0]["again"] is False
+
+
+def test_a_glance_is_only_a_screenshot_of_hers(tmp_path):
+    from backend.guide import Glance
+
+    folder = tmp_path / "tsukumo"
+    folder.mkdir()
+    (folder / "shot.png").write_bytes(b"png")
+    (tmp_path / "secret.png").write_bytes(b"png")
+    good = {"display": {"x": 0, "y": 0, "width": 10, "height": 10}, "image": {"width": 10, "height": 10}}
+    assert Glance.from_message({**good, "file": str(folder / "shot.png")}, 0, folder) is not None
+    for path in (tmp_path / "secret.png", folder / ".." / "secret.png", folder / "shot.txt"):
+        assert Glance.from_message({**good, "file": str(path)}, 0, folder) is None, path
+
+
+def test_the_eye_is_chosen_only_from_the_pc(tmp_path):
+    from backend.preferences import Preferences
+
+    assert local_only("POST", "/api/preferences")
+    prefs = Preferences(tmp_path / "preferences.json")
+    prefs.update({"eye": "../../evil", "eyeModel": "gpt-4.1\nDC_X=1", "guide": "yes"})
+    assert prefs.eye == "" and "\n" not in prefs.eye_model and prefs.guide is True
+    prefs.update({"eye": "gemini", "eyeModel": "  gemini-2.5-flash ", "guide": False})
+    assert (prefs.eye, prefs.eye_model, prefs.guide) == ("gemini", "gemini-2.5-flash", False)
+
 def threading_wait(seconds: float) -> None:
     import threading
 

@@ -18,6 +18,9 @@ segno>=1.6
 # Audio analysis and the viseme timeline
 numpy>=1.26,<3.0
 
+# Crops and zooms of the screenshot for the eye that finds where to point (backend/eye.py)
+pillow>=10.0
+
 # Local Kokoro TTS (ONNX Runtime + weights downloaded by scripts/download_models.py).
 # kokoro-onnx installs espeakng-loader in turn, so on Windows you DON'T need
 # to install espeak-ng separately.

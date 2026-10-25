@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tsukumo arrow</title>
+    <style>
+      :root {
+        --line: #a58bff;
+        --halo: rgba(12, 12, 16, 0.6);
+        --label-bg: rgba(22, 22, 27, 0.94);
+        --label-text: #f4f4f8;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+        pointer-events: none;
+      }
+      svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+      .halo {
+        fill: none;
+        stroke: var(--halo);
+        stroke-width: 5;
+        stroke-linejoin: miter;
+      }
+      .line {
+        fill: none;
+        stroke: var(--line);
+        stroke-width: 2.25;
+        stroke-linejoin: miter;
+      }
+      .wire {
+        stroke-dasharray: 7 5;
+      }
+      .head {
+        fill: var(--line);
+        stroke: var(--halo);
+        stroke-width: 1.5;
+        stroke-linejoin: round;
+      }
+      .spot {
+        fill: rgba(165, 139, 255, 0.1);
+        stroke: var(--line);
+        stroke-width: 2;
+      }
+      .spot-halo {
+        fill: none;
+        stroke: var(--halo);
+        stroke-width: 5;
+      }
+      .draw {
+        animation: draw 280ms ease-out both;
+      }
+      @keyframes draw {
+        from {
+          stroke-dashoffset: var(--length);
+        }
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      .fade {
+        animation: fade 220ms ease-out both;
+      }
+      @keyframes fade {
+        from {
+          opacity: 0;
+        }
+      }
+      .label {
+        position: absolute;
+        max-width: 280px;
+        padding: 3px 9px;
+        border: 1.5px solid var(--line);
+        border-radius: 6px;
+        background: var(--label-bg);
+        color: var(--label-text);
+        font: 600 12px/1.45 'Segoe UI', system-ui, sans-serif;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .label .count {
+        margin-right: 6px;
+        color: var(--line);
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <svg id="arrow" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="label" class="label" hidden></div>
+    <script type="module" src="./src/guide.js"></script>
+  </body>
+</html>

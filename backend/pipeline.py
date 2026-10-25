@@ -317,7 +317,10 @@ class Companion:
         #: Tells the server when a memory comes in or goes out (for the panel).
         self.on_memory_changed: Callable[[], Awaitable[None]] | None = None
         #: Asks the shell for the screenshot (true if someone can take it): "look at the screen".
-        self.screen_capture: Callable[[str], Awaitable[bool]] | None = None
+        #: With ``guide=True`` it comes back with where it sits on the screen (``guide.Glance``).
+        self.screen_capture: Callable[..., Awaitable[bool]] | None = None
+        #: Showing where on the screen (guide.py): "where's the AND?" gets an arrow to it.
+        self.guide: Any = None
         #: Spotify and the music taste (the server connects them): "what genre is this?", "play similar ones".
         self.music: MusicService | None = None
         #: The spontaneous remarks (proactive.py, the server connects them): the brain is told
@@ -402,6 +405,9 @@ class Companion:
         brain: LLMClient | None = None,
         silent: bool = False,
         speak_anyway: bool = False,
+        glance: dict[str, Any] | None = None,
+        again: bool = False,
+        blind: bool = False,
     ) -> str:
         """The full cycle: brain in streaming + sentence-by-sentence synthesis.
 
@@ -417,6 +423,10 @@ class Companion:
         ``speak_anyway``: synthesize even if muted or ``silent``. The phone asks
         for it to hear her; ``emit`` then sends the audio to the phone alone
         (``ConnectionHub.broadcast(voice_to=...)``), so the PC stays quiet.
+        ``glance``: the screenshot is for showing where (guide.py): where it sits
+        on the screen. ``again``: the same message, back with the screenshot the
+        brain asked for ([[look]]): it's already in the chat. ``blind``: the shell
+        couldn't look, answer without the screen.
         """
         llm = brain or self.llm
         attachments = prepare(files)
@@ -426,10 +436,18 @@ class Companion:
         if not prompt:
             return ""
         # "Look at the screen": the shell takes the screenshot, then sends the same
-        # message back here with the image attached.
-        if not hidden and not attachments and self.screen_capture is not None and wants_screen(prompt):
-            if await self.screen_capture(prompt):
-                return ""
+        # message back here with the image attached. "Where's the AND?" too, with
+        # where the screenshot sits, so the answer can point at the spot.
+        if not hidden and not attachments and not blind and self.screen_capture is not None:
+            guided = self.guide is not None and not silent and brain is None and self.guide.available
+            if guided and (wants_screen(prompt) or self.guide.wants(prompt)):
+                if await self.screen_capture(prompt, guide=True):
+                    return ""
+            elif wants_screen(prompt):
+                if await self.screen_capture(prompt):
+                    return ""
+        seen = self.guide.seen(glance) if self.guide is not None and glance is not None and screen else None
+        look_again = False
 
         async with self._turn_lock:
             self._cancel.clear()
@@ -444,7 +462,7 @@ class Companion:
             first_token_at: float | None = None
 
             await emit({"type": "state", "value": "thinking", "turn": turn})
-            if not hidden:
+            if not hidden and not again:
                 files_info = [{"name": item.name, "kind": item.kind} for item in attachments]
                 await emit({"type": "user", "text": prompt, "turn": turn, "files": files_info, "screen": screen})
                 # Timers and reminders that are understood by themselves: immediate reply.
@@ -458,6 +476,8 @@ class Companion:
                     notes.append(await self.music.directive(prompt))
                 except Exception as exc:  # the music must never stop a turn
                     logger.warning("Music context unavailable: %s", exc)
+            if self.guide is not None and not hidden and brain is None and not silent and not blind:
+                notes.extend(self.guide.notes(seen))
             messages = self._build_messages(prompt, attachments, llm, notes)
             buffer = ""
             full_reply = ""
@@ -509,7 +529,12 @@ class Companion:
                         spoken += await self._speak(sentence, emit, turn, spoken)
                 if full_reply.strip():
                     self.last_errors.pop("chatter" if brain else "llm", None)
-                await self._schedule_from_tags(tags.tags, emit)
+                found = tags.tags
+                if self.guide is not None and found and brain is None and not hidden:
+                    # [[point]] and [[wire]]: the arrow to the spot. [[look]]: it wants the screen.
+                    found, look = self.guide.run_tags(found)
+                    look_again = look and not attachments and not silent and not blind and self.screen_capture is not None
+                await self._schedule_from_tags(found, emit)
             except Exception as exc:
                 failed = True
                 logger.warning("Turn %s failed: %s", turn, exc)
@@ -575,7 +600,12 @@ class Companion:
                 )
                 await emit({"type": "state", "value": "idle", "turn": turn})
 
-            return reply
+        if look_again and self.screen_capture is not None:
+            # The brain asked to see: the same message goes back with the screenshot
+            # (or without, if nobody can take it: an answer all the same).
+            if not await self.screen_capture(prompt, guide=True, again=True):
+                return await self.chat(prompt, emit, again=True, blind=True)
+        return reply
 
     async def announce(self, text: str, emit: Emit, event: str = "") -> None:
         """Says something on her own (a reminder, a notification).
@@ -811,6 +841,11 @@ class Companion:
 
     async def _local_reply(self, prompt: str) -> str | None:
         """Timers, reminders, "remember that...", "pause the music", "how much Claude do I have left?": without the brain."""
+        if self.guide is not None:
+            # "Done", "back", "stop" while she's showing a step.
+            answer = await self.guide.command(prompt)
+            if answer is not None:
+                return answer
         if self.usage_reply is not None:
             usage = await self.usage_reply(prompt, self.voice_language)
             if usage is not None:

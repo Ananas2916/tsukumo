@@ -504,13 +504,15 @@ export class CharacterView {
     });
     const languageCard = this._card('globe', t('Language'), this._row(t('Interface'), uiLanguage, t('What she says follows her voice (Voice, above).')));
 
+    // Pointing at the screen takes her window in Electron: not in a browser.
+    const guideCard = this._guideCard();
     if (!this.companion) {
-      for (const node of [lookCard, behaviourCard, actionsCard, moreCard]) node.classList.add('hidden');
+      for (const node of [lookCard, behaviourCard, actionsCard, moreCard, guideCard]) node.classList.add('hidden');
     }
     this.memory = new MemoryCard(this.app, (...args) => this._card(...args));
     this.music = new MusicCard(this.app, (...args) => this._card(...args));
     // First her (the flame and her colour), then the voice and the rest.
-    this.root.append(lookCard, voiceCard, this.memory.node, this.music.node, micCard, chatterCard, behaviourCard, actionsCard, languageCard, moreCard);
+    this.root.append(lookCard, voiceCard, this.memory.node, this.music.node, micCard, chatterCard, guideCard, behaviourCard, actionsCard, languageCard, moreCard);
   }
 
   /**
@@ -543,85 +545,25 @@ export class CharacterView {
 
     // Who writes news, fun facts and comments: a separate model (cloud or
     // local), so a pay-per-use agent doesn't spend a turn on every chat.
-    const brain = el('select', { class: 'field-input' }, el('option', { value: '' }, t('The main brain')));
-    const models = el('input', { class: 'field-input', type: 'text', spellcheck: 'false', 'aria-label': t('Models for the chatter') });
-    const key = el('input', { class: 'field-input', type: 'password', autocomplete: 'off', placeholder: t('Paste the key'), 'aria-label': t('API key for the chatter') });
-    const modelsRow = this._row(t('Models'), models, t('Comma separated: if the first is busy it tries the next one.'));
-    const keyRow = this._row(t('Key'), key, t("It stays in this PC's .env file, like those in Engines."));
-    const brainLine = el('p', { class: 'card-sub' });
-    const brains = { specs: {}, saved: {}, error: null };
-    const brainSpec = () => brains.specs[brain.value] ?? null;
-    const secretOf = (spec) => spec?.fields.find((field) => field.secret) ?? null;
-    const refreshBrain = () => {
-      const spec = brainSpec();
-      const secret = secretOf(spec);
-      const model = spec?.fields.find((field) => field.env.endsWith('_MODEL'));
-      modelsRow.hidden = !model;
-      models.placeholder = model?.default ? t('Empty = {model}', { model: model.default }) : '';
-      keyRow.hidden = !secret || Boolean(brains.saved[spec.id]?.[secret.env]);
-      if (!spec) brainLine.textContent = t('News, fun facts and comments are written by the brain chosen in Engines.');
-      else if (brains.error) brainLine.textContent = t("{engine} didn't answer: {error}", { engine: tx(spec.label), error: tx(brains.error) });
-      else brainLine.textContent = t('{engine} writes them; the main brain stays for when you talk to her.', { engine: tx(spec.label) });
-    };
-    const loadBrains = async () => {
-      try {
-        const response = await fetch(apiUrl('/api/providers'));
-        const data = await response.json();
-        const usable = (data.providers?.llm ?? []).filter((spec) => spec.category === 'cloud' || spec.category === 'local');
-        brains.specs = Object.fromEntries(usable.map((spec) => [spec.id, spec]));
-        brains.saved = data.saved?.llm ?? {};
-        const current = brain.value;
-        brain.replaceChildren(
-          el('option', { value: '' }, t('The main brain')),
-          ...usable.map((spec) => el('option', { value: spec.id }, spec.pricing === 'free' ? spec.label : `${tx(spec.label)} (${spec.pricing === 'freemium' ? t('free too') : t('pay as you go')})`)),
-        );
-        brain.value = current in brains.specs ? current : '';
-        refreshBrain();
-      } catch {
-        // Without the backend it stays "the main brain".
-      }
-    };
-    const saveKey = async () => {
-      const spec = brainSpec();
-      const secret = secretOf(spec);
-      if (!secret || !key.value.trim()) return;
-      try {
-        const response = await fetch(apiUrl('/api/providers/options'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind: 'llm', provider: spec.id, options: { [secret.env]: key.value.trim() } }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
-        brains.saved[spec.id] = data.saved;
-        key.value = '';
-        refreshBrain();
-        this.app.toast(t('{engine} key saved', { engine: tx(spec.label) }), 'ok');
-      } catch (error) {
-        this.app.toast(t('Key not saved: {error}', { error: error.message }), 'error');
-      }
-    };
-
-    const save = async (changes) => {
-      try {
-        const response = await fetch(apiUrl('/api/preferences'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(changes),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      } catch (error) {
-        this.app.toast(t('Preference not saved: {error}', { error: error.message }), 'error');
-      }
-    };
+    const save = (changes) => this._savePreferences(changes);
+    const brain = this._modelChoice({
+      modelsLabel: t('Models'),
+      modelsHint: t('Comma separated: if the first is busy it tries the next one.'),
+      modelsAria: t('Models for the chatter'),
+      keyAria: t('API key for the chatter'),
+      describe: (spec, error) => {
+        if (!spec) return t('News, fun facts and comments are written by the brain chosen in Engines.');
+        if (error) return t("{engine} didn't answer: {error}", { engine: tx(spec.label), error: tx(error) });
+        return t('{engine} writes them; the main brain stays for when you talk to her.', { engine: tx(spec.label) });
+      },
+      onEngine: (value) => save({ brain: value }),
+      onModels: (value) => save({ brainModels: value }),
+    });
     const apply = (prefs) => {
       level.value = prefs.chatter ?? 'normal';
       city.value = prefs.city ?? '';
       for (const [name, control] of Object.entries(topics)) control.input.checked = prefs.topics?.[name] !== false;
-      brain.value = prefs.brain && prefs.brain in brains.specs ? prefs.brain : '';
-      models.value = prefs.brainModels ?? '';
-      if ('brainError' in prefs) brains.error = prefs.brainError;
-      refreshBrain();
+      brain.set(prefs.brain, prefs.brainModels, 'brainError' in prefs ? prefs.brainError : undefined);
     };
     const showWeather = async () => {
       try {
@@ -637,20 +579,13 @@ export class CharacterView {
     };
 
     level.addEventListener('change', () => save({ chatter: level.value }));
-    brain.addEventListener('change', () => {
-      brains.error = null;
-      refreshBrain();
-      save({ brain: brain.value });
-    });
-    models.addEventListener('change', () => save({ brainModels: models.value }));
-    key.addEventListener('change', saveKey);
-    this.app.on('providers', loadBrains);
     city.addEventListener('change', () => save({ city: city.value }).then(showWeather));
     for (const [name, control] of Object.entries(topics)) {
       control.input.addEventListener('change', () => save({ topics: { [name]: control.input.checked } }));
     }
     this.socket.on('preferences', apply);
-    loadBrains()
+    brain
+      .load()
       .then(() => fetch(apiUrl('/api/preferences')))
       .then((response) => (response.ok ? response.json() : null))
       .then((prefs) => prefs && apply(prefs))
@@ -665,11 +600,165 @@ export class CharacterView {
       ...Object.values(topics).map((control) => control.node),
       this._row(t('City'), city),
       weatherLine,
-      this._row(t('Who writes them'), brain),
-      modelsRow,
-      keyRow,
-      brainLine,
+      this._row(t('Who writes them'), brain.select),
+      brain.modelsRow,
+      brain.keyRow,
+      brain.line,
     );
+  }
+
+  /**
+   * "Where's the AND?": she looks at the screen and draws an arrow to the spot
+   * (backend/guide.py). The eye is the model that finds the spot on the
+   * screenshot: any cloud or local model that sees, or the main brain if it's one.
+   */
+  _guideCard() {
+    const save = (changes) => this._savePreferences(changes);
+    const looks = this._switch(
+      t('Look by herself'),
+      t('On «where is…», «where do I click…», «how do I…» she looks at the screen and draws an arrow to the spot. Only then: never by herself.'),
+    );
+    let effective = '';
+    const eye = this._modelChoice({
+      modelsLabel: t('Model'),
+      modelsHint: t('One that sees images (e.g. gemini-2.5-flash, gpt-4.1, qwen2.5-vl).'),
+      modelsAria: t('Model for the eye'),
+      keyAria: t('API key for the eye'),
+      describe: (spec, error) => {
+        if (spec && error) return t("{engine} didn't answer: {error}", { engine: tx(spec.label), error: tx(error) });
+        if (spec) return t('{engine} finds the spots on the screenshot.', { engine: tx(spec.label) });
+        const main = eye.specs[effective];
+        if (main && error) return t("{engine} didn't answer: {error}", { engine: tx(main.label), error: tx(error) });
+        if (main) return t('The main brain ({engine}) finds the spots: it must be a model that sees images.', { engine: tx(main.label) });
+        return t("The main brain is an agent: choose a model that sees, or she points only at what Windows describes (buttons, menus, fields).");
+      },
+      onEngine: (value) => save({ eye: value }),
+      onModels: (value) => save({ eyeModel: value }),
+    });
+    const apply = (prefs) => {
+      looks.input.checked = prefs.guide !== false;
+      if ('eyeEngine' in prefs) effective = prefs.eyeEngine ?? '';
+      eye.set(prefs.eye, prefs.eyeModel, 'eyeError' in prefs ? prefs.eyeError : undefined);
+    };
+    const refresh = () =>
+      fetch(apiUrl('/api/preferences'))
+        .then((response) => (response.ok ? response.json() : null))
+        .then((prefs) => prefs && apply(prefs))
+        .catch(() => {});
+    looks.input.addEventListener('change', () => save({ guide: looks.input.checked }));
+    // The broadcast doesn't carry the eye's state: it's read again after every change.
+    this.socket.on('preferences', (prefs) => {
+      apply(prefs);
+      refresh();
+    });
+    eye.load().then(refresh);
+    return this._card(
+      'target',
+      t('Show me where'),
+      el('p', { class: 'card-sub' }, t('An arrow from her to the button, the field or the pin: a click there (or «done») moves on to the next step. She only points, she never clicks for you.')),
+      looks.node,
+      this._row(t('Who sees'), eye.select),
+      eye.modelsRow,
+      eye.keyRow,
+      eye.line,
+    );
+  }
+
+  async _savePreferences(changes) {
+    try {
+      const response = await fetch(apiUrl('/api/preferences'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      this.app.toast(t('Preference not saved: {error}', { error: error.message }), 'error');
+    }
+  }
+
+  /**
+   * A model for a side job (the chatter, the eye): engine, model and, when
+   * its key is missing, the key, saved like those in Engines. `describe(spec,
+   * error)` writes the line under it.
+   */
+  _modelChoice({ modelsLabel, modelsHint, modelsAria, keyAria, describe, onEngine, onModels }) {
+    const select = el('select', { class: 'field-input' }, el('option', { value: '' }, t('The main brain')));
+    const models = el('input', { class: 'field-input', type: 'text', spellcheck: 'false', 'aria-label': modelsAria });
+    const key = el('input', { class: 'field-input', type: 'password', autocomplete: 'off', placeholder: t('Paste the key'), 'aria-label': keyAria });
+    const choice = {
+      select,
+      modelsRow: this._row(modelsLabel, models, modelsHint),
+      keyRow: this._row(t('Key'), key, t("It stays in this PC's .env file, like those in Engines.")),
+      line: el('p', { class: 'card-sub' }),
+      specs: {},
+      saved: {},
+      error: null,
+    };
+    const specOf = () => choice.specs[select.value] ?? null;
+    const secretOf = (spec) => spec?.fields.find((field) => field.secret) ?? null;
+    choice.refresh = () => {
+      const spec = specOf();
+      const secret = secretOf(spec);
+      const model = spec?.fields.find((field) => field.env.endsWith('_MODEL'));
+      choice.modelsRow.hidden = !model;
+      models.placeholder = model?.default ? t('Empty = {model}', { model: model.default }) : '';
+      choice.keyRow.hidden = !secret || Boolean(choice.saved[spec.id]?.[secret.env]);
+      choice.line.textContent = describe(spec, choice.error);
+    };
+    choice.set = (engine, value, error) => {
+      select.value = engine && engine in choice.specs ? engine : '';
+      models.value = value ?? '';
+      if (error !== undefined) choice.error = error;
+      choice.refresh();
+    };
+    choice.load = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/providers'));
+        const data = await response.json();
+        const usable = (data.providers?.llm ?? []).filter((spec) => spec.category === 'cloud' || spec.category === 'local');
+        choice.specs = Object.fromEntries(usable.map((spec) => [spec.id, spec]));
+        choice.saved = data.saved?.llm ?? {};
+        const current = select.value;
+        select.replaceChildren(
+          el('option', { value: '' }, t('The main brain')),
+          ...usable.map((spec) => el('option', { value: spec.id }, spec.pricing === 'free' ? spec.label : `${tx(spec.label)} (${spec.pricing === 'freemium' ? t('free too') : t('pay as you go')})`)),
+        );
+        select.value = current in choice.specs ? current : '';
+        choice.refresh();
+      } catch {
+        // Without the backend it stays "the main brain".
+      }
+    };
+    const saveKey = async () => {
+      const spec = specOf();
+      const secret = secretOf(spec);
+      if (!secret || !key.value.trim()) return;
+      try {
+        const response = await fetch(apiUrl('/api/providers/options'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'llm', provider: spec.id, options: { [secret.env]: key.value.trim() } }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(tx(data.detail) ?? `HTTP ${response.status}`);
+        choice.saved[spec.id] = data.saved;
+        key.value = '';
+        choice.refresh();
+        this.app.toast(t('{engine} key saved', { engine: tx(spec.label) }), 'ok');
+      } catch (error) {
+        this.app.toast(t('Key not saved: {error}', { error: error.message }), 'error');
+      }
+    };
+    select.addEventListener('change', () => {
+      choice.error = null;
+      choice.refresh();
+      onEngine(select.value);
+    });
+    models.addEventListener('change', () => onModels(models.value));
+    key.addEventListener('change', saveKey);
+    this.app.on('providers', choice.load);
+    return choice;
   }
 
   _card(iconName, title, ...children) {

@@ -18,14 +18,16 @@ export default defineConfig({
     // three.js exceeds 500 kB: we raise the threshold so as not to fill the
     // log with useless warnings.
     chunkSizeWarningLimit: 1500,
-    // Four pages: Tsukumo, the panel (chat + settings) and Electron's
-    // dashboard, and the text-only chat for the phone (backend/phone.py).
+    // Five pages: Tsukumo, the panel (chat + settings) and Electron's
+    // dashboard, the text-only chat for the phone (backend/phone.py) and the
+    // arrow that shows where things are on the screen (electron/guide.js).
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         panel: fileURLToPath(new URL('./panel.html', import.meta.url)),
         mobile: fileURLToPath(new URL('./mobile.html', import.meta.url)),
         dashboard: fileURLToPath(new URL('./dashboard.html', import.meta.url)),
+        guide: fileURLToPath(new URL('./guide.html', import.meta.url)),
       },
     },
   },
