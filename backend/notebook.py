@@ -31,6 +31,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -114,6 +115,8 @@ class Notebook:
         self._todos: dict[str, Todo] = {}
         self._notes: dict[str, Note] = {}
         self._lock = threading.Lock()
+        #: Called when a to-do gets ticked off (stats.py counts them).
+        self.on_done: Callable[[], None] | None = None
         self._load()
 
     # ------------------------------------------------------------ storage
@@ -189,8 +192,11 @@ class Notebook:
         item = self._todos.get(todo_id)
         if item is None:
             return None
+        ticked = done and not item.done
         item.done = (time.time() if now is None else now) if done else None
         self._save()
+        if ticked and self.on_done is not None:
+            self.on_done()
         return item
 
     def update_todo(self, todo_id: str, *, text: str | None = None, due: float | None | bool = False, important: bool | None = None) -> Todo | None:

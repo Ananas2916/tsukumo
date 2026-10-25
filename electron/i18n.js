@@ -10,6 +10,7 @@ const IT = {
   "Character": "Personaggio",
   "Click to see what is new and download it.": "Clicca per vedere le novità e scaricarla.",
   "Download Tsukumo {version}": "Scarica Tsukumo {version}",
+  "Update Tsukumo to {version}": "Aggiorna Tsukumo alla {version}",
   "Engines": "Motori",
   "Ghost mode": "Modalita fantasma",
   "I can't start Tsukumo": "Non riesco ad avviare Tsukumo",

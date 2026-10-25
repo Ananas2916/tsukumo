@@ -514,6 +514,21 @@ export class Stage {
     return this.flame.poke(py < center.y ? 'head' : 'body');
   }
 
+  /** The new version's lantern (Flame.setLantern). */
+  setLantern(state, info) {
+    this.flame.setLantern(state, info);
+  }
+
+  /** Is this point (window pixels) on the lantern, while it waits for its click? */
+  lanternAt(px, py) {
+    if (!this.flame.lanternClickable) return false;
+    const { center, radius } = this.flame.lanternHitArea(new THREE.Vector3());
+    const edge = center.clone().add(new THREE.Vector3(radius, 0, 0));
+    const c = this._toScreen(center);
+    const e = this._toScreen(edge);
+    return Math.hypot(px - c.x, py - c.y) <= Math.max(16, Math.abs(e.x - c.x));
+  }
+
   /** World point -> window pixels. */
   _toScreen(point) {
     point.project(this.camera);

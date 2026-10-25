@@ -299,6 +299,10 @@ const settings = {
   updateChecks: true,
   /** The last version already announced with a notification: each one is announced once. */
   updateNotified: null,
+  /** A version whose lantern was clicked away (a build that only tells): it doesn't come back. */
+  updateDismissed: null,
+  /** The version that ran last time: a higher one now means "just updated", and she shows what's new. */
+  lastVersion: null,
   /** Hold Ctrl to talk to her (Windows only). */
   holdToTalk: true,
 };
@@ -1360,12 +1364,12 @@ function createTray() {
 
 function updateTrayMenu() {
   if (!tray) return;
-  const update = availableUpdate
-    ? [
-        { label: t('Download Tsukumo {version}', { version: availableUpdate.version }), click: () => openOutside(availableUpdate.url) },
-        { type: 'separator' },
-      ]
-    : [];
+  let update = [];
+  if (availableUpdate && updateState?.mode === 'install') {
+    update = [{ label: t('Update Tsukumo to {version}', { version: availableUpdate.version }), click: () => startUpdate() }, { type: 'separator' }];
+  } else if (availableUpdate) {
+    update = [{ label: t('Download Tsukumo {version}', { version: availableUpdate.version }), click: () => openOutside(availableUpdate.url) }, { type: 'separator' }];
+  }
   tray.setContextMenu(
     Menu.buildFromTemplate([
       ...update,
@@ -1422,9 +1426,29 @@ const UPDATE_FIRST_MS = 60_000;
 const UPDATE_EVERY_MS = 12 * 3600 * 1000;
 let availableUpdate = null;
 let updateTimer = null;
+/**
+ * The new version as her lantern shows it (frontend flame/lantern.js):
+ * `{version, mode, state, progress, error}`. `mode` 'install' = one click
+ * installs it, 'notice' = this build only tells (it has a suffix, or it
+ * isn't the installed app). `state`: waiting, downloading, installing, failed.
+ */
+let updateState = null;
+/** "Just updated": `{from, to}`, given once to her page, which shows what's new. */
+let pendingNews = null;
 
 const updateChecksWanted = () =>
   process.env.DC_CHECK_UPDATES === '1' || (PACKAGED && process.env.DC_CHECK_UPDATES !== '0');
+
+/** Installing by itself: the installed public app on Windows, never a build with a suffix. */
+const canInstall = (found) =>
+  Boolean(found?.installer) &&
+  process.platform === 'win32' &&
+  (PACKAGED || process.env.DC_SELF_UPDATE === '1') &&
+  updates.selfUpdatable(app.getVersion());
+
+function publishUpdate() {
+  sendToPet('pet:update', updateState);
+}
 
 async function checkUpdates() {
   if (!settings.updateChecks) return;
@@ -1437,6 +1461,10 @@ async function checkUpdates() {
   }
   if (!found) return;
   availableUpdate = found;
+  if (settings.updateDismissed !== found.version && !['downloading', 'installing'].includes(updateState?.state)) {
+    updateState = { version: found.version, mode: canInstall(found) ? 'install' : 'notice', state: 'waiting', progress: 0 };
+    publishUpdate();
+  }
   updateTrayMenu();
   console.log(`[electron] Tsukumo ${found.version} is out`);
   if (settings.updateNotified === found.version || !Notification.isSupported()) return;
@@ -1461,11 +1489,108 @@ function scheduleUpdateChecks() {
 
 function toggleUpdateChecks() {
   settings.updateChecks = !settings.updateChecks;
-  if (!settings.updateChecks) availableUpdate = null;
+  if (!settings.updateChecks) {
+    availableUpdate = null;
+    updateState = null;
+    publishUpdate();
+  }
   saveSettings();
   updateTrayMenu();
   scheduleUpdateChecks();
 }
+
+/** Waits until nobody answers on the backend's port: the installer must find its files free. */
+async function backendGone(timeoutMs) {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (!(await probeBackend(500))) return true;
+    await sleep(300);
+  }
+  return false;
+}
+
+/**
+ * The click on the lantern. A build that installs by itself downloads the
+ * installer, checks it, stops the backend and hands over to the installer
+ * (silent, it reopens her when done). A build that only tells lets the
+ * lantern go, for this version.
+ */
+async function startUpdate() {
+  if (!updateState || !availableUpdate || ['downloading', 'installing'].includes(updateState.state)) return updateState;
+  if (updateState.mode !== 'install') {
+    settings.updateDismissed = updateState.version;
+    saveSettings();
+    const told = { ...updateState, state: 'dismissed', url: availableUpdate.url };
+    updateState = null;
+    // The lantern floats away (flame.js, 'gone'); the tray keeps the download link.
+    sendToPet('pet:update', told);
+    return told;
+  }
+  updateState = { ...updateState, state: 'downloading', progress: 0, error: null };
+  publishUpdate();
+  updateTrayMenu();
+  let sent = 0;
+  try {
+    const file = await updates.downloadInstaller(availableUpdate, path.join(app.getPath('temp'), 'tsukumo', 'update'), {
+      onProgress: (fraction) => {
+        updateState.progress = fraction;
+        // A message every 2%: the lantern's light doesn't need more.
+        if (fraction - sent >= 0.02 || fraction >= 1) {
+          sent = fraction;
+          publishUpdate();
+        }
+      },
+    });
+    updateState = { ...updateState, state: 'installing', progress: 1 };
+    publishUpdate();
+    console.log(`[electron] installing Tsukumo ${updateState.version} from ${file}`);
+    // Written now, not on the timer: the app is about to close.
+    fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+    stopBackend();
+    await backendGone(8000);
+    spawn(file, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' }).unref();
+    app.isQuitting = true;
+    setTimeout(() => app.quit(), 300);
+  } catch (error) {
+    console.warn(`[electron] update failed: ${error.message}`);
+    updateState = { ...updateState, state: 'failed', error: error.message };
+    publishUpdate();
+    updateTrayMenu();
+    // The lantern waits again: another click retries.
+    setTimeout(() => {
+      if (updateState?.state === 'failed') {
+        updateState = { ...updateState, state: 'waiting', progress: 0 };
+        publishUpdate();
+      }
+    }, 5000);
+  }
+  return updateState;
+}
+
+/**
+ * Just updated? The version that ran last time against this one. An install
+ * from before this check existed has no `lastVersion`: then it's an update too.
+ */
+function noteVersion() {
+  const current = app.getVersion();
+  const previous = settings.lastVersion;
+  const wanted = PACKAGED || process.env.DC_SHOW_NEWS === '1';
+  if (wanted && !firstRun && previous !== current && (!previous || updates.isNewer(current, previous))) {
+    pendingNews = { from: previous ?? null, to: current };
+  }
+  if (previous !== current) {
+    settings.lastVersion = current;
+    saveSettings();
+  }
+}
+
+handleIpc('update:state', () => updateState);
+handleIpc('update:start', () => startUpdate());
+handleIpc('update:news', () => {
+  const news = pendingNews;
+  pendingNews = null;
+  return news;
+});
 
 // ---------------------------------------------------------------------------
 // IPC (the counterparts are in preload.js)
@@ -1847,6 +1972,7 @@ if (!app.requestSingleInstanceLock()) {
     // card instead of making you think the double click didn't work.
     createPetWindow();
     createTray();
+    noteVersion();
     scheduleUpdateChecks();
     setInterval(tick, TICK_MS);
     setInterval(keepOnTop, ON_TOP_MS);

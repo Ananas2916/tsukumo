@@ -112,10 +112,18 @@ all geometry: nothing else to download. Settings, state and logs live in
 `%APPDATA%\Tsukumo`, so updates never touch them.
 
 When a new version is published here, Tsukumo tells you with a Windows
-notification and a "Download" item in her notification area menu. She only
-asks GitHub which release is the latest (shortly after startup, then twice a
-day); installing stays your click. Untick *Tell me about new versions* in
-that menu to stop asking.
+notification, and a paper lantern appears beside her with 新 ("new") and the
+version written on it. Click the lantern and she jumps inside: it lights up
+while the installer downloads from this repository's release, is checked
+against the SHA-256 GitHub publishes for it, and installs silently; then she
+comes back out of the lantern. Right after an update her menu island shows
+what's new and what you've done together: agent sessions and the lines the
+agents wrote (read from Claude Code's and Codex's logs on your PC), the words
+you dictated, your messages, reminders and ticked to-dos. Nothing of it
+leaves your PC. She asks GitHub which release is the latest shortly after
+startup, then twice a day; untick *Tell me about new versions* in her
+notification area menu to stop asking. A build with a version suffix (your
+own) only tells you: the public installer would replace it.
 
 On first launch the panel opens a six-step welcome:
 

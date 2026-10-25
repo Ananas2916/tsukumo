@@ -7,7 +7,8 @@
  * character) and the tools (voice, microphone, engines); in the card the
  * brain and what it's doing, step by step (done, in progress), and the usage
  * limit closest to running out; below, the pills: the wardrobe, dancing and
- * a small Spotify player while Spotify is open, quit.
+ * a small Spotify player while Spotify is open, quit. Right after an
+ * update the card tells what's new and what you've done together.
  *
  * It's a wide, low strip (Coucou's is 4:1; ours keeps room for her and the
  * steps): about 448 x 210 at scale 1. Grabbing its black, not a button, moves
@@ -58,6 +59,12 @@ const PLAYER = [
 const STEPS_SHOWN = 3;
 
 const WINDOW_WORDS = { 300: t('5 hours'), 10080: t('week'), 43200: t('month') };
+
+/** Big numbers, short: 254,704 -> "255K" (or "255.000" -> "255 Mila" in Italian). */
+const COMPACT = new Intl.NumberFormat(LOCALE, { notation: 'compact', maximumFractionDigits: 1 });
+
+/** Agents' ids as the stats name them (backend/stats.py), for the sessions' caption. */
+const AGENT_NAMES = { claude_code: 'Claude Code', codex: 'Codex', gemini_cli: 'Gemini CLI', antigravity: 'Antigravity' };
 
 function usageColor(used) {
   if (used >= 90) return 'var(--danger)';
@@ -157,7 +164,14 @@ export class Island {
     });
     this.approval.append(this.approvalHead, this.approvalWhat, choices);
     this.approval.addEventListener('click', (event) => event.stopPropagation());
-    this.card.append(this.slot, info, this.closet, this.approval);
+    // Right after an update: what's new, and under it what you've done together.
+    this.news = node('div', 'island-news hidden');
+    this.newsTitle = node('div', 'island-news-title');
+    this.newsList = node('ul', 'island-news-list');
+    this.newsStats = node('div', 'island-news-stats');
+    this.news.append(this.newsTitle, this.newsList, this.newsStats);
+    this.news.addEventListener('click', (event) => event.stopPropagation());
+    this.card.append(this.slot, info, this.closet, this.approval, this.news);
 
     // The pills: the wardrobe, the dance and the player (while Spotify is open), quit.
     const pills = node('div', 'island-pills');
@@ -452,8 +466,11 @@ export class Island {
     label(this.wardrobePill, t('Wardrobe'));
     this.wardrobePill.classList.toggle('active', Boolean(this.closetOpen));
     const asking = this.hud.approvals?.[0];
-    this.info.classList.toggle('hidden', Boolean(this.closetOpen) || Boolean(asking));
+    const news = asking ? null : this.hud.news;
+    this.info.classList.toggle('hidden', Boolean(this.closetOpen) || Boolean(asking) || Boolean(news));
     this.approval.classList.toggle('hidden', !asking);
+    this.news.classList.toggle('hidden', !news);
+    if (news) this._renderNews(news);
     if (asking) {
       const where = asking.project ? ` · ${asking.project}` : '';
       const more = this.hud.approvals.length > 1 ? ` (+${this.hud.approvals.length - 1})` : '';
@@ -466,8 +483,8 @@ export class Island {
     this.focusPill.classList.toggle('hidden', !until);
     if (until) label(this.focusPill, new Date(until * 1000).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' }));
     // The closet grows the card: every outfit in sight, no scrolling.
-    this.card.classList.toggle('closet-open', Boolean(this.closetOpen));
-    this.closet.classList.toggle('hidden', !this.closetOpen || Boolean(asking));
+    this.card.classList.toggle('closet-open', Boolean(this.closetOpen) || Boolean(news));
+    this.closet.classList.toggle('hidden', !this.closetOpen || Boolean(asking) || Boolean(news));
     if (this.closetOpen) this._renderCloset();
 
     // Dancing only while it plays; the player as long as Spotify is open (paused too).
@@ -489,6 +506,50 @@ export class Island {
 
     label(this.powerPill, this.powerPill.classList.contains('confirm') ? t('Quit?') : '');
     if (this._hovered) this._caption(this._hovered);
+  }
+
+  // ------------------------------------------------------------ news
+  /** `{version, lines, stats}`: drawn once per news, not at every render. */
+  _renderNews(news) {
+    if (news === this._newsShown) return;
+    this._newsShown = news;
+    const title = node('strong');
+    title.textContent = `Tsukumo ${news.version}`;
+    const sub = node('small');
+    sub.textContent = t("what's new");
+    this.newsTitle.replaceChildren(title, sub);
+    this.newsList.replaceChildren(
+      ...news.lines.map((line) => {
+        const item = node('li');
+        item.textContent = line;
+        return item;
+      }),
+    );
+    const stats = news.stats;
+    this.newsStats.classList.toggle('hidden', !stats);
+    if (!stats) return;
+    const together = (stats.messages ?? 0) + (stats.reminders ?? 0) + (stats.todos ?? 0);
+    const since = new Date((stats.since ?? 0) * 1000).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long' });
+    const agents = Object.entries(stats.sessionsBy ?? {})
+      .map(([id, count]) => `${AGENT_NAMES[id] ?? id} ${count}`)
+      .join(' · ');
+    const cells = [
+      [stats.sessions, t('sessions'), agents],
+      [stats.lines, t('lines written'), t('Lines the agents wrote on this PC (Claude Code edits, Codex patches).')],
+      [stats.words, t('words spoken'), t('Words you dictated to her since {date}', { date: since })],
+      [together, t('things together'), t('{messages} messages, {reminders} reminders, {todos} to-dos ticked off', stats)],
+    ];
+    this.newsStats.replaceChildren(
+      ...cells.map(([value, label, hint]) => {
+        const cell = node('div', 'island-stat', { title: hint });
+        const number = node('b');
+        number.textContent = COMPACT.format(value ?? 0);
+        const words = node('span');
+        words.textContent = label;
+        cell.append(number, words);
+        return cell;
+      }),
+    );
   }
 
   // ------------------------------------------------------------ closet

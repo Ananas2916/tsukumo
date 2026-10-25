@@ -36,6 +36,8 @@ const NAMES = {
 
 /** After how many ms without the cursor over the island it closes by itself. */
 const AUTO_HIDE_MS = 7000;
+/** What's new takes longer to read. */
+const NEWS_HIDE_MS = 25_000;
 
 /** How many agent steps are remembered for the island (it shows the last ones). */
 const STEPS_KEPT = 8;
@@ -86,6 +88,8 @@ export class Hud {
     this.approvals = [];
     /** Focus time: until when (epoch seconds), or null. */
     this.focusUntil = null;
+    /** Right after an update: `{version, lines, stats}` (news.js, /api/stats), until the island closes. */
+    this.news = null;
 
     this.island = new Island(islandRoot, this);
   }
@@ -103,8 +107,17 @@ export class Hud {
     this._keepOpen();
   }
 
+  /** Right after an update: the island opens on what's new. */
+  showNews(news) {
+    this.news = news;
+    if (this.visible) this.island.render();
+    else this.show();
+    this._keepOpen();
+  }
+
   hide() {
     this.visible = false;
+    this.news = null;
     this.island.hide();
     document.body.classList.remove('island-open');
     clearTimeout(this._hideTimer);
@@ -118,7 +131,7 @@ export class Hud {
   _keepOpen() {
     clearTimeout(this._hideTimer);
     // A permission question waits for its click: the island doesn't close under it.
-    this._hideTimer = setTimeout(() => (this.approvals.length ? this._keepOpen() : this.hide()), AUTO_HIDE_MS);
+    this._hideTimer = setTimeout(() => (this.approvals.length ? this._keepOpen() : this.hide()), this.news ? NEWS_HIDE_MS : AUTO_HIDE_MS);
   }
 
   /** The top edge of the open island, in window pixels: the speech bubble sits above it. */

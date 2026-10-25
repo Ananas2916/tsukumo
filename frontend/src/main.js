@@ -26,6 +26,7 @@ import { Hud } from './hud.js';
 import { LANG, t, translateDom, tx, watchLanguage } from './i18n.js';
 import { LipSync } from './lipsync.js';
 import { MusicListener } from './music.js';
+import { newsBetween } from './news.js';
 import { Presence, SLEEP_LEVEL } from './presence.js';
 import { Sfx } from './sfx.js';
 import { Stage } from './stage.js';
@@ -677,6 +678,8 @@ socket.on('close', () => {
 socket.on('hello', (message) => {
   refreshStatus();
   const config = message.config ?? {};
+  if (config.voiceLanguage) state.voiceLanguage = config.voiceLanguage;
+  tellNews();
   if (message.context) state.activity = message.context.activity ?? null;
   hud.setEngines(message.engines);
   state.usage = message.usage ?? null;
@@ -790,7 +793,84 @@ socket.on('usage', (message) => {
 
 socket.on('settings', (message) => {
   if (typeof message.muted === 'boolean' && message.muted !== state.muted) setMuted(message.muted);
+  if (message.voiceLanguage) state.voiceLanguage = message.voiceLanguage;
 });
+
+// ---------------------------------------------------------------------------
+// A new version: the lantern beside her (electron/updates.js, flame/lantern.js)
+// ---------------------------------------------------------------------------
+/** What she says follows her voice's language (Italian or English here). */
+const voiceLanguage = () => (String(state.voiceLanguage ?? LANG).toLowerCase().startsWith('it') ? 'it' : 'en');
+
+let updateShown = null;
+function showUpdate(update) {
+  const before = updateShown;
+  updateShown = update?.state === 'dismissed' ? null : (update ?? null);
+  if (update?.state === 'dismissed') {
+    stage.setLantern('gone');
+    return;
+  }
+  if (!update) {
+    if (before) stage.setLantern(null);
+    return;
+  }
+  stage.setLantern(update.state, { version: update.version, progress: update.progress ?? 0 });
+  const percent = Math.round((update.progress ?? 0) * 100);
+  if (update.state === 'downloading') {
+    if (before?.state !== 'downloading') sfx.play('whoosh');
+    ui.toast(t('Downloading Tsukumo {version}… {percent}%', { version: update.version, percent }), false, 4000);
+  } else if (update.state === 'installing') {
+    ui.toast(t("Installing Tsukumo {version}: I'll be right back.", { version: update.version }), false, 15000);
+  } else if (update.state === 'failed') {
+    ui.toast(t("The update didn't work: {error}", { error: tx(update.error ?? '') }), true, 6000);
+  }
+}
+pet?.onUpdate?.(showUpdate);
+pet?.updateState?.().then(showUpdate).catch(() => {});
+
+/** The click on the lantern: the public build updates; one that only tells lets it go. */
+async function clickLantern() {
+  presence.touch();
+  sfx.play('pat');
+  const result = await pet.startUpdate().catch(() => null);
+  if (result?.state !== 'dismissed') return;
+  const line =
+    voiceLanguage() === 'it'
+      ? `È uscita la ${result.version}. Questa versione è tutta tua: l'installer lo lanci tu.`
+      : `Version ${result.version} is out. This build is your own: run its installer yourself.`;
+  socket.send({ type: 'say', text: line });
+}
+
+/**
+ * Right after an update she comes out of the lantern, then the island tells
+ * what's new and what you've done together (backend/stats.py). Once.
+ */
+let newsAsked = false;
+async function tellNews() {
+  if (newsAsked || !pet?.takeNews) return;
+  newsAsked = true;
+  const update = await pet.takeNews().catch(() => null);
+  if (!update) return;
+  const version = String(update.to).replace(/-.*$/, '');
+  const news = newsBetween(update.from, update.to, LANG, voiceLanguage());
+  stage.setLantern('emerge', { version });
+  let stats = null;
+  try {
+    const response = await fetch(apiUrl('/api/stats'));
+    if (response.ok) stats = await response.json();
+  } catch {
+    // Without the numbers the card still says what's new.
+  }
+  // Once she's out and the lantern is on its way up.
+  setTimeout(() => {
+    if (!state.docked) {
+      hud.setFrame(stage.hudFrame());
+      hud.showNews({ version, lines: news?.lines ?? [], stats });
+      sfx.play('open');
+    }
+    if (news?.say) socket.send({ type: 'say', text: news.say });
+  }, 2600);
+}
 
 socket.on('state', (message) => {
   state.backendState = message.value;
@@ -1182,6 +1262,11 @@ if (pet) {
       state.droppedAt = performance.now();
     } else {
       presence.touch();
+      // The new version's lantern: one click and she goes into it.
+      if (stage.lanternAt(event.clientX, event.clientY)) {
+        clickLantern();
+        return;
+      }
       const streak = pokeStreak();
       if (streak && stage.play(streak)) {
         pokes.length = 0;

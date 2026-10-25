@@ -102,6 +102,15 @@ contextBridge.exposeInMainWorld('companion', {
    * `{event}` for lock-screen, unlock-screen, suspend, resume.
    */
   onPresence: (callback) => listen('pet:presence', callback),
+  // --- new versions -----------------------------------------------------------
+  /** The new version as her lantern shows it: `{version, mode, state, progress, error}` or null. */
+  updateState: () => ipcRenderer.invoke('update:state'),
+  onUpdate: (callback) => listen('pet:update', callback),
+  /** The click on the lantern: installs (public build) or lets it go (a build that only tells). */
+  startUpdate: () => ipcRenderer.invoke('update:start'),
+  /** Once, right after an update: `{from, to}`, else null. */
+  takeNews: () => ipcRenderer.invoke('update:news'),
+
   /** System notification (a reminder went off, an agent is done). */
   notify: (title, body) => ipcRenderer.send('pet:notify', { title, body }),
 

@@ -95,6 +95,7 @@ from . import phone
 from .eye import Eye
 from .guide import Glance, Guide
 from .preferences import Preferences
+from .stats import Stats
 from .proactive import Proactive
 from .reminders import (
     MAX_LATE,
@@ -355,6 +356,9 @@ PROACTIVE = Proactive(
 
 #: The secretary (secretary.py): to-dos and notes, the vault, the calendars, the mail.
 NOTEBOOK = Notebook(SETTINGS.state_dir / "notebook.json")
+#: What you've done together (stats.py): she shows it after an update.
+STATS = Stats(SETTINGS.state_dir)
+NOTEBOOK.on_done = lambda: STATS.add("todos")
 VAULT = Vault(SETTINGS.state_dir / "vault.json")
 APPROVALS = Approvals(_broadcast)
 SECRETARY = Secretary(
@@ -1281,6 +1285,7 @@ async def _fire_due_reminders(now: float | None = None) -> list[ReminderItem]:
             logger.info("Reminder too old, skipping it: %s", describe(reminder))
             continue
         fired.append(reminder)
+        STATS.add("reminders")
         logger.info("Due: %s", describe(reminder))
         await hub.broadcast({"type": "reminder", "event": "fired", "reminder": reminder.as_dict(), "late": round(late)})
         instance = _current()
@@ -1497,6 +1502,16 @@ async def get_agents() -> dict[str, Any]:
 async def get_park() -> dict[str, Any]:
     """The park: the agents on this PC and who talks to whom (local only)."""
     return PARK.public()
+
+
+@app.get("/api/stats")
+async def get_stats() -> dict[str, Any]:
+    """Sessions and lines from the agents' logs, plus her own counters (local only).
+
+    The first call reads the logs (a couple of seconds for hundreds of MB), then
+    only what they gained since.
+    """
+    return await STATS.snapshot()
 
 
 @app.get("/api/integrations")
@@ -1948,6 +1963,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             if kind == "ping":
                 await websocket.send_json({"type": "pong"})
             elif kind == "chat":
+                if str(message.get("text") or "").strip() and not message.get("again"):
+                    STATS.add("messages")
                 # A separate task: the loop stays free to receive "cancel".
                 files = [str(item) for item in (message.get("files") or []) if isinstance(item, str)]
                 if remote:
@@ -2076,6 +2093,7 @@ async def _handle_voice(instance: Companion, message: dict[str, Any]) -> None:
     if echo:
         logger.info("Transcription ignored, it's her own voice: %r", transcript.text[:80])
         return
+    STATS.dictated(transcript.text)
     if message.get("autoSend", True):
         await instance.chat(transcript.text, hub.broadcast)
 

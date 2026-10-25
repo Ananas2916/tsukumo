@@ -107,6 +107,8 @@ LOCAL_ONLY: tuple[tuple[str, str], ...] = (
     ("POST", "/api/approvals/"),
     # The park: the other programs' sessions, their folders, who wrote to whom.
     ("GET", "/api/park"),
+    # How much the agents worked on this PC, and what you did with her.
+    ("GET", "/api/stats"),
 )
 #: The shell of the phone's page: the HTML and the bundle (code already
 #: public, no data). It loads without the token because the token is after

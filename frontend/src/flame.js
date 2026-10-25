@@ -9,7 +9,8 @@
  * (thinking, working with her little terminal, the page or the magnifying
  * glass), reactions to touches, dancing, sleep with the bubble, the file she
  * eats, the sprint and the flight when you throw her (the real run is done
- * by electron/pet-physics.js moving the window; here the trail and the face).
+ * by electron/pet-physics.js moving the window; here the trail and the face),
+ * and the lantern of a new version, which she moves into to update.
  *
  * Ideas also come from those who make similar things (VS Code's Blobby,
  * Coucou's Mochi), redone her own way: no clones, a flame stays a flame.
@@ -18,6 +19,7 @@
 import * as THREE from 'three';
 
 import { FlameFx } from './flame/fx.js';
+import { Lantern } from './flame/lantern.js';
 import { DEFAULT_PALETTE, flat, glowSprite, INK, makeEye, palette, paletteKey, part, PLANE, SPHERE, TEX, toon } from './flame/look.js';
 import { duration, play, Spring, Squash } from './flame/motion.js';
 import { MOVES } from './flame/moves.js';
@@ -104,6 +106,10 @@ const GESTURES = {
 const POKES = ['flinch', 'flinch', 'hearts', 'cool', 'sing', 'speechless', 'surprise'];
 /** When she's doing nothing, now and then. */
 const FIDGETS = ['look', 'look', 'stretch', 'hop', 'spin', 'gust'];
+/** With a new version's lantern beside her: every so often a glance and a spark into it. */
+const LANTERN_GLANCE_EVERY = [6, 11];
+/** Her trip into the lantern and back out, in seconds; inside it she's this small. */
+const LANTERN_TRIP = { in: 0.8, out: 0.7, scale: 0.22 };
 const FIDGET_EVERY = [9, 22];
 /** Shaken while you hold her: many fast reversals in a short time and her head spins. */
 const SHAKE = { speed: 900, turns: 4, window: 1.2 };
@@ -141,6 +147,13 @@ export class Flame {
     this._build();
     this.props = new WorkProps(this.root, { HOVER, R, UNIT }, this.geometry, this.colors);
     this.acc = new Accessories(this.root, this.pivot, { HOVER, R, UNIT }, this.colors);
+    this.lantern = new Lantern(scene, this.colors);
+    /** The lantern's state (see setLantern) and her trip into it: 0 at home, 1 inside. */
+    this._lantern = { state: null, progress: 0, glanceUntil: 0, nextGlance: rand(2, 4), away: 0 };
+    this._trip = 0;
+    this._tripTo = 0;
+    this._tripPoint = new THREE.Vector3();
+    this._bulbPoint = new THREE.Vector3();
     // The wardrobe (flame/outfits.js): when the new accessory touches her she squashes.
     this.wardrobe = new Wardrobe(this.root, this.pivot, this.uniforms);
     this.wardrobe.onArrive = (item) => this.squash.impact(item.hat ? 0.16 : 0.08);
@@ -293,6 +306,7 @@ export class Flame {
     this.fx.setColors(this.colors);
     this.props.setColors(this.colors);
     this.acc.setColors(this.colors);
+    this.lantern.setColors(this.colors);
   }
 
   // --------------------------------------------------------------- measures
@@ -357,11 +371,133 @@ export class Flame {
         this.props.active ||
         this.squash.busy ||
         this.wardrobe.busy ||
+        this._trip !== this._tripTo ||
+        this._lantern.state === 'gone' ||
         !this.eyeScale.settled ||
         !this.tip.settled ||
         this.roll !== 0 ||
         Math.abs(this._menuAmount - (this._menuWanted ? 1 : 0)) > 0.002,
     );
+  }
+
+  // ----------------------------------------------------------------- lantern
+  /**
+   * A new version's lantern (flame/lantern.js). `state`:
+   *  - null: none;
+   *  - 'waiting': beside her, unlit, with the version on it;
+   *  - 'downloading' / 'installing': she jumps inside and it lights up (`progress` 0..1);
+   *  - 'failed': she comes back out, sulking, and it waits again;
+   *  - 'gone': it floats away (a build that only tells, after the click);
+   *  - 'emerge': just updated, she starts inside the lit lantern and comes out.
+   */
+  setLantern(state, { version = '', progress = 0 } = {}) {
+    const lantern = this._lantern;
+    const previous = lantern.state;
+    if (version) this.lantern.setVersion(version);
+    lantern.progress = progress;
+    if (state === previous) return;
+    lantern.state = state;
+    if (state === 'downloading' || state === 'installing') {
+      if (this._tripTo !== 1) {
+        // Gathers herself, then the jump.
+        this.squash.impact(0.18);
+        this._tripTo = 1;
+      }
+    } else if (state === 'emerge') {
+      this.lantern.setVersion(version);
+      this.lantern.state.shown = 1;
+      this.lantern.state.light = 1;
+      this._trip = 1;
+      this._tripTo = 1;
+      lantern.emergeAt = this.t + 0.9;
+    } else if (state === 'gone') {
+      lantern.away = 0;
+      this._tripTo = 0;
+    } else {
+      if (previous === 'downloading' || previous === 'installing') {
+        this._tripTo = 0;
+        if (state === 'failed') this._queued = 'pout';
+      }
+      lantern.away = 0;
+    }
+  }
+
+  /** Whether a click at the lantern counts now (it waits beside her). */
+  get lanternClickable() {
+    const state = this._lantern.state;
+    return (state === 'waiting' || state === 'failed') && this._trip < 0.05 && this.lantern.state.shown > 0.8 && this.lantern.group.visible;
+  }
+
+  /** The lantern's middle in the world and its radius in metres: the stage checks clicks with them. */
+  lanternHitArea(target = new THREE.Vector3()) {
+    return { center: this.lantern.centerWorld(target), radius: this.lantern.radius };
+  }
+
+  /** The lantern, each frame: whether it shows, its light, her trips. Returns where she looks, or null. */
+  _updateLantern(dt, mood, reaction, run) {
+    const lantern = this._lantern;
+    const state = lantern.state;
+    const t = this.t;
+    // Inside it or coming out of it she can't be anything else; beside it, work and the menu come first.
+    const inside = state === 'downloading' || state === 'installing' || state === 'emerge';
+    const beside = (state === 'waiting' || state === 'failed') && !this._menuWanted && !this.props.active;
+    if (state === 'gone') lantern.away = Math.min(1, lantern.away + dt / 1.6);
+    if (state === 'gone' && lantern.away >= 1) lantern.state = null;
+    if (state === 'emerge') {
+      lantern.away = this._trip <= 0.001 && lantern.emergeAt < t ? Math.min(1, lantern.away + dt / 1.6) : 0;
+      if (lantern.emergeAt <= t && this._tripTo === 1) this._tripTo = 0;
+      if (lantern.away >= 1) lantern.state = null;
+    }
+
+    // The trip: a hop along an arc, quicker going in than coming out.
+    const before = this._trip;
+    const step = dt / (this._tripTo > this._trip ? LANTERN_TRIP.in : LANTERN_TRIP.out);
+    this._trip = this._tripTo > this._trip ? Math.min(this._tripTo, this._trip + step) : Math.max(this._tripTo, this._trip - step);
+    if (before < 1 && this._trip >= 1) {
+      // In: the lantern lights up and swings with the push.
+      this.lantern.push(-1.4);
+      this.lantern.pulse(1);
+      this.fx.flash(this.lantern.centerWorld(this._tripPoint), 0.7 * this.size);
+    } else if (before > 0 && this._trip <= 0) {
+      this.lantern.push(1.1);
+      this.squash.impact(0.22);
+      if (state === 'emerge') this._queued = 'cheer';
+    }
+
+    let light = 0;
+    let flicker = 0;
+    if (state === 'downloading') {
+      light = 0.35 + 0.65 * Math.min(1, Math.max(0, lantern.progress));
+      flicker = 1;
+    } else if (state === 'installing' || state === 'emerge') {
+      light = 1;
+      flicker = 0.6;
+    }
+    this.lantern.update(dt, this.home, this.size, {
+      shown: inside || beside || state === 'gone' ? 1 : 0,
+      light: light * (state === 'emerge' ? 1 - lantern.away : 1),
+      away: lantern.away,
+      flicker,
+    });
+    this.lantern.group.updateMatrixWorld(true);
+
+    // Beside her and unlit: now and then she looks at it and sends it a spark.
+    if (state !== 'waiting' || !beside || mood !== 'idle' || reaction || run) return null;
+    if (t >= lantern.nextGlance) {
+      lantern.nextGlance = t + rand(...LANTERN_GLANCE_EVERY);
+      lantern.glanceUntil = t + 1.6;
+      const from = this.topWorld(new THREE.Vector3());
+      const to = this.lantern.centerWorld(new THREE.Vector3());
+      this.fx.ember(from, to, { size: 0.16 * this.size, life: 0.7, swirl: 0.2 * this.size });
+      lantern.pulseAt = t + 0.65;
+      if (Math.random() < 0.35) this._queued = 'hop';
+    }
+    if (lantern.pulseAt && t >= lantern.pulseAt) {
+      lantern.pulseAt = 0;
+      this.lantern.pulse();
+      this.lantern.push(0.35);
+    }
+    return t < lantern.glanceUntil ? { x: -0.9, y: 0.2 } : null;
   }
 
   // ----------------------------------------------------------------- events
@@ -1037,6 +1173,18 @@ export class Flame {
       }
     }
 
+    // The new version's lantern: she glances at it now and then.
+    const lanternLook = this._updateLantern(dt, mood, reaction, run);
+    if (lanternLook) {
+      lookX = lanternLook.x;
+      lookY = lanternLook.y;
+      lookRate = 6;
+    }
+    // A queued gesture (a hop at the lantern, the cheer after the update) when she's free.
+    if (this._queued && !this.reaction && !this.run && !this.held && !this.falling && this._trip === this._tripTo) {
+      if (this.react(this._queued)) this._queued = null;
+    }
+
     // When she's doing nothing, now and then she moves by herself: stretches, hops, turns.
     if (this.spontaneous && mood === 'idle' && !reaction && !run && !hover && !this._menu && !input.music?.active) {
       if (t >= this._nextFidgetAt) {
@@ -1123,6 +1271,18 @@ export class Flame {
       this._menuPose = null;
     }
 
+    // Into the lantern: along an arc, smaller and smaller, until she's inside the paper.
+    if (this._trip > 0.0005) {
+      const k = smooth(this._trip);
+      const into = this.lantern.centerWorld(this._tripPoint);
+      const from = this.restCenterWorld(this._bulbPoint);
+      const s = lerp(1, LANTERN_TRIP.scale, k);
+      this.root.position.x += (into.x - from.x) * k;
+      this.root.position.y += (into.y - from.y) * k + (HOVER + R) * scale * (1 - s) + arc(this._trip) * 0.5 * scale;
+      this.root.position.z += (into.z - from.z) * k;
+      this.root.scale.multiplyScalar(s);
+    }
+
     // Eyes. The blink closes fast (70 ms) and reopens more slowly (130 ms);
     // about once in five she does two in a row.
     if (t > this.blinkAt + 0.2) {
@@ -1178,7 +1338,7 @@ export class Flame {
     this.shadow.x = this.root.position.x;
     this.shadow.z = this.home.z;
     this.shadow.size = 0.9 * this.size * (1 - lift * 0.6) * (1 + (sx - 1) * 0.8);
-    this.shadow.opacity = this.root.visible ? 0.9 * (this.falling ? 0.25 : 1) * (1 - inMenu) : 0;
+    this.shadow.opacity = this.root.visible ? 0.9 * (this.falling ? 0.25 : 1) * (1 - inMenu) * (1 - this._trip) : 0;
 
     this.fx.update(dt);
   }

@@ -399,6 +399,85 @@ body.island-open #stage {
   opacity: 0.7;
 }
 
+/* What's new, right after an update: like the closet, the card grows upwards. */
+.island-news {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: default;
+}
+
+.island-news-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.island-news-title strong {
+  font: 650 14px/1.2 var(--font-display);
+  color: #fff;
+}
+
+.island-news-title small {
+  color: rgb(var(--tint));
+  font-size: 11.5px;
+}
+
+.island-news-list {
+  margin: 0;
+  padding: 0 0 0 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: #c9c9d2;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.island-news-list li {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.island-news-list li::marker {
+  color: rgb(var(--tint));
+}
+
+.island-news-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.island-stat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.island-stat b {
+  font: 650 14px/1.15 var(--font-display);
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.island-stat span {
+  overflow: hidden;
+  color: #8a8a95;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .island-pill.active {
   background: rgba(var(--tint), 0.18);
   border-color: rgba(var(--tint), 0.5);

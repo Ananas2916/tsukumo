@@ -526,6 +526,11 @@ def test_the_eye_is_chosen_only_from_the_pc(tmp_path):
     prefs.update({"eye": "gemini", "eyeModel": "  gemini-2.5-flash ", "guide": False})
     assert (prefs.eye, prefs.eye_model, prefs.guide) == ("gemini", "gemini-2.5-flash", False)
 
+
+def test_what_we_did_together_stays_on_the_pc():
+    # Sessions and lines from the agents' logs say what the user worked on: PC only.
+    assert local_only("GET", "/api/stats")
+
 def threading_wait(seconds: float) -> None:
     import threading
 
