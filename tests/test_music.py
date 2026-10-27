@@ -16,6 +16,17 @@ from backend.music import (
     music_tag,
     parse_command,
 )
+from backend.spotify_app import (
+    AppError,
+    AppState,
+    LibraryItem,
+    Row,
+    parse_title,
+    pick_library,
+    pick_row,
+    same_track,
+    split_item,
+)
 
 
 def _track(id_="t1", title="Motion Sickness", artist="Phoebe Bridgers", duration=230.0):
@@ -77,8 +88,40 @@ class FakeSpotify:
         pass
 
 
-def _service(tmp_path, now=None, connected=True):
-    service = MusicService(tmp_path, "http://127.0.0.1:8770/api/music/spotify/callback")
+class FakeApp:
+    """Spotify's desktop app: what it plays, what it can't find."""
+
+    def __init__(self, available=False, state=None):
+        self.available = available
+        self.now = state or AppState()
+        self.played = []
+        self.missing = set()
+        self.items = []
+
+    async def state(self):
+        return self.now
+
+    async def library(self, max_age=600.0):
+        return self.items
+
+    async def play_playlist(self, wanted):
+        item = pick_library(self.items, wanted)
+        if item is None:
+            raise AppError("I didn't find that playlist in your Spotify library.", "NO_PLAYLIST")
+        self.played.append(f"playlist {item.name}")
+        return self.now
+
+    async def play(self, item):
+        self.played.append(item)
+        if item in self.missing:
+            raise AppError("I didn't find that song in Spotify's app.", "APP_NOT_FOUND")
+        artist, title = split_item(item)
+        self.now = AppState(open=True, playing=True, artist=artist, title=title)
+        return self.now
+
+
+def _service(tmp_path, now=None, connected=True, app=None):
+    service = MusicService(tmp_path, "http://127.0.0.1:8770/api/music/spotify/callback", app=app or FakeApp())
     service.spotify = FakeSpotify(now, connected)
     return service
 
@@ -220,6 +263,142 @@ def test_like_tag_learns_and_saves(tmp_path):
     assert asyncio.run(service.run_tags(["[[music: like]]"])) is None
     assert service.taste.data["liked"] == ["Phoebe Bridgers - Motion Sickness"]
     assert ("save", "t1") in service.spotify.calls
+
+
+# ---------------------------------------------------------------------------
+# The desktop app, without the API (Free, or nothing connected)
+# ---------------------------------------------------------------------------
+def _row(name, links=(), buttons=()):
+    return Row(name, tuple(links), tuple(buttons))
+
+
+# Recorded from Spotify's app (Italian, Free) searching "Hajnal Venetian Snares",
+# plus a few made up to cover remixes, covers and playlists.
+_ROWS = [
+    _row("Hajnal", ["Hajnal", "Venetian Snares"], ["Altre opzioni per Hajnal", "Aggiungi a Brani che ti piacciono", "Play"]),
+    _row("Hajnal2", ["Hajnal2", "Venetian Snares"], ["Riproduci Hajnal2", "Altre opzioni per Hajnal2", "Aggiungi a Brani che ti piacciono"]),
+    _row("Venetian Snares", ["Venetian Snares"], ["Riproduci Venetian Snares", "Altre opzioni per Venetian Snares", "Segui Venetian Snares"]),
+    _row("Szamár Madár", ["Szamár Madár", "Venetian Snares"], ["Riproduci Szamár Madár", "Altre opzioni per Szamár Madár"]),
+    _row("Venetian Snares Mix", ["Venetian Snares Mix", "Spotify"], ["Riproduci Venetian Snares Mix", "Altre opzioni per Venetian Snares Mix"]),
+    _row("Kyoto (Live)", ["Kyoto (Live)", "Phoebe Bridgers"], ["Riproduci Kyoto (Live)"]),
+    _row("Kyoto", ["Kyoto", "Phoebe Bridgers"], ["Riproduci Kyoto"]),
+    _row("Motion Sickness", ["Motion Sickness", "Phoebe Bridgers"], ["Pausa Motion Sickness"]),
+    _row("Perché Sì", ["Perché Sì", "Café Tacvba"], ["Play Perché Sì"]),
+    _row("Gentleman", ["Gentleman", "Someone Else"], ["Riproduci Gentleman"]),
+]
+
+
+@pytest.mark.parametrize(
+    ("artist", "title", "picked"),
+    [
+        ("Venetian Snares", "Hajnal", (0, "Play")),  # the top result, not "Hajnal2", not the player bar's Play
+        ("", "Hajnal", (0, "Play")),
+        ("Venetian Snares", "Hajnal - Remastered 2011", (0, "Play")),
+        ("Venetian Snares", "Szamar Madar", (3, "Riproduci Szamár Madár")),  # accents and case don't matter
+        ("Phoebe Bridgers", "Kyoto", (6, "Riproduci Kyoto")),  # the studio one, below the live one
+        ("Phoebe Bridgers", "Motion Sickness", None),  # only its Pause button: it's already playing
+        ("Mitski", "Hajnal", None),  # the title is there, by someone else
+        ("Venetian Snares", "Gentleman", None),
+        ("Venetian Snares", "Venetian Snares Mix", None),  # a playlist by Spotify
+        ("Cafe Tacuba", "Perche Si", (8, "Play Perché Sì")),  # half the artist is enough
+        ("Venetian Snares", "Sajtban", None),
+    ],
+)
+def test_the_app_row_is_picked_by_title_and_artist(artist, title, picked):
+    assert pick_row(_ROWS, artist, title) == picked
+
+
+def test_app_rows_survive_powershell_json():
+    # A list of one comes back as the item itself.
+    assert Row.from_json({"name": "Hajnal", "links": "Hajnal", "buttons": ["Play"]}) == _row("Hajnal", ["Hajnal"], ["Play"])
+    assert Row.from_json({"links": []}) is None
+
+
+def test_the_app_window_title_says_what_is_playing():
+    assert parse_title("Venetian Snares - Hajnal") == AppState(True, True, "Venetian Snares", "Hajnal")
+    assert parse_title("Spotify Free") == AppState(open=True)
+    assert parse_title("") == AppState()
+    assert parse_title("Advertisement") == AppState(open=True)
+    playing = parse_title("Phoebe Bridgers - Motion Sickness - Live")
+    assert same_track(playing, "Phoebe Bridgers", "Motion Sickness")
+    assert same_track(playing, "", "Motion Sickness (feat. Someone)")
+    assert not same_track(playing, "Mitski", "Motion Sickness")
+    assert not same_track(playing, "Phoebe Bridgers", "Kyoto")
+    assert split_item("Venetian Snares - Hajnal") == ("Venetian Snares", "Hajnal")
+    assert split_item("Hajnal") == ("", "Hajnal")
+
+
+def test_without_spotify_connected_the_app_plays_one_song(tmp_path):
+    app = FakeApp(available=True)
+    app.missing = {"Nessuno - Mai"}
+    service = _service(tmp_path, connected=False, app=app)
+    tag = "[[music: play Nessuno - Mai; Venetian Snares - Hajnal; Mitski - Nobody]]"
+    assert asyncio.run(service.run_tags([tag])) is None
+    # The first wasn't there, the second plays, the third is never searched.
+    assert app.played == ["Nessuno - Mai", "Venetian Snares - Hajnal"]
+    assert "un brano alla volta" in asyncio.run(service.run_tags(["[[music: queue Mitski - Nobody]]"], "it"))
+    app.missing = {"A - B", "C - D"}
+    assert "Spotify's app" in asyncio.run(service.run_tags(["[[music: play A - B; C - D]]"]))
+
+
+def test_with_a_free_account_the_app_plays_what_the_search_found(tmp_path):
+    app = FakeApp(available=True)
+    service = _service(tmp_path, app=app)
+    service.spotify.catalog = {"Kyoto": _track("k", "Kyoto")}
+    service.spotify.fail["play"] = SpotifyError("Premium required", "PREMIUM_REQUIRED", 403)
+    assert asyncio.run(service.run_tags(["[[music: play Kyoto]]"])) is None
+    assert app.played == ["Phoebe Bridgers - Kyoto"]  # Spotify's exact names, not the brain's
+
+
+def test_without_spotify_connected_the_brain_learns_of_the_app(tmp_path):
+    app = FakeApp(available=True, state=AppState(True, True, "Venetian Snares", "Hajnal"))
+    service = _service(tmp_path, connected=False, app=app)
+    note = asyncio.run(service.directive("che genere è questa canzone?"))
+    assert '"Hajnal" by Venetian Snares' in note and "ONE real song" in note
+    asyncio.run(service.run_tags(["[[music: like]]"]))
+    assert service.taste.data["liked"] == ["Venetian Snares - Hajnal"]
+    assert service.status()["app"] is True
+
+
+# Recorded from the app's side bar ("La tua libreria").
+_LIBRARY = [
+    LibraryItem("🎐", "🎐 In evidenza Playlist • tsu𝓴i"),
+    LibraryItem("Русский", "Русский Playlist • Sir_Muller"),
+    LibraryItem("Brani che ti piacciono", "Brani che ti piacciono Playlist • Sir_Muller"),
+    LibraryItem("tsu𝓴i + Sir_Muller", "tsu𝓴i + Sir_Muller Playlist • Solo per Sir_Muller"),
+    LibraryItem("Applause", "Applause Singolo • Lady Gaga"),
+    LibraryItem("Si", "Si Playlist • Sir_Muller"),
+]
+
+
+@pytest.mark.parametrize(
+    ("wanted", "name"),
+    [
+        ("🎐", "🎐"),  # a name with no letters at all
+        ("🎐 In evidenza", "🎐"),
+        ("русский", "Русский"),
+        ("Brani che ti piacciono", "Brani che ti piacciono"),
+        ('"Si"', "Si"),  # not "tsu𝓴i + Sir_Muller", not "Brani che ti piacciono"
+        ("Applause Lady Gaga", "Applause"),
+        ("Discover Weekly", None),
+    ],
+)
+def test_the_library_item_is_picked_by_name(wanted, name):
+    item = pick_library(_LIBRARY, wanted)
+    assert (item.name if item else None) == name
+
+
+def test_a_playlist_of_the_library_is_played_and_offered_to_the_brain(tmp_path):
+    app = FakeApp(available=True, state=AppState(open=True))
+    app.items = _LIBRARY
+    service = _service(tmp_path, connected=False, app=app)
+    note = asyncio.run(service.directive("metti la playlist che ascolto di solito"))
+    assert '"🎐 In evidenza Playlist • tsu𝓴i"' in note and "[[music: playlist" in note
+    assert "Never drive Spotify yourself" in note
+    assert music_tag("[[music: playlist 🎐]]") == ("playlist", ["🎐"])
+    assert asyncio.run(service.run_tags(["[[music: playlist Русский]]"])) is None
+    assert app.played == ["playlist Русский"]
+    assert "Non ho trovato quella playlist" in asyncio.run(service.run_tags(["[[music: playlist Discover Weekly]]"], "it"))
 
 
 def test_listening_and_skipping_are_observed(tmp_path):

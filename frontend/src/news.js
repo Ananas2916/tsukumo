@@ -7,6 +7,23 @@
 
 export const NEWS = [
   {
+    version: '3.3.2',
+    en: [
+      'Spotify without Premium: I pick a song and press Play in the app myself.',
+      'Ask for one of your playlists by name, or "the one I always listen to".',
+      'I check that it really started, and tell you if it didn’t.',
+    ],
+    it: [
+      'Spotify anche senza Premium: scelgo un brano e premo Riproduci nell’app io.',
+      'Chiedimi una tua playlist per nome, o «quella che ascolto sempre».',
+      'Controllo che sia partita davvero, e se no te lo dico.',
+    ],
+    say: {
+      en: "I'm version {version}: now I can put on your music even without Premium.",
+      it: 'Sono la {version}: adesso ti metto la musica anche senza Premium.',
+    },
+  },
+  {
     version: '3.3.1',
     en: [
       'When a new version is out I bring you a lantern: one click and I update myself.',

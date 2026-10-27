@@ -93,7 +93,7 @@ export const IT = {
   "Approves everything by itself (commands too) — risky": "Approva tutto da solo (anche i comandi) — rischioso",
   "Arabic": "Arabo",
   "As the Redirect URI paste: ": "Come Redirect URI incolla: ",
-  "Ask her \"what genre is this?\", \"play something similar\", \"pause the music\". Choosing what to play needs Spotify Premium; pause and skip work with any account.": "Chiedile «che genere è?», «mettine di simili», «metti in pausa la musica». Scegliere cosa suonare richiede Spotify Premium; pausa e cambio brano vanno con qualunque account.",
+  "Ask her \"what genre is this?\", \"play something similar\", \"pause the music\". With Premium she queues whole lists; without it she plays one song at a time in Spotify's app. Pause and skip work with any account.": "Chiedile «che genere è?», «mettine di simili», «metti in pausa la musica». Con Premium mette in coda liste intere; senza, fa partire un brano alla volta nell'app di Spotify. Pausa e cambio brano vanno con qualunque account.",
   "Ask me anything. I can remind you of things (\"remind me to drink in 20 minutes\"), remember things about you (\"remember that…\"), tell you when Claude Code or Codex are done and how much of their limits you have left: it's all in the Work tab.": "Chiedimi quello che vuoi. Posso ricordarti le cose («tra 20 minuti ricordami di bere»), ricordarmi di te («ricordati che…»), avvisarti quando Claude Code o Codex hanno finito e dirti quanto ti resta dei loro limiti: è tutto nella scheda Lavoro.",
   "Asleep after": "Dorme dopo",
   "At 20, 10 and 5% she reminds you of the charger.": "Al 20, 10 e 5% ti ricorda il caricabatterie.",

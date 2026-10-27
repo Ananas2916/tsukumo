@@ -912,6 +912,14 @@ class Companion:
         await emit({"type": "state", "value": "idle", "turn": turn})
         return reply
 
+    async def _play_music(self, tags: list[str], emit: Emit | None) -> None:
+        assert self.music is not None
+        problem = await self.music.run_tags(tags, self.voice_language)
+        if problem and emit is not None:
+            # The brain already said "here's something similar": if Spotify says no, it
+            # must be said aloud.
+            await self.announce(problem, emit)
+
     async def _schedule_from_tags(self, tags: list[str], emit: Emit | None = None) -> None:
         """The brain's [[remind ...]] tags become real reminders."""
         if self.proactive is not None and tags:
@@ -926,11 +934,9 @@ class Companion:
         music = [tag for tag in tags if is_music_tag(tag)]
         if music:
             tags = [tag for tag in tags if not is_music_tag(tag)]
-            problem = await self.music.run_tags(music, self.voice_language) if self.music is not None else None
-            if problem and emit is not None:
-                # The brain already said "here's something similar": if Spotify says no, it
-                # must be said aloud, as soon as this turn ends.
-                task = asyncio.create_task(self.announce(problem, emit))
+            if self.music is not None:
+                # Without Premium the app is searched and pressed, seconds: the turn doesn't wait.
+                task = asyncio.create_task(self._play_music(music, emit))
                 self._followups.add(task)
                 task.add_done_callback(self._followups.discard)
         # The memories noted by the brain ([[remember: ...]]).

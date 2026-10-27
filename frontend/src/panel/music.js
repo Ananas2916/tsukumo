@@ -73,7 +73,7 @@ export class MusicCard {
       el(
         'p',
         { class: 'hint' },
-        t('Ask her "what genre is this?", "play something similar", "pause the music". Choosing what to play needs Spotify Premium; pause and skip work with any account.'),
+        t('Ask her "what genre is this?", "play something similar", "pause the music". With Premium she queues whole lists; without it she plays one song at a time in Spotify\'s app. Pause and skip work with any account.'),
       ),
     );
 
